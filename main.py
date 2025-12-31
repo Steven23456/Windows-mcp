@@ -90,18 +90,18 @@ def validate_text(text: str, max_length: int = MAX_TEXT_LENGTH) -> tuple[bool, s
         return False, f"Text exceeds maximum length ({max_length} chars)."
     return True, "OK"
 
-os=system()
-version=release()
+os_name=system()
+os_version=release()
 
 instructions=dedent(f'''
-Windows MCP server provides tools to interact directly with the {os} {version} desktop, 
+Windows MCP server provides tools to interact directly with the {os_name} {os_version} desktop,
 thus enabling to operate the desktop like an actual USER.
 ''')
 
 @asynccontextmanager
 async def lifespan(app: FastMCP):
     """Runs initialization code before the server starts and cleanup code after it shuts down."""
-    await asyncio.sleep(1) # Simulate startup latency
+    # Server is ready immediately - no artificial delay needed
     yield
 
 desktop=Desktop()
@@ -122,7 +122,7 @@ def powershell_tool(command: str) -> str:
     return f'Status Code: {status}\nResponse: {response}'
 
 @mcp.tool(name='State-Tool',description='Capture comprehensive desktop state including focused/opened applications, interactive UI elements (buttons, text fields, menus), informative content (text, labels, status), and scrollable areas. Optionally includes visual screenshot when use_vision=True. Essential for understanding current desktop context and available UI interactions.')
-def state_tool(use_vision:bool=False):
+def state_tool(use_vision:bool=False)->str|list:
     desktop_state=desktop.get_state(use_vision=use_vision)
     interactive_elements=desktop_state.tree_state.interactive_elements_to_string()
     informative_elements=desktop_state.tree_state.informative_elements_to_string()
@@ -182,7 +182,7 @@ def click_tool(loc:tuple[int,int],button:Literal['left','right','middle']='left'
     return f'{num_clicks.get(clicks)} {button} Clicked on {control.Name} Element with ControlType {control.ControlTypeName} at ({x},{y}).'
 
 @mcp.tool(name='Type-Tool',description='Type text into input fields, text areas, or focused elements. Set clear=True to replace existing text, False to append. Click on target element coordinates first.')
-def type_tool(loc:tuple[int,int],text:str,clear:bool=False):
+def type_tool(loc:tuple[int,int],text:str,clear:bool=False)->str:
     # Input validation
     valid, msg = validate_coordinates(loc)
     if not valid:
@@ -197,7 +197,16 @@ def type_tool(loc:tuple[int,int],text:str,clear:bool=False):
     if clear==True or clear=='True':  # Handle both bool and string
         pg.hotkey('ctrl','a')
         pg.press('backspace')
-    pg.typewrite(text,interval=0.1)
+    # Use clipboard for Unicode support (typewrite only supports ASCII)
+    if text.isascii():
+        pg.typewrite(text,interval=0.05)
+    else:
+        # Save current clipboard, paste text, restore clipboard
+        old_clipboard = pc.paste()
+        pc.copy(text)
+        pg.hotkey('ctrl','v')
+        pg.sleep(0.1)
+        pc.copy(old_clipboard if old_clipboard else '')
     return f'Typed {text} on {control.Name} Element with ControlType {control.ControlTypeName} at ({x},{y}).'
 
 @mcp.tool(name='Switch-Tool',description='Switch to a specific application window (e.g., "notepad", "calculator", "chrome", etc.) and bring to foreground.')
@@ -276,9 +285,9 @@ def move_tool(to_loc:tuple[int,int])->str:
     return f'Moved the mouse pointer to ({x},{y}).'
 
 @mcp.tool(name='Shortcut-Tool',description='Execute keyboard shortcuts using key combinations. Pass keys as list (e.g., ["ctrl", "c"] for copy, ["alt", "tab"] for app switching, ["win", "r"] for Run dialog).')
-def shortcut_tool(shortcut:list[str]):
+def shortcut_tool(shortcut:list[str])->str:
     pg.hotkey(*shortcut)
-    return f'Pressed {'+'.join(shortcut)}.'
+    return f'Pressed {"+".join(shortcut)}.'
 
 @mcp.tool(name='Key-Tool',description='Press individual keyboard keys. Supports special keys like "enter", "escape", "tab", "space", "backspace", "delete", arrow keys ("up", "down", "left", "right"), function keys ("f1"-"f12").')
 def key_tool(key:str='')->str:

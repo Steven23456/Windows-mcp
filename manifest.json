@@ -74,7 +74,7 @@
       "description": "Move mouse cursor to specific coordinates without clicking. Useful for hovering over elements or positioning cursor before other actions."
     },
     {
-      "name": "Shorcut-Tool",
+      "name": "Shortcut-Tool",
       "description": "Execute keyboard shortcuts using key combinations. Pass keys as list (e.g., ['ctrl', 'c'] for copy, ['alt', 'tab'] for app switching, ['win', 'r'] for Run dialog)."
     },
     {

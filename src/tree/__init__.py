@@ -26,7 +26,12 @@ class Tree:
     def get_appwise_nodes(self,node:Control) -> tuple[list[TreeElementNode],list[TextElementNode]]:
         all_apps=node.GetChildren()
         visible_apps = {app.Name: app for app in all_apps if self.desktop.is_app_visible(app) and app.Name not in AVOIDED_APPS}
-        apps={'Taskbar':visible_apps.pop('Taskbar'),'Program Manager':visible_apps.pop('Program Manager')}
+        apps={}
+        # Safely pop Taskbar and Program Manager if they exist
+        if 'Taskbar' in visible_apps:
+            apps['Taskbar'] = visible_apps.pop('Taskbar')
+        if 'Program Manager' in visible_apps:
+            apps['Program Manager'] = visible_apps.pop('Program Manager')
         if visible_apps:
             foreground_app = list(visible_apps.values()).pop(0)
             apps[foreground_app.Name.strip()]=foreground_app

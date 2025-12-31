@@ -2,7 +2,6 @@ from uiautomation import GetScreenSize, Control, GetRootControl, ControlType, Ge
 from src.desktop.views import DesktopState,App,Size
 from src.desktop.config import EXCLUDED_APPS
 from fuzzywuzzy import process
-from src.tree import Tree
 from time import sleep
 from io import BytesIO
 from PIL import Image
@@ -16,6 +15,8 @@ class Desktop:
         self.desktop_state=None
         
     def get_state(self,use_vision:bool=False)->DesktopState:
+        # Lazy import to avoid circular dependency (tree imports desktop.config)
+        from src.tree import Tree
         tree=Tree(self)
         tree_state=tree.get_state()
         if use_vision:
@@ -57,11 +58,14 @@ class Desktop:
     
     def execute_command(self,command:str)->tuple[str,int]:
         try:
-            result = subprocess.run(['powershell', '-Command']+command.split(), 
-            capture_output=True, check=True)
-            return (result.stdout.decode('latin1'),result.returncode)
+            # Pass command as single string to PowerShell, not split by spaces
+            result = subprocess.run(
+                ['powershell', '-NoProfile', '-NonInteractive', '-Command', command],
+                capture_output=True, check=True
+            )
+            return (result.stdout.decode('utf-8', errors='replace'), result.returncode)
         except subprocess.CalledProcessError as e:
-            return (e.stdout.decode('latin1'),e.returncode)
+            return (e.stdout.decode('utf-8', errors='replace') if e.stdout else str(e), e.returncode)
         
     def launch_app(self,name:str):
         apps_map=self.get_apps_from_start_menu()
@@ -127,10 +131,10 @@ class Desktop:
         return apps
     
     def screenshot_in_bytes(self,screenshot:Image.Image)->bytes:
-        io=BytesIO()
-        screenshot.save(io,format='PNG')
-        bytes=io.getvalue()
-        return bytes
+        buffer=BytesIO()
+        screenshot.save(buffer,format='PNG')
+        image_bytes=buffer.getvalue()
+        return image_bytes
 
     def get_screenshot(self,scale:float=0.7)->Image.Image:
         screenshot=pyautogui.screenshot()
