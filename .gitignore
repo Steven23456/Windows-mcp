@@ -144,10 +144,6 @@ cython_debug/
 Thumbs.db
 desktop.ini
 
-# Claude Code files (except CLAUDE.md)
-.claude/
-.mcp.json
-
 # Project specific - DO commit these
 !uv.lock
 !CLAUDE.md
