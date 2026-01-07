@@ -4,252 +4,89 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Windows-MCP is a lightweight, open-source MCP (Model Context Protocol) server that enables AI agents to interact directly with the Windows operating system. It provides tools for UI automation, desktop interaction, application control, and system operations through a11y (accessibility) tree traversal.
+Windows-MCP is an MCP server that enables AI agents to interact with Windows OS through UI automation and a11y (accessibility) tree traversal.
 
-**Version**: 0.1.5 | **Platform**: Windows 7-11 only | **Python**: 3.13+ | **Entry Point**: `main.py`
-
-## Project Structure
-
-```
-Windows-MCP/
-├── main.py              # MCP server entry point with 14 tool definitions
-├── windows_mcp_entry.py # Console script entry point (pip install creates windows-mcp command)
-├── __main__.py          # Package entry point for python -m windows_mcp
-├── src/
-│   ├── desktop/         # Desktop state management and app control
-│   │   ├── __init__.py  # Desktop class - core Windows interaction layer
-│   │   ├── config.py    # App filtering configuration (EXCLUDED_APPS, AVOIDED_APPS)
-│   │   └── views.py     # Data models (DesktopState, App, Size)
-│   └── tree/            # UI element tree traversal and extraction
-│       ├── __init__.py  # Tree class - a11y tree traversal and screenshot annotation
-│       ├── config.py    # UI element type configuration (INTERACTIVE_CONTROL_TYPE_NAMES, etc.)
-│       ├── views.py     # Tree data models (TreeElementNode, TextElementNode, ScrollElementNode)
-│       └── utils.py     # Geometry utilities for bounding box operations
-├── docs/
-│   └── architecture/    # Architecture documentation
-│       ├── OVERVIEW.md      # High-level architecture overview
-│       ├── ARCHITECTURE.md  # Detailed architecture documentation
-│       ├── COMPONENTS.md    # Component specifications
-│       └── DATAFLOW.md      # Data flow diagrams and explanations
-├── pyproject.toml       # Package configuration and dependencies
-├── manifest.json        # DXT (Desktop Extension) metadata
-├── dist/                # Built wheel and source distributions
-└── .venv/               # Virtual environment (pre-configured)
-```
+**Version**: 0.1.5 | **Platform**: Windows 7-11 | **Python**: 3.13+ | **Entry Point**: `main.py`
 
 ## Architecture
 
-### Core Components
+### Two-Layer Design
 
-**Desktop Layer (`src/desktop/__init__.py`)**
-- `Desktop` class: Primary interface to Windows OS
-- Manages application state, screenshots, PowerShell command execution
-- Uses `uiautomation` library for Windows UI Automation API access
-- Key methods:
-  - `get_state()`: Captures comprehensive desktop state (apps + UI tree + optional screenshot)
-  - `launch_app()`: Launches apps from Start Menu using PowerShell + fuzzy matching
-  - `switch_app()`: Brings windows to foreground
-  - `execute_command()`: Executes PowerShell commands via subprocess
+**Desktop Layer (`src/desktop/__init__.py`)** - Windows OS interface
+- `Desktop` class manages app state, screenshots, PowerShell execution
+- Uses `uiautomation` library for Windows UI Automation API
+- `get_state()` → `Tree.get_state()` → `get_appwise_nodes()` → `get_nodes()` → `tree_traversal()`
 
-**Tree Layer (`src/tree/__init__.py`)**
-- `Tree` class: UI accessibility tree traversal and element extraction
-- Parallel traversal with `ThreadPoolExecutor` for performance
-- Categorizes elements into three types:
-  - **Interactive**: Buttons, links, text fields, checkboxes (defined in `INTERACTIVE_CONTROL_TYPE_NAMES`)
-  - **Informative**: Static text, labels (defined in `INFORMATIVE_CONTROL_TYPE_NAMES`)
+**Tree Layer (`src/tree/__init__.py`)** - UI element extraction
+- Parallel traversal with `ThreadPoolExecutor`
+- Three element categories:
+  - **Interactive**: Buttons, links, text fields (see `INTERACTIVE_CONTROL_TYPE_NAMES` in `src/tree/config.py`)
+  - **Informative**: Static text, labels (see `INFORMATIVE_CONTROL_TYPE_NAMES`)
   - **Scrollable**: Elements with scroll patterns
-- `annotated_screenshot()`: Generates annotated screenshots with bounding boxes and labels
-- DOM correction logic to fix a11y tree inconsistencies (e.g., nested links, unnamed groups)
+- DOM correction logic handles a11y tree quirks (list items with child links, unnamed groups)
 
-**Tool Definitions (`main.py`)**
-- 14 MCP tools exposed via FastMCP decorators (`@mcp.tool`)
-- Tools use `humancursor` for mouse operations and `pyautogui` for keyboard input
-- `State-Tool` is the primary context-gathering tool (returns apps + UI elements + optional screenshot)
+**Tool Definitions (`main.py`)** - 14 MCP tools via FastMCP
+- Mouse: `humancursor` library (human-like movement)
+- Keyboard: `pyautogui` library
+- `State-Tool` is primary context-gathering tool
 
 ## Build & Development Commands
 
-### Running the Server
-
 ```bash
-# Direct execution (development)
+# Run server (development)
 python main.py
 
-# Using uv (as Claude Desktop extension)
+# Run with uv
 uv --directory C:\mcp-servers\Windows-MCP run main.py
 
-# Using pip-installed package
-windows-mcp
-```
+# Test with MCP inspector
+npx @modelcontextprotocol/inspector python main.py
 
-### Building the Package
-
-```bash
-# Install build tool
-pip install build
-
-# Build wheel and source distribution
+# Build package
 python -m build
 
-# Output: dist/windows_mcp_server-<version>-py3-none-any.whl
-#         dist/windows_mcp_server-<version>.tar.gz
-```
-
-### Installation Methods
-
-```bash
-# Install from PyPI (recommended)
-pip install windows-mcp-server
-
-# Install from local wheel
-pip install dist/windows_mcp_server-0.1.3-py3-none-any.whl
-
-# Editable install for development
-pip install -e .
-
-# Standard install from current directory
-pip install .
-```
-
-### Building DXT Extension
-
-```bash
-# Pack as Claude Desktop extension
+# Build DXT extension for Claude Desktop
 npx @anthropic-ai/dxt pack
 
-# Output: Windows-MCP.dxt
+# Install for development
+pip install -e .
 ```
 
-### Testing
+## MCP Tools (14 total)
 
-```bash
-# Run the server in test mode
-python main.py
-
-# Test with MCP inspector (if available)
-npx @modelcontextprotocol/inspector python main.py
-```
-
-## Configuration Files
-
-### .mcp.json (Project-level MCP Server Registry)
-
-The `.mcp.json` file in the project root configures all available MCP servers for this workspace. This includes the Windows-MCP server along with other servers in the C:/mcp-servers/ collection.
-
-**Location**: `C:\mcp-servers\Windows-MCP\.mcp.json`
-
-This file is used by Claude Code to auto-discover and connect to MCP servers when working in this directory.
-
-### .claude/settings.local.json (Claude Code Permissions)
-
-The `.claude/settings.local.json` file configures Claude Code permissions for this project:
-
-**Location**: `C:\mcp-servers\Windows-MCP\.claude\settings.local.json`
-
-**Key Settings:**
-- `permissions.allow`: Pre-approved Bash commands and MCP tool calls
-- `enableAllProjectMcpServers`: Automatically enable all servers from .mcp.json
-- `enabledMcpjsonServers`: List of specific servers to enable
-
-**Pre-approved Windows-MCP Tools:**
-- All 14 Windows automation tools (Launch-Tool, State-Tool, Click-Tool, etc.)
-- Memory-MCP tools for cross-session context
-- DeepThinking-MCP tools for complex reasoning
-- Everything-MCP for file search
-- Git commands, Python/pip/uv commands, build commands
-
-## MCP Server Configuration
-
-### Claude Desktop (using UV)
-
-Add to `%APPDATA%\Claude\claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "windows-mcp": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "C:\\mcp-servers\\Windows-MCP",
-        "run",
-        "main.py"
-      ]
-    }
-  }
-}
-```
-
-### Claude Desktop (using pip-installed package)
-
-```json
-{
-  "mcpServers": {
-    "windows-mcp": {
-      "command": "python",
-      "args": ["-m", "windows_mcp"]
-    }
-  }
-}
-```
-
-### Gemini CLI
-
-Add to `%USERPROFILE%\.gemini\settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "windows-mcp": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "C:\\mcp-servers\\Windows-MCP",
-        "run",
-        "main.py"
-      ]
-    }
-  }
-}
-```
-
-## Available MCP Tools
-
-The server exposes 14 tools for Windows interaction:
-
-**Desktop State**
-- `State-Tool`: Capture desktop state (apps, UI elements, optional screenshot). Returns `str` when `use_vision=False`, returns `list[str, Image]` when `use_vision=True`
-
-**Application Control**
-- `Launch-Tool`: Launch apps from Start Menu by name
-- `Switch-Tool`: Switch to running application window
-
-**Mouse Operations** (using `humancursor` library)
-- `Click-Tool`: Click at coordinates (left/right/middle, single/double/triple)
-- `Move-Tool`: Move mouse cursor to coordinates
-- `Drag-Tool`: Drag from source to destination coordinates
-- `Scroll-Tool`: Scroll vertically/horizontally at coordinates
-
-**Keyboard Operations** (using `pyautogui` library)
-- `Type-Tool`: Type text into focused element
-- `Key-Tool`: Press individual keys (including special keys)
-- `Shortcut-Tool`: Execute keyboard shortcuts (e.g., ["ctrl", "c"])
-- `Clipboard-Tool`: Copy/paste using system clipboard
-
-**Utility**
-- `Wait-Tool`: Pause execution for specified duration
-- `Powershell-Tool`: Execute PowerShell commands
-- `Scrape-Tool`: Fetch webpage content and convert to markdown
+| Tool | Purpose |
+|------|---------|
+| `State-Tool` | Desktop state + UI elements (primary context tool). Returns `str` or `list[str, Image]` if `use_vision=True` |
+| `Launch-Tool` | Launch app from Start Menu (fuzzy matching) |
+| `Switch-Tool` | Bring app window to foreground |
+| `Click-Tool` | Click at coordinates (left/right/middle, 1-3 clicks) |
+| `Move-Tool` | Move cursor without clicking |
+| `Drag-Tool` | Drag and drop between coordinates |
+| `Scroll-Tool` | Vertical/horizontal scroll |
+| `Type-Tool` | Type text (supports Unicode via clipboard fallback) |
+| `Key-Tool` | Press single key (enter, escape, arrows, F1-F12) |
+| `Shortcut-Tool` | Keyboard shortcuts (["ctrl", "c"]) |
+| `Clipboard-Tool` | Copy/paste via system clipboard |
+| `Wait-Tool` | Pause execution (max 300s) |
+| `Powershell-Tool` | Execute PowerShell commands |
+| `Scrape-Tool` | Fetch webpage as markdown (SSRF protected) |
 
 ## Key Technical Details
 
+### Input Validation (v0.1.4+)
+- `MAX_SCREEN_COORD = 10000` - reasonable max for multi-monitor
+- `MAX_TEXT_LENGTH = 10000` - limit text input
+- `MAX_WAIT_DURATION = 300` - 5 minutes max wait
+- `MAX_WHEEL_TIMES = 100` - scroll limit
+- `MAX_CLICKS = 3` - triple-click max
+
 ### PyAutoGUI Configuration
 ```python
-pg.FAILSAFE = False  # Disables fail-safe corner abort
+pg.FAILSAFE = True   # Abort by moving mouse to corner (security)
 pg.PAUSE = 1.0       # 1-second delay between operations
 ```
 
-### Element Visibility Logic
-Elements must meet all criteria to be considered interactive:
+### Element Visibility Criteria
 - `IsControlElement == True`
 - `IsOffscreen == False`
 - `IsEnabled == True`
@@ -257,195 +94,70 @@ Elements must meet all criteria to be considered interactive:
 - Not an unlabeled image control
 
 ### App Filtering
-- `EXCLUDED_APPS`: Filtered from `get_apps()` (Program Manager, Taskbar)
-- `AVOIDED_APPS`: Filtered from tree traversal (Recording toolbar)
+- `EXCLUDED_APPS` in `src/desktop/config.py`: Filtered from `get_apps()`
+- `AVOIDED_APPS`: Filtered from tree traversal
 
-### Coordinate System
-- All coordinates use center points of bounding boxes
-- `random_point_within_bounding_box()` generates randomized click points (0.5 scale factor)
-- Screenshot annotation scales coordinates by configurable factor (default 0.7)
-
-### Parallel Processing
-- App tree traversal uses `ThreadPoolExecutor` for concurrent element extraction
-- Screenshot annotation draws labels in parallel
-
-## Dependencies
-
-**Core MCP Framework**
-- `fastmcp>=2.8.1` - FastMCP server framework
-
-**Windows Automation**
-- `uiautomation>=2.0.24` - Windows UI Automation API
-- `pyautogui>=0.9.54` - Keyboard/mouse control
-- `humancursor>=1.1.5` - Human-like cursor movements
-
-**Utilities**
-- `fuzzywuzzy>=0.18.0` + `python-levenshtein>=0.27.1` - Fuzzy app name matching
-- `pillow>=11.2.1` - Image processing for screenshots
-- `pyperclip>=1.8.2` - Clipboard operations
-- `markdownify>=1.1.0` - HTML to markdown conversion
-- `requests>=2.32.3` - HTTP requests for web scraping
-
-**Note**: `pythonnet` (indirect dependency) has compatibility issues with Python 3.14+. Use Python 3.13 for best results.
+### Performance
+- **State-Tool latency**: 1.5-2.3 seconds (varies with app count)
+- **Sleep delays**: 0.75s (app enumeration), 1.0s (tree traversal), 0.25s (post-screenshot)
 
 ## Development Notes
 
 ### Adding New Tools
-
-1. Define tool function in `main.py` with `@mcp.tool()` decorator
+1. Add function in `main.py` with `@mcp.tool()` decorator
 2. Add type hints for all parameters
 3. Return `str` or `list[str | Image]` for vision support
 4. Update `manifest.json` tools array for DXT metadata
-5. Rebuild package if distributing: `python -m build`
+5. Rebuild: `python -m build`
 
 ### Modifying UI Element Detection
-
-1. Edit control type sets in `src/tree/config.py`:
-   - `INTERACTIVE_CONTROL_TYPE_NAMES`: Clickable/focusable elements
+1. Edit `src/tree/config.py`:
+   - `INTERACTIVE_CONTROL_TYPE_NAMES`: Clickable elements
    - `INFORMATIVE_CONTROL_TYPE_NAMES`: Text-only elements
-   - `DEFAULT_ACTIONS`: Legacy IAccessible default actions
-2. Modify filtering logic in `Tree.get_nodes()` (`src/tree/__init__.py`)
-3. DOM correction logic handles a11y tree quirks (list items with child links, unnamed groups, etc.)
+2. Modify `Tree.get_nodes()` filtering logic
+3. DOM correction in `dom_correction()` handles a11y quirks
 
-### Desktop State Workflow
+### Known Issues
+- `Type-Tool` `clear` parameter accepts both `bool` and string `'True'` (line 197 in main.py)
+- `get_element_under_cursor()` returns focused control, not element at cursor coordinates
 
-```
-Desktop.get_state(use_vision=False)
-  └─> Tree.get_state()
-       └─> Tree.get_appwise_nodes()  [parallel]
-            └─> Tree.get_nodes()  [per app, parallel]
-                 └─> tree_traversal()  [recursive DFS]
-```
-
-### Performance Characteristics
-
-- **State-Tool latency**: 1.5-2.3 seconds (varies with app count)
-- **Element extraction**: Parallel across apps (ThreadPoolExecutor)
-- **Screenshot annotation**: Parallel label drawing
-- **Sleep delays**: 0.75s before app enumeration, 1.0s before tree traversal, 0.25s after screenshot
-
-## Important Behavioral Notes
-
-1. **Coordinate Selection**: `Type-Tool` and `Click-Tool` require coordinates from `State-Tool` output
-2. **App Matching**: Fuzzy matching allows approximate app names (e.g., "chrome" matches "Google Chrome")
-3. **Clear Parameter**: `Type-Tool` accepts `clear` parameter but checks as string `'True'` (potential bug)
-4. **Screenshot Scaling**: Vision mode screenshots are scaled to 50% by default
-5. **PowerShell Encoding**: Output decoded as `latin1` (line 62, `main.py:60`)
-6. **Element Under Cursor**: Returns focused control, not actual element under cursor coordinates
-
-## Claude Desktop Extension (DXT)
-
-The project includes `manifest.json` for packaging as a `.dxt` file installable in Claude Desktop:
-- `npx @anthropic-ai/dxt pack` creates the extension bundle
-- Extension includes embedded `.venv` with Python interpreter
-- `manifest.json` specifies entry point as `.venv/Scripts/python.exe main.py`
-
-## Known Limitations
-
-1. Cannot select specific text sections within paragraphs (a11y tree limitation)
-2. `Type-Tool` types entire program files at once (not suitable for IDE coding)
-3. Windows-only (relies on Windows UI Automation API)
-4. Requires `es.exe` (Everything search) for some features - **Note**: This appears in README but not in actual code
-
-## Code Style (from CONTRIBUTING.md)
-
-- **Formatter/Linter**: Ruff (configured in `ruff.toml` if present)
+## Code Style
+- **Formatter**: Ruff
 - **Line length**: 100 characters
-- **Quotes**: Double quotes for strings
+- **Quotes**: Double quotes
 - **Type hints**: Required on function signatures
-- **Docstrings**: Google-style format
-- **Pre-commit hooks**: Available (run `pre-commit install`)
+- **Docstrings**: Google-style
+- **Pre-commit**: `pip install pre-commit && pre-commit install`
 
-## Development Best Practices
+## Cleanup Before Committing
 
-### Cleanup Before Committing
-
-**CRITICAL**: Always remove temporary debug/test artifacts before committing:
-
+Remove temporary files before committing:
 ```bash
-# Before git commit - check for junk files
-git status
-
-# Common temporary files to remove:
 rm test-*.py debug-*.py temp-*.py .error.txt
-
-# Verify only intended files are staged
-git diff --cached
-```
-
-**Cleanup Checklist:**
-- ✅ Remove temporary test scripts (e.g., `test-server.py`, `debug-tools.py`)
-- ✅ Delete debug files created during troubleshooting
-- ✅ Check for `.error.txt` or other runtime artifacts
-- ✅ Review `git status` output before committing
-- ✅ Verify `dist/` doesn't contain test artifacts before publishing
-- ✅ Remove any hardcoded paths or credentials
-
-**Workflow:**
-1. Create temp files for debugging → Test/Debug → **Delete temp files** → Commit clean code
-2. Before `git commit`: Ask yourself "Did I create any temp/debug files?"
-3. Before publishing: Verify package contents are clean
-
-### Build & Publish Workflow
-
-For distributing the package:
-
-```bash
-# Correct workflow
-1. Make source changes in src/ or main.py
-2. Test changes: python main.py
-3. python -m build              # Build package
-4. git add -A && git commit     # Commit source + dist
-5. # Optionally publish to PyPI
-6. git push origin main         # Push to GitHub
+git status  # verify clean
 ```
 
 ## Entry Points
 
-- **CLI execution**: `python main.py`
-- **Package module**: `python -m windows_mcp` (after pip install)
-- **Console script**: `windows-mcp` (after pip install, via `windows_mcp_entry.py`)
-- **Source entry**: `main.py` (FastMCP server with tool definitions)
+| Method | Command |
+|--------|---------|
+| Direct | `python main.py` |
+| Module | `python -m windows_mcp` |
+| Console script | `windows-mcp` (after pip install) |
 
-**Note on Entry Points (v0.1.2 fix)**: The console script uses `windows_mcp_entry.py` instead of `__main__.py` because using `__main__:main` as the entry point causes an ImportError when pip creates the console script. The dedicated entry module imports `mcp` from `main.py` and calls `mcp.run()`.
-
-## Memory Usage Reminder
-
-**IMPORTANT**: Use the `memory-mcp` tools periodically during sessions to maintain cross-session context:
-
-1. **At session start**: Search for existing context with `mcp__memory-mcp__search_nodes` using query "windows-mcp" or "Windows MCP"
-2. **During work**: Add observations for significant changes with `mcp__memory-mcp__add_observations`
-   - Record bug fixes, new features, API changes
-   - Note architectural decisions and their rationale
-   - Document known issues or workarounds
-3. **At session end**: Update memory with session summary and next steps
-   - Summarize what was accomplished
-   - Record unfinished tasks or blockers
-   - Note user preferences or patterns observed
-
-**Entity**: "Windows MCP" (importance: 10, tags: mcp, windows, automation, python, fastmcp, active-project, pypi, ui-automation)
-
-## Version History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 0.1.5 | 2025-12-31 | Critical bug fixes: TreeState default_factory, circular import, KeyError in get_appwise_nodes; PowerShell command handling; Unicode Type-Tool support |
-| 0.1.4 | 2025-12-08 | Security hardening: SSRF protection, FAILSAFE enabled, input validation |
-| 0.1.3 | 2025-12-02 | Fix State-Tool return type (returns string, not list) when use_vision=False |
-| 0.1.2 | 2025-12-02 | Fix ImportError in console script entry point (created windows_mcp_entry.py) |
-| 0.1.1 | 2025-12-01 | Remove live-inspect dependency |
-| 0.1.0 | 2025-11-30 | Initial PyPI release as windows-mcp-server |
+**Note**: Console script uses `windows_mcp_entry.py` (not `__main__.py`) due to ImportError with pip's entry point generation.
 
 ## PyPI Publication
 
-**Package Name**: `windows-mcp-server` (not `windows-mcp` due to namespace conflict)
-**Console Command**: `windows-mcp`
-**PyPI URL**: https://pypi.org/project/windows-mcp-server/
+**Package**: `windows-mcp-server` | **Command**: `windows-mcp`
 
 ```bash
-# Publish new version to PyPI
 python -m build
 python -m twine upload --username __token__ --password "$(cat C:/mcp-servers/PyPi_key.txt | tail -1 | cut -d: -f2)" dist/windows_mcp_server-<version>*
 ```
 
-**Note**: PyPI API token is stored in `C:/mcp-servers/PyPi_key.txt`
+## Known Limitations
+
+1. Cannot select specific text within paragraphs (a11y tree limitation)
+2. `Type-Tool` types entire text at once (not suitable for incremental IDE typing)
+3. Windows-only (requires Windows UI Automation API)
