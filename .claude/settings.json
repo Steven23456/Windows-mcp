@@ -1,3 +1,17 @@
 {
-  "alwaysThinkingEnabled": true
+  "alwaysThinkingEnabled": true,
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "command": "python -m ruff format \"$CLAUDE_FILE_PATH\" 2>/dev/null; python -m ruff check --fix \"$CLAUDE_FILE_PATH\" 2>/dev/null; true"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|Read",
+        "command": "echo \"$CLAUDE_FILE_PATH\" | grep -qi 'pypi_key\\|token\\|\\.env' && echo 'BLOCKED: sensitive file' && exit 1 || true"
+      }
+    ]
+  }
 }

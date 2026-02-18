@@ -15,10 +15,12 @@ Windows-MCP is an MCP server that enables AI agents to interact with Windows OS 
 **Desktop Layer (`src/desktop/__init__.py`)** - Windows OS interface
 - `Desktop` class manages app state, screenshots, PowerShell execution
 - Uses `uiautomation` library for Windows UI Automation API
+- `Tree` is lazily imported inside `get_state()` to avoid circular dependency
 - `get_state()` → `Tree.get_state()` → `get_appwise_nodes()` → `get_nodes()` → `tree_traversal()`
 
 **Tree Layer (`src/tree/__init__.py`)** - UI element extraction
 - Parallel traversal with `ThreadPoolExecutor`
+- **Important**: `get_appwise_nodes()` only traverses the foreground app + Taskbar + Desktop (Program Manager), not all visible apps
 - Three element categories:
   - **Interactive**: Buttons, links, text fields (see `INTERACTIVE_CONTROL_TYPE_NAMES` in `src/tree/config.py`)
   - **Informative**: Static text, labels (see `INFORMATIVE_CONTROL_TYPE_NAMES`)
@@ -52,24 +54,9 @@ npx @anthropic-ai/dxt pack
 pip install -e .
 ```
 
-## MCP Tools (14 total)
+## MCP Tools
 
-| Tool | Purpose |
-|------|---------|
-| `State-Tool` | Desktop state + UI elements (primary context tool). Returns `str` or `list[str, Image]` if `use_vision=True` |
-| `Launch-Tool` | Launch app from Start Menu (fuzzy matching) |
-| `Switch-Tool` | Bring app window to foreground |
-| `Click-Tool` | Click at coordinates (left/right/middle, 1-3 clicks) |
-| `Move-Tool` | Move cursor without clicking |
-| `Drag-Tool` | Drag and drop between coordinates |
-| `Scroll-Tool` | Vertical/horizontal scroll |
-| `Type-Tool` | Type text (supports Unicode via clipboard fallback) |
-| `Key-Tool` | Press single key (enter, escape, arrows, F1-F12) |
-| `Shortcut-Tool` | Keyboard shortcuts (["ctrl", "c"]) |
-| `Clipboard-Tool` | Copy/paste via system clipboard |
-| `Wait-Tool` | Pause execution (max 300s) |
-| `Powershell-Tool` | Execute PowerShell commands |
-| `Scrape-Tool` | Fetch webpage as markdown (SSRF protected) |
+14 tools defined in `main.py` via `@mcp.tool()`. Key tool: `State-Tool` is the primary context-gathering tool — returns desktop state + UI elements, optionally with annotated screenshot (`use_vision=True`). All other tools are mouse/keyboard/clipboard/shell operations. See `main.py` for full definitions.
 
 ## Key Technical Details
 
@@ -118,16 +105,21 @@ pg.PAUSE = 1.0       # 1-second delay between operations
 3. DOM correction in `dom_correction()` handles a11y quirks
 
 ### Known Issues
-- `Type-Tool` `clear` parameter accepts both `bool` and string `'True'` (line 197 in main.py)
 - `get_element_under_cursor()` returns focused control, not element at cursor coordinates
 
+## Testing
+
+No test framework is configured yet. There are no automated tests. Manual testing is done via:
+```bash
+npx @modelcontextprotocol/inspector python main.py
+```
+
 ## Code Style
-- **Formatter**: Ruff
-- **Line length**: 100 characters
+- **Formatter**: Ruff (default config, no ruff.toml or pyproject.toml overrides)
+- **Line length**: ~100 characters (convention, not enforced by config)
 - **Quotes**: Double quotes
 - **Type hints**: Required on function signatures
 - **Docstrings**: Google-style
-- **Pre-commit**: `pip install pre-commit && pre-commit install`
 
 ## Cleanup Before Committing
 
@@ -139,13 +131,7 @@ git status  # verify clean
 
 ## Entry Points
 
-| Method | Command |
-|--------|---------|
-| Direct | `python main.py` |
-| Module | `python -m windows_mcp` |
-| Console script | `windows-mcp` (after pip install) |
-
-**Note**: Console script uses `windows_mcp_entry.py` (not `__main__.py`) due to ImportError with pip's entry point generation.
+Run via `python main.py`, `python -m windows_mcp`, or `windows-mcp` (after pip install). Console script uses `windows_mcp_entry.py` (not `__main__.py`) due to ImportError with pip's entry point generation.
 
 ## PyPI Publication
 
