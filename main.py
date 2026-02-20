@@ -3,8 +3,10 @@ from fastmcp.utilities.types import Image
 from humancursor import SystemCursor
 from platform import system, release
 from markdownify import markdownify
+from src.desktop.config import BLOCKED_COMMANDS, BLOCKED_OPERATORS, MAX_COMMAND_LENGTH
 from src.desktop import Desktop
 from urllib.parse import urlparse
+from datetime import datetime
 from fastmcp import FastMCP
 from textwrap import dedent
 from typing import Literal
@@ -93,6 +95,30 @@ def validate_text(text: str, max_length: int = MAX_TEXT_LENGTH) -> tuple[bool, s
     return True, "OK"
 
 
+def validate_command(command: str) -> tuple[bool, str]:
+    """Validate a PowerShell command against security rules."""
+    if len(command) > MAX_COMMAND_LENGTH:
+        return False, f"Command exceeds maximum length ({MAX_COMMAND_LENGTH} chars)."
+
+    # Check for blocked operators (injection protection)
+    for op in BLOCKED_OPERATORS:
+        if op in command:
+            return False, f"Command contains blocked operator: {op!r}"
+
+    # Extract first token and check against blocked commands
+    first_token = command.strip().split()[0].lower() if command.strip() else ""
+    # Strip path and extension (e.g., C:\Windows\system32\format.exe → format)
+    first_token = first_token.replace("/", "\\").rsplit("\\", 1)[-1]
+    first_token = (
+        first_token.removesuffix(".exe").removesuffix(".cmd").removesuffix(".bat")
+    )
+
+    if first_token in BLOCKED_COMMANDS:
+        return False, f"Blocked command: {first_token}"
+
+    return True, "OK"
+
+
 os_name = system()
 os_version = release()
 
@@ -111,6 +137,8 @@ async def lifespan(app: FastMCP):
 
 desktop = Desktop()
 cursor = SystemCursor()
+command_history: list[dict] = []
+MAX_HISTORY_SIZE = 100
 mcp = FastMCP(name="windows-mcp", instructions=instructions, lifespan=lifespan)
 
 
@@ -130,9 +158,50 @@ def launch_tool(name: str) -> str:
     name="Powershell-Tool",
     description="Execute PowerShell commands and return the output with status code",
 )
-def powershell_tool(command: str) -> str:
-    response, status = desktop.execute_command(command)
+def powershell_tool(command: str, workingDir: str = None) -> str:
+    # Validate command against security rules
+    valid, msg = validate_command(command)
+    if not valid:
+        return f"Security Error: {msg}"
+
+    response, status = desktop.execute_command(command, working_dir=workingDir)
+
+    # Record in history
+    command_history.append(
+        {
+            "command": command,
+            "workingDir": workingDir,
+            "timestamp": datetime.now().isoformat(),
+            "exitCode": status,
+            "output": response[:500],
+        }
+    )
+    if len(command_history) > MAX_HISTORY_SIZE:
+        command_history.pop(0)
+
     return f"Status Code: {status}\nResponse: {response}"
+
+
+@mcp.tool(
+    name="Command-History-Tool",
+    description="Get the history of executed PowerShell commands with timestamps, exit codes, and truncated output.",
+)
+def command_history_tool(limit: int = 10) -> str:
+    if limit < 1:
+        limit = 1
+    if limit > MAX_HISTORY_SIZE:
+        limit = MAX_HISTORY_SIZE
+    entries = command_history[-limit:]
+    if not entries:
+        return "No command history."
+    lines = []
+    for i, entry in enumerate(entries, 1):
+        lines.append(
+            f"{i}. [{entry['timestamp']}] (exit {entry['exitCode']}) {entry['command']}"
+        )
+        if entry.get("workingDir"):
+            lines.append(f"   cwd: {entry['workingDir']}")
+    return "\n".join(lines)
 
 
 @mcp.tool(

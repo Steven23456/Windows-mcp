@@ -77,13 +77,16 @@ class Desktop:
         reader = csv.DictReader(io.StringIO(apps_info))
         return {row.get("Name").lower(): row.get("AppID") for row in reader}
 
-    def execute_command(self, command: str, timeout: int = 30) -> tuple[str, int]:
+    def execute_command(
+        self, command: str, timeout: int = 30, working_dir: str = None
+    ) -> tuple[str, int]:
         try:
             result = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
                 capture_output=True,
                 check=True,
                 timeout=timeout,
+                cwd=working_dir,
             )
             return (result.stdout.decode("utf-8", errors="replace"), result.returncode)
         except subprocess.TimeoutExpired:
