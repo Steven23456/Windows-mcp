@@ -781,6 +781,97 @@ def multi_monitor_tool() -> str:
 
 
 @mcp.tool(
+    name="System-Info-Tool",
+    description="Get comprehensive system information including OS, CPU, memory, disks, GPU, network, battery, and top processes. No parameters needed.",
+)
+def system_info_tool() -> str:
+    ps_script = r"""
+$r = ""
+
+# OS
+$os = Get-CimInstance Win32_OperatingSystem
+$uptime = (Get-Date) - $os.LastBootUpTime
+$r += "=== OS ===`n"
+$r += "  Edition: $($os.Caption)`n"
+$r += "  Build: $($os.BuildNumber) ($($os.OSArchitecture))`n"
+$r += "  Install Date: $($os.InstallDate.ToString('yyyy-MM-dd'))`n"
+$r += "  Uptime: $([int]$uptime.TotalDays)d $($uptime.Hours)h $($uptime.Minutes)m`n"
+
+# CPU
+$cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+$r += "`n=== CPU ===`n"
+$r += "  Name: $($cpu.Name.Trim())`n"
+$r += "  Cores: $($cpu.NumberOfCores) physical, $($cpu.NumberOfLogicalProcessors) logical`n"
+$r += "  Clock: $($cpu.MaxClockSpeed) MHz`n"
+$r += "  Load: $($cpu.LoadPercentage)%`n"
+
+# Memory
+$totalMB = [math]::Round($os.TotalVisibleMemorySize / 1024)
+$freeMB = [math]::Round($os.FreePhysicalMemory / 1024)
+$usedMB = $totalMB - $freeMB
+$pct = [math]::Round($usedMB / $totalMB * 100, 1)
+$r += "`n=== Memory ===`n"
+$r += "  Total: $([math]::Round($totalMB / 1024, 1)) GB`n"
+$r += "  Used: $([math]::Round($usedMB / 1024, 1)) GB ($pct%)`n"
+$r += "  Available: $([math]::Round($freeMB / 1024, 1)) GB`n"
+
+# Disks
+$r += "`n=== Disks ===`n"
+$vols = Get-Volume | Where-Object { $_.DriveLetter -and $_.Size -gt 0 }
+foreach ($v in $vols) {
+    $sizeGB = [math]::Round($v.Size / 1GB, 1)
+    $freeGB = [math]::Round($v.SizeRemaining / 1GB, 1)
+    $usedPct = [math]::Round(($v.Size - $v.SizeRemaining) / $v.Size * 100, 1)
+    $r += "  $($v.DriveLetter): $sizeGB GB ($freeGB GB free, $usedPct% used) [$($v.FileSystemType)] $($v.HealthStatus)`n"
+}
+
+# GPU
+$r += "`n=== GPU ===`n"
+$gpus = Get-CimInstance Win32_VideoController
+foreach ($g in $gpus) {
+    $vram = [math]::Round($g.AdapterRAM / 1GB, 1)
+    $r += "  $($g.Name) | VRAM: ${vram} GB | Driver: $($g.DriverVersion) | $($g.Status)`n"
+}
+
+# Network
+$r += "`n=== Network ===`n"
+$adapters = Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' }
+foreach ($a in $adapters) {
+    $ips = (Get-NetIPAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress -join ', '
+    $r += "  $($a.Name): $ips | MAC: $($a.MacAddress) | $($a.LinkSpeed)`n"
+}
+if (-not $adapters) { $r += "  No active physical adapters`n" }
+
+# Battery
+$bat = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
+if ($bat) {
+    $r += "`n=== Battery ===`n"
+    $r += "  Charge: $($bat.EstimatedChargeRemaining)%`n"
+    $plugged = if ($bat.BatteryStatus -eq 2) { "Yes" } else { "No" }
+    $r += "  Plugged in: $plugged`n"
+    if ($bat.EstimatedRunTime -and $bat.EstimatedRunTime -lt 71582788) {
+        $r += "  Est. runtime: $($bat.EstimatedRunTime) min`n"
+    }
+}
+
+# Top Processes
+$r += "`n=== Top Processes (by CPU) ===`n"
+$procs = Get-Process | Sort-Object CPU -Descending | Select-Object -First 5
+foreach ($p in $procs) {
+    $memMB = [math]::Round($p.WorkingSet64 / 1MB, 1)
+    $cpuSec = [math]::Round($p.CPU, 1)
+    $r += "  $($p.ProcessName) (PID $($p.Id)) | CPU: ${cpuSec}s | Mem: ${memMB} MB`n"
+}
+
+$r
+"""
+    result = desktop.execute_command(ps_script, timeout=30)
+    if result["status"] != 0:
+        return f"Error collecting system info (exit {result['status']}): {result['output']}"
+    return result["output"].strip()
+
+
+@mcp.tool(
     name="OCR-Tool",
     description="Extract text from the screen or a specific region using Windows built-in OCR (Windows 10+). Returns recognized text.",
 )

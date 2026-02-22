@@ -167,7 +167,8 @@ Claude can access the following tools to interact with Windows:
 | `File-Dialog-Tool` | Type a path into an open/save file dialog and confirm |
 | `Multi-Monitor-Tool` | Get display count, resolutions, and positions |
 | `OCR-Tool` | Extract text from screen or region using Windows built-in OCR |
-| `Audio-Tool` | Get/set system volume, mute/unmute
+| `Audio-Tool` | Get/set system volume, mute/unmute |
+| `System-Info-Tool` | Get comprehensive system info (OS, CPU, RAM, disks, GPU, network, battery, top processes)
 
 ### 📡 MCP Resources
 
