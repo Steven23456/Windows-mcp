@@ -36,10 +36,13 @@
 - **Use Any LLM (Vision Optional)**
    Unlike many automation tools, Windows MCP doesn't rely on any traditional computer vision techniques or specific fine-tuned models; it works with any LLMs, reducing complexity and setup time.
 
-- **Rich Toolset for UI Automation**  
-  Includes tools for basic keyboard, mouse operation and capturing window/UI state.
+- **Rich Toolset for UI Automation**
+  15 tools for keyboard, mouse, clipboard, shell, and window/UI state capture.
 
-- **Lightweight & Open-Source**  
+- **Command Security**
+  Built-in protection against dangerous commands (format, shutdown, rm, etc.), injection attacks (blocked operators and encoded command arguments), working directory restrictions, and command length limits.
+
+- **Lightweight & Open-Source**
   Minimal dependencies and easy setup with full source code available under MIT license.
 
 - **Customizable & Extendable**  
@@ -65,6 +68,22 @@
 - DXT (Desktop Extension) from Antropic, install with `npm install -g @anthropic-ai/dxt`
 
 ## 🏁 Getting Started
+
+### PyPI (Any MCP Client)
+
+Install from PyPI:
+
+```shell
+pip install windows-mcp-server
+```
+
+Then configure your MCP client to run `windows-mcp` as the command.
+
+### Claude Code
+
+```shell
+claude mcp add windows-mcp -- windows-mcp
+```
 
 ### Gemini CLI
 
@@ -122,20 +141,40 @@ For additional Claude Desktop integration troubleshooting, see the [MCP document
 
 Claude can access the following tools to interact with Windows:
 
-- `Click-Tool`: Click on the screen at the given coordinates.
-- `Type-Tool`: Type text on an element (optionally clears existing text).
-- `Clipboard-Tool`: Copy or paste using the system clipboard.
-- `Scroll-Tool`: Scroll vertically or horizontally on the window or specific regions.
-- `Drag-Tool`: Drag from one point to another.
-- `Move-Tool`: Move mouse pointer.
-- `Shortcut-Tool`: Press keyboard shortcuts (`Ctrl+c`, `Alt+Tab`, etc).
-- `Key-Tool`: Press a single key.
-- `Wait-Tool`: Pause for a defined duration.
-- `State-Tool`: Combined snapshot of active apps and interactive, textual and scrollable elements along with screenshot of the desktop.
-- `Screenshot-Tool`: Capture a screenshot of the desktop.
-- `Launch-Tool`: To launch an application from the start menu.
-- `Shell-Tool`: To execute PowerShell commands.
-- `Scrape-Tool`: To scrape the entire webpage for information.
+| Tool | Description |
+|------|-------------|
+| `State-Tool` | Combined snapshot of active apps, interactive/textual/scrollable elements, and optional annotated screenshot |
+| `Click-Tool` | Click on the screen at given coordinates (single, double, or triple click) |
+| `Type-Tool` | Type text on an element (optionally clears existing text) |
+| `Clipboard-Tool` | Copy or paste using the system clipboard |
+| `Scroll-Tool` | Scroll vertically or horizontally on the window or specific regions |
+| `Drag-Tool` | Drag from one point to another |
+| `Move-Tool` | Move mouse pointer |
+| `Shortcut-Tool` | Press keyboard shortcuts (`Ctrl+C`, `Alt+Tab`, etc.) |
+| `Key-Tool` | Press a single key |
+| `Wait-Tool` | Pause for a defined duration |
+| `Launch-Tool` | Launch an application from the start menu |
+| `Switch-Tool` | Switch to a running application |
+| `Powershell-Tool` | Execute PowerShell commands with security validation and optional working directory |
+| `Command-History-Tool` | Retrieve history of executed commands with timestamps and exit codes |
+| `Scrape-Tool` | Scrape a webpage for information (with SSRF protection)
+
+### 📡 MCP Resources
+
+| Resource URI | Description |
+|--------------|-------------|
+| `windows-mcp://current-directory` | Server's current working directory |
+| `windows-mcp://security-config` | Active security rules (blocked commands, arguments, operators, allowed paths)
+
+### 🔒 Command Security
+
+The `Powershell-Tool` includes multiple layers of protection:
+
+- **Blocked commands**: `format`, `shutdown`, `rm`, `del`, `regedit`, `net`, and more
+- **Blocked arguments**: `-enc`, `-encodedcommand`, `--exec`, and other injection-risk flags
+- **Blocked operators**: `;` and `` ` `` (backtick) to prevent command chaining and injection
+- **Path restriction**: `workingDir` limited to user home directory and server working directory
+- **Length limit**: Commands capped at 2000 characters
 
 ## Star History
 
