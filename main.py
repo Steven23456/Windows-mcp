@@ -865,10 +865,10 @@ foreach ($p in $procs) {
 
 $r
 """
-    result = desktop.execute_command(ps_script, timeout=30)
-    if result["status"] != 0:
-        return f"Error collecting system info (exit {result['status']}): {result['output']}"
-    return result["output"].strip()
+    response, status = desktop.execute_command(ps_script, timeout=30)
+    if status != 0:
+        return f"Error collecting system info (exit {status}): {response}"
+    return response.strip()
 
 
 @mcp.tool(
