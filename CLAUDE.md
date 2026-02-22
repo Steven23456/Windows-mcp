@@ -147,7 +147,7 @@ Run via `python main.py`, `python -m windows_mcp`, or `windows-mcp` (after pip i
 
 ```bash
 python -m build
-python -m twine upload --username __token__ --password "$(cat C:/mcp-servers/PyPi_key.txt | tail -1 | cut -d: -f2)" dist/windows_mcp_server-<version>*
+python -m twine upload --username __token__ --password "$(cat ~/Dropbox/Github/PyPi_Key.txt | tail -1 | cut -d: -f2)" dist/windows_mcp_server-<version>*
 ```
 
 ## Known Limitations
