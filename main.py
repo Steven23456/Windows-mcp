@@ -575,13 +575,16 @@ def find_element_tool(
 
     lines = [f'Found {len(matches)} {element_type} element(s) matching "{search}":']
     for n in matches:
-        rect = n.bounding_rect
-        cx = rect.left + rect.width() // 2
-        cy = rect.top + rect.height() // 2
-        lines.append(
-            f"  - {n.name} [{n.control_type}] center=({cx},{cy}) "
-            f"rect=({rect.left},{rect.top},{rect.right},{rect.bottom})"
-        )
+        if hasattr(n, "center"):
+            cx, cy = n.center.x, n.center.y
+            coord = f"center=({cx},{cy})"
+        else:
+            coord = ""
+        if hasattr(n, "bounding_box"):
+            bb = n.bounding_box
+            coord += f" rect={bb.to_string()}"
+        ctrl = f" [{n.control_type}]" if hasattr(n, "control_type") else ""
+        lines.append(f"  - {n.name}{ctrl} {coord}".strip())
     return "\n".join(lines)
 
 
@@ -612,13 +615,13 @@ def wait_for_tool(text: str, timeout: int = 10, poll_interval: float = 1.0) -> s
 
         for n in all_nodes:
             if text_lower in n.name.lower():
-                rect = n.bounding_rect
-                cx = rect.left + rect.width() // 2
-                cy = rect.top + rect.height() // 2
-                return (
-                    f'Found "{text}" after {elapsed:.1f}s: '
-                    f"{n.name} [{n.control_type}] center=({cx},{cy})"
+                ctrl = f" [{n.control_type}]" if hasattr(n, "control_type") else ""
+                coord = (
+                    f" center=({n.center.x},{n.center.y})"
+                    if hasattr(n, "center")
+                    else ""
                 )
+                return f'Found "{text}" after {elapsed:.1f}s: {n.name}{ctrl}{coord}'
 
         time.sleep(poll_interval)
 
