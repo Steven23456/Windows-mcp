@@ -27,7 +27,7 @@ Windows-MCP is an MCP server that enables AI agents to interact with Windows OS 
   - **Scrollable**: Elements with scroll patterns
 - DOM correction logic handles a11y tree quirks (list items with child links, unnamed groups)
 
-**Tool Definitions (`main.py`)** - 15 MCP tools + 2 MCP resources via FastMCP
+**Tool Definitions (`main.py`)** - 19 MCP tools + 2 MCP resources via FastMCP
 - Mouse: `humancursor` library (human-like movement)
 - Keyboard: `pyautogui` library
 - `State-Tool` is primary context-gathering tool
