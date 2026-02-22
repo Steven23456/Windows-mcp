@@ -56,9 +56,19 @@ pip install -e .
 
 ## MCP Tools
 
-19 tools and 2 resources defined in `main.py` via `@mcp.tool()` and `@mcp.resource()`. Key tool: `State-Tool` is the primary context-gathering tool — returns desktop state + UI elements, optionally with annotated screenshot (`use_vision=True`). Resources: `windows-mcp://current-directory` (server cwd) and `windows-mcp://security-config` (active security rules). See `main.py` for full definitions.
+25 tools and 2 resources defined in `main.py` via `@mcp.tool()` and `@mcp.resource()`. Key tool: `State-Tool` is the primary context-gathering tool — returns desktop state + UI elements, optionally with annotated screenshot (`use_vision=True`). Resources: `windows-mcp://current-directory` (server cwd) and `windows-mcp://security-config` (active security rules). See `main.py` for full definitions.
 
 ## Key Technical Details
+
+### COM Interface Patterns
+- Use C# `_VtblGap1_N()` to skip N vtable slots in COM interfaces — never use stub methods with guessed signatures (causes silent stack corruption)
+- `IMMDeviceEnumerator` needs `_VtblGap1_1()` before `GetDefaultAudioEndpoint` (skips `EnumAudioEndpoints`)
+- `IAudioEndpointVolume` needs `_VtblGap1_4()` before `SetMasterVolumeLevelScalar` (skips Register/Unregister/GetChannelCount/SetMasterVolumeLevel)
+
+### WinRT Async in PowerShell
+- Never call `GetResults()` directly on WinRT async operations — it doesn't block
+- Use an `Await($WinRtTask, $ResultType)` helper that resolves via `AsTask().Wait(-1)`
+- The `AsTask` method must be found by reflection filtering on `` IAsyncOperation`1 `` parameter type
 
 ### Input Validation (v0.1.4+)
 - `MAX_SCREEN_COORD = 10000` - reasonable max for multi-monitor
