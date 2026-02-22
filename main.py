@@ -819,28 +819,22 @@ def ocr_tool(region: tuple[int, int, int, int] = None, language: str = "en") -> 
         [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
         [Windows.Storage.StorageFile, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
 
-        $asyncInfo = [Windows.Storage.StorageFile]::GetFileFromPathAsync("{tmp_path}")
-        $typeName = 'WindowsRuntimeSystemExtensions'
-        $null = [System.WindowsRuntimeSystemExtensions].GetMethod('AsTask', [type[]]@([Windows.Foundation.IAsyncOperation[Windows.Storage.StorageFile]])).Invoke($null, @($asyncInfo))
-        $file = $asyncInfo.GetResults()
+        function Await($WinRtTask, $ResultType) {{
+            $asTaskGeneric = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {{ $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' }})[0]
+            $asTask = $asTaskGeneric.MakeGenericMethod($ResultType)
+            $netTask = $asTask.Invoke($null, @($WinRtTask))
+            $netTask.Wait(-1) | Out-Null
+            $netTask.Result
+        }}
 
-        $stream = $file.OpenAsync([Windows.Storage.FileAccessMode]::Read)
-        $null = [System.WindowsRuntimeSystemExtensions].GetMethod('AsTask', [type[]]@([Windows.Foundation.IAsyncOperation[Windows.Storage.Streams.IRandomAccessStream]])).Invoke($null, @($stream))
-        $streamResult = $stream.GetResults()
-
-        $decoder = [Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($streamResult)
-        $null = [System.WindowsRuntimeSystemExtensions].GetMethod('AsTask', [type[]]@([Windows.Foundation.IAsyncOperation[Windows.Graphics.Imaging.BitmapDecoder]])).Invoke($null, @($decoder))
-        $bitmapDecoder = $decoder.GetResults()
-
-        $bitmap = $bitmapDecoder.GetSoftwareBitmapAsync()
-        $null = [System.WindowsRuntimeSystemExtensions].GetMethod('AsTask', [type[]]@([Windows.Foundation.IAsyncOperation[Windows.Graphics.Imaging.SoftwareBitmap]])).Invoke($null, @($bitmap))
-        $softwareBitmap = $bitmap.GetResults()
-
-        $ocrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
-        $ocrResult = $ocrEngine.RecognizeAsync($softwareBitmap)
-        $null = [System.WindowsRuntimeSystemExtensions].GetMethod('AsTask', [type[]]@([Windows.Foundation.IAsyncOperation[Windows.Media.Ocr.OcrResult]])).Invoke($null, @($ocrResult))
-        $result = $ocrResult.GetResults()
-        $result.Text
+        $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync("{tmp_path}")) ([Windows.Storage.StorageFile])
+        $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+        $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+        $bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+        $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+        if ($engine -eq $null) {{ Write-Error "OCR engine unavailable"; exit 1 }}
+        $ocrResult = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+        $ocrResult.Text
     """)
 
     response, status = desktop.execute_command(ps_script, timeout=30)
@@ -872,68 +866,75 @@ def audio_tool(
         return "Validation Error: level must be between 0 and 100."
 
     # PowerShell COM interop with Windows Core Audio API
+    # Uses _VtblGap to skip unused vtable slots in COM interfaces
     audio_setup = dedent("""\
-        Add-Type @"
+        Add-Type -TypeDefinition @"
         using System;
         using System.Runtime.InteropServices;
 
         [Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        interface IAudioEndpointVolume {
-            int NotImpl1(); int NotImpl2(); int NotImpl3(); int NotImpl4(); int NotImpl5(); int NotImpl6(); int NotImpl7(); int NotImpl8(); int NotImpl9(); int NotImpl10(); int NotImpl11(); int NotImpl12();
-            int GetMasterVolumeLevelScalar(out float fLevel);
-            int SetMasterVolumeLevelScalar(float fLevel, System.Guid pguidEventContext);
-            int GetMute(out bool bMute);
-            int SetMute(bool bMute, System.Guid pguidEventContext);
+        internal interface IAudioEndpointVolume {
+            int _VtblGap1_4();
+            int SetMasterVolumeLevelScalar(float fLevel, Guid pguidEventContext);
+            int GetMasterVolumeLevel(out float pfLevelDB);
+            int GetMasterVolumeLevelScalar(out float pfLevel);
+            int _VtblGap2_4();
+            int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, Guid pguidEventContext);
+            int GetMute([MarshalAs(UnmanagedType.Bool)] out bool pbMute);
         }
 
         [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        interface IMMDevice { int Activate(ref Guid iid, int dwClsCtx, IntPtr pActivationParams, [MarshalAs(UnmanagedType.IUnknown)] out object ppInterface); }
+        internal interface IMMDevice {
+            int Activate(ref Guid iid, int dwClsCtx, IntPtr pActivationParams, [MarshalAs(UnmanagedType.IUnknown)] out object ppInterface);
+        }
 
         [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        interface IMMDeviceEnumerator { int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppDevice); }
+        internal interface IMMDeviceEnumerator {
+            int _VtblGap1_1();
+            int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppDevice);
+        }
 
-        [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorComObject { }
+        [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+        internal class MMDeviceEnumeratorCom {}
 
-        public class AudioHelper {
-            public static IAudioEndpointVolume GetVolumeObject() {
-                var enumerator = new MMDeviceEnumeratorComObject() as IMMDeviceEnumerator;
+        public static class AudioHelper {
+            static IAudioEndpointVolume GetVol() {
+                var enumerator = (IMMDeviceEnumerator)(new MMDeviceEnumeratorCom());
                 IMMDevice dev;
                 enumerator.GetDefaultAudioEndpoint(0, 1, out dev);
                 Guid iid = typeof(IAudioEndpointVolume).GUID;
                 object o;
                 dev.Activate(ref iid, 23, IntPtr.Zero, out o);
-                return o as IAudioEndpointVolume;
+                return (IAudioEndpointVolume)o;
             }
+            public static float GetVolume() { float v; GetVol().GetMasterVolumeLevelScalar(out v); return v; }
+            public static void SetVolume(float v) { GetVol().SetMasterVolumeLevelScalar(v, Guid.Empty); }
+            public static bool GetMute() { bool m; GetVol().GetMute(out m); return m; }
+            public static void SetMute(bool m) { GetVol().SetMute(m, Guid.Empty); }
         }
 "@
     """)
 
     if action == "get":
         cmd = audio_setup + dedent("""\
-            $vol = [AudioHelper]::GetVolumeObject()
-            $level = 0.0
-            $vol.GetMasterVolumeLevelScalar([ref]$level)
-            $muted = $false
-            $vol.GetMute([ref]$muted)
-            "Volume: $([math]::Round($level * 100))%, Muted: $muted"
+            $v = [AudioHelper]::GetVolume()
+            $m = [AudioHelper]::GetMute()
+            "Volume: $([math]::Round($v * 100))%, Muted: $m"
         """)
     elif action == "set":
         scalar = level / 100.0
         cmd = audio_setup + dedent(f"""\
-            $vol = [AudioHelper]::GetVolumeObject()
-            $vol.SetMasterVolumeLevelScalar({scalar}, [System.Guid]::Empty)
+            [AudioHelper]::SetVolume([float]{scalar})
             "Volume set to {level}%"
         """)
     elif action == "mute":
         cmd = audio_setup + dedent("""\
-            $vol = [AudioHelper]::GetVolumeObject()
-            $vol.SetMute($true, [System.Guid]::Empty)
+            [AudioHelper]::SetMute($true)
             "Muted"
         """)
     elif action == "unmute":
         cmd = audio_setup + dedent("""\
-            $vol = [AudioHelper]::GetVolumeObject()
-            $vol.SetMute($false, [System.Guid]::Empty)
+            [AudioHelper]::SetMute($false)
             "Unmuted"
         """)
     else:
