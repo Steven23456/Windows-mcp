@@ -179,6 +179,38 @@ class Desktop:
         image_bytes = buffer.getvalue()
         return image_bytes
 
+    def manage_window(self, name: str, action: str) -> tuple[str, int]:
+        """Minimize, maximize, restore, or close a window by name."""
+        import ctypes
+
+        apps = self.get_apps()
+        app_names = {app.name: app for app in apps}
+        matched = process.extractOne(name, list(app_names.keys()))
+        if matched is None:
+            return (f"Application '{name}' not found.", 1)
+        app_name, score = matched
+        app = app_names[app_name]
+        handle = app.handle
+
+        SW_MAXIMIZE = 3
+        SW_MINIMIZE = 6
+        SW_RESTORE = 9
+        WM_CLOSE = 0x0010
+
+        user32 = ctypes.windll.user32
+        if action == "minimize":
+            user32.ShowWindow(handle, SW_MINIMIZE)
+        elif action == "maximize":
+            user32.ShowWindow(handle, SW_MAXIMIZE)
+        elif action == "restore":
+            user32.ShowWindow(handle, SW_RESTORE)
+        elif action == "close":
+            user32.PostMessageW(handle, WM_CLOSE, 0, 0)
+        else:
+            return (f"Unknown action: {action}", 1)
+
+        return (f"{action.title()}d {app_name}.", 0)
+
     def get_screenshot(self, scale: float = 0.7) -> Image.Image:
         screenshot = pyautogui.screenshot()
         size = (screenshot.width * scale, screenshot.height * scale)

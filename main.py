@@ -23,6 +23,7 @@ import pyperclip as pc
 import ipaddress
 import requests
 import socket
+import time
 
 # PyAutoGUI safety: FAILSAFE=True allows aborting by moving mouse to corner
 # Set to False only if corner-abort causes issues with your automation
@@ -505,6 +506,123 @@ def scrape_tool(url: str) -> str:
     content = markdownify(html=html)
     truncated = " (truncated)" if len(response.text) > MAX_RESPONSE_SIZE else ""
     return f"Scraped the contents of the entire webpage{truncated}:\n{content}"
+
+
+@mcp.tool(
+    name="Screenshot-Tool",
+    description="Take a screenshot of the entire screen or a specific region. Much faster than State-Tool when you only need a visual check. Optionally specify a region as (x, y, width, height) to capture a portion of the screen.",
+)
+def screenshot_tool(region: tuple[int, int, int, int] = None) -> list:
+    screenshot = desktop.get_screenshot()
+    if region:
+        x, y, w, h = region
+        # Validate region bounds
+        for val, name in [(x, "x"), (y, "y"), (w, "width"), (h, "height")]:
+            if not isinstance(val, int) or val < 0:
+                return [f"Validation Error: {name} must be a non-negative integer."]
+            if val > MAX_SCREEN_COORD:
+                return [
+                    f"Validation Error: {name} exceeds maximum ({MAX_SCREEN_COORD})."
+                ]
+        if w == 0 or h == 0:
+            return ["Validation Error: width and height must be greater than 0."]
+        screenshot = screenshot.crop((x, y, x + w, y + h))
+    image_bytes = desktop.screenshot_in_bytes(screenshot=screenshot)
+    return [Image(data=image_bytes, format="png")]
+
+
+@mcp.tool(
+    name="Window-Tool",
+    description='Manage application windows: minimize, maximize, restore, or close by name. Uses fuzzy matching to find the window (e.g., "notepad", "chrome").',
+)
+def window_tool(
+    name: str, action: Literal["minimize", "maximize", "restore", "close"]
+) -> str:
+    valid, msg = validate_text(name, max_length=200)
+    if not valid:
+        return f"Validation Error: {msg}"
+    result, status = desktop.manage_window(name, action)
+    if status != 0:
+        return f"Failed: {result}"
+    return result
+
+
+@mcp.tool(
+    name="Find-Element-Tool",
+    description="Search for UI elements by text. Returns matching elements with their coordinates, control type, and bounding box. Faster than parsing State-Tool output when looking for a specific element.",
+)
+def find_element_tool(
+    search: str,
+    element_type: Literal["interactive", "text", "scrollable"] = "interactive",
+) -> str:
+    valid, msg = validate_text(search, max_length=500)
+    if not valid:
+        return f"Validation Error: {msg}"
+
+    desktop_state = desktop.get_state(use_vision=False)
+    ts = desktop_state.tree_state
+
+    if element_type == "interactive":
+        nodes = ts.interactive_nodes
+    elif element_type == "text":
+        nodes = ts.informative_nodes
+    else:
+        nodes = ts.scrollable_nodes
+
+    search_lower = search.lower()
+    matches = [n for n in nodes if search_lower in n.name.lower()]
+
+    if not matches:
+        return f'No {element_type} elements found matching "{search}".'
+
+    lines = [f'Found {len(matches)} {element_type} element(s) matching "{search}":']
+    for n in matches:
+        rect = n.bounding_rect
+        cx = rect.left + rect.width() // 2
+        cy = rect.top + rect.height() // 2
+        lines.append(
+            f"  - {n.name} [{n.control_type}] center=({cx},{cy}) "
+            f"rect=({rect.left},{rect.top},{rect.right},{rect.bottom})"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool(
+    name="Wait-For-Tool",
+    description="Wait until a UI element or text appears on screen, polling at regular intervals. Returns element details when found or a timeout message. Useful for waiting for apps to load or dialogs to appear.",
+)
+def wait_for_tool(text: str, timeout: int = 10, poll_interval: float = 1.0) -> str:
+    valid, msg = validate_text(text, max_length=500)
+    if not valid:
+        return f"Validation Error: {msg}"
+    if timeout < 1 or timeout > MAX_WAIT_DURATION:
+        return f"Validation Error: timeout must be between 1 and {MAX_WAIT_DURATION}."
+    if poll_interval < 0.5:
+        return "Validation Error: poll_interval must be at least 0.5 seconds."
+
+    text_lower = text.lower()
+    start = time.time()
+
+    while True:
+        elapsed = time.time() - start
+        if elapsed >= timeout:
+            return f'Timeout after {timeout}s: "{text}" not found.'
+
+        desktop_state = desktop.get_state(use_vision=False)
+        ts = desktop_state.tree_state
+        all_nodes = ts.interactive_nodes + ts.informative_nodes
+
+        for n in all_nodes:
+            if text_lower in n.name.lower():
+                rect = n.bounding_rect
+                cx = rect.left + rect.width() // 2
+                cy = rect.top + rect.height() // 2
+                return (
+                    f'Found "{text}" after {elapsed:.1f}s: '
+                    f"{n.name} [{n.control_type}] center=({cx},{cy})"
+                )
+
+        time.sleep(poll_interval)
 
 
 if __name__ == "__main__":

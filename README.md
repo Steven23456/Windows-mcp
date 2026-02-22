@@ -37,7 +37,7 @@
    Unlike many automation tools, Windows MCP doesn't rely on any traditional computer vision techniques or specific fine-tuned models; it works with any LLMs, reducing complexity and setup time.
 
 - **Rich Toolset for UI Automation**
-  15 tools for keyboard, mouse, clipboard, shell, and window/UI state capture.
+  19 tools for keyboard, mouse, clipboard, shell, window management, element search, and UI state capture.
 
 - **Command Security**
   Built-in protection against dangerous commands (format, shutdown, rm, etc.), injection attacks (blocked operators and encoded command arguments), working directory restrictions, and command length limits.
@@ -157,6 +157,10 @@ Claude can access the following tools to interact with Windows:
 | `Switch-Tool` | Switch to a running application |
 | `Powershell-Tool` | Execute PowerShell commands with security validation and optional working directory |
 | `Command-History-Tool` | Retrieve history of executed commands with timestamps and exit codes |
+| `Screenshot-Tool` | Take a screenshot of the full screen or a specific region |
+| `Window-Tool` | Minimize, maximize, restore, or close windows by name |
+| `Find-Element-Tool` | Search UI elements by text and return coordinates |
+| `Wait-For-Tool` | Poll until a UI element or text appears, with timeout |
 | `Scrape-Tool` | Scrape a webpage for information (with SSRF protection)
 
 ### 📡 MCP Resources
