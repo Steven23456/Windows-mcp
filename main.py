@@ -512,23 +512,21 @@ def scrape_tool(url: str) -> str:
     name="Screenshot-Tool",
     description="Take a screenshot of the entire screen or a specific region. Much faster than State-Tool when you only need a visual check. Optionally specify a region as (x, y, width, height) to capture a portion of the screen.",
 )
-def screenshot_tool(region: tuple[int, int, int, int] = None) -> list:
+def screenshot_tool(region: tuple[int, int, int, int] = None):
     screenshot = desktop.get_screenshot()
     if region:
         x, y, w, h = region
         # Validate region bounds
         for val, name in [(x, "x"), (y, "y"), (w, "width"), (h, "height")]:
             if not isinstance(val, int) or val < 0:
-                return [f"Validation Error: {name} must be a non-negative integer."]
+                return f"Validation Error: {name} must be a non-negative integer."
             if val > MAX_SCREEN_COORD:
-                return [
-                    f"Validation Error: {name} exceeds maximum ({MAX_SCREEN_COORD})."
-                ]
+                return f"Validation Error: {name} exceeds maximum ({MAX_SCREEN_COORD})."
         if w == 0 or h == 0:
-            return ["Validation Error: width and height must be greater than 0."]
+            return "Validation Error: width and height must be greater than 0."
         screenshot = screenshot.crop((x, y, x + w, y + h))
     image_bytes = desktop.screenshot_in_bytes(screenshot=screenshot)
-    return [Image(data=image_bytes, format="png")]
+    return Image(data=image_bytes, format="png")
 
 
 @mcp.tool(
