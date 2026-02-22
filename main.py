@@ -626,5 +626,324 @@ def wait_for_tool(text: str, timeout: int = 10, poll_interval: float = 1.0) -> s
         time.sleep(poll_interval)
 
 
+@mcp.tool(
+    name="Notification-Tool",
+    description="Show a Windows toast notification. Useful for alerting the user after long-running automations complete.",
+)
+def notification_tool(title: str, message: str) -> str:
+    valid, msg = validate_text(title, max_length=200)
+    if not valid:
+        return f"Validation Error (title): {msg}"
+    valid, msg = validate_text(message, max_length=1000)
+    if not valid:
+        return f"Validation Error (message): {msg}"
+
+    # Escape XML special characters
+    import html
+
+    safe_title = html.escape(title)
+    safe_message = html.escape(message)
+
+    ps_script = dedent(f"""\
+        [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+        [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType = WindowsRuntime] | Out-Null
+        $template = @"
+        <toast>
+            <visual>
+                <binding template="ToastGeneric">
+                    <text>{safe_title}</text>
+                    <text>{safe_message}</text>
+                </binding>
+            </visual>
+        </toast>
+        "@
+        $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+        $xml.LoadXml($template)
+        $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
+        [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Windows-MCP").Show($toast)
+    """)
+    response, status = desktop.execute_command(ps_script, timeout=10)
+    if status != 0:
+        return f"Failed to show notification: {response}"
+    return f"Notification shown: {title}"
+
+
+@mcp.tool(
+    name="Process-Tool",
+    description='List running processes or kill a process by name/PID. Use action="list" with optional name filter, or action="kill" with name or pid.',
+)
+def process_tool(
+    action: Literal["list", "kill"], name: str = None, pid: int = None
+) -> str:
+    if action == "list":
+        if name:
+            valid, msg = validate_text(name, max_length=200)
+            if not valid:
+                return f"Validation Error: {msg}"
+            cmd = f'Get-Process -Name "{name}" -ErrorAction Stop | Select-Object Name, Id, @{{N="MemoryMB";E={{[math]::Round($_.WorkingSet64/1MB,1)}}}} | Format-Table -AutoSize | Out-String'
+        else:
+            cmd = 'Get-Process | Select-Object Name, Id, @{N="MemoryMB";E={[math]::Round($_.WorkingSet64/1MB,1)}} | Sort-Object MemoryMB -Descending | Select-Object -First 30 | Format-Table -AutoSize | Out-String'
+        response, status = desktop.execute_command(cmd, timeout=15)
+        if status != 0:
+            return f"Failed to list processes: {response}"
+        return response.strip()
+
+    elif action == "kill":
+        if not name and not pid:
+            return "Error: Provide either 'name' or 'pid' to kill a process."
+        if name:
+            valid, msg = validate_text(name, max_length=200)
+            if not valid:
+                return f"Validation Error: {msg}"
+            # Security: check name against blocked commands
+            if name.lower().replace(".exe", "") in BLOCKED_COMMANDS:
+                return f"Security Error: Cannot kill blocked process: {name}"
+            cmd = f'Stop-Process -Name "{name}" -Force -ErrorAction Stop'
+        else:
+            if pid < 0 or pid > 99999:
+                return "Validation Error: PID must be between 0 and 99999."
+            cmd = f"Stop-Process -Id {pid} -Force -ErrorAction Stop"
+        response, status = desktop.execute_command(cmd, timeout=10)
+        if status != 0:
+            return f"Failed to kill process: {response}"
+        target = name if name else f"PID {pid}"
+        return f"Killed process: {target}"
+
+    return f"Unknown action: {action}"
+
+
+@mcp.tool(
+    name="File-Dialog-Tool",
+    description="Type a file path into an active Open/Save file dialog and confirm it. Useful for automating file selection in native Windows dialogs.",
+)
+def file_dialog_tool(path: str, action: Literal["open", "save"] = "open") -> str:
+    valid, msg = validate_text(path, max_length=500)
+    if not valid:
+        return f"Validation Error: {msg}"
+
+    desktop_state = desktop.get_state(use_vision=False)
+    ts = desktop_state.tree_state
+
+    # Look for an Edit control in interactive nodes (filename field in dialog)
+    edit_node = None
+    for n in ts.interactive_nodes:
+        if hasattr(n, "control_type") and "Edit" in n.control_type:
+            name_lower = n.name.lower()
+            if any(
+                kw in name_lower for kw in ["file name", "filename", "name", "edit"]
+            ):
+                edit_node = n
+                break
+
+    # Fallback: find any Edit control
+    if edit_node is None:
+        for n in ts.interactive_nodes:
+            if hasattr(n, "control_type") and "Edit" in n.control_type:
+                edit_node = n
+                break
+
+    if edit_node is None:
+        return "Error: No file name input field found. Make sure a file dialog is open."
+
+    # Click on the edit field, clear it, type the path, press Enter
+    cx, cy = edit_node.center.x, edit_node.center.y
+    cursor.click_on((cx, cy))
+    pg.hotkey("ctrl", "a")
+    pg.press("backspace")
+    # Use clipboard for paths with Unicode characters
+    old_clipboard = pc.paste()
+    pc.copy(path)
+    pg.hotkey("ctrl", "v")
+    pg.sleep(0.3)
+    pc.copy(old_clipboard if old_clipboard else "")
+    pg.press("enter")
+    return f"Typed path '{path}' into file dialog and confirmed ({action})."
+
+
+@mcp.tool(
+    name="Multi-Monitor-Tool",
+    description="Get display count, resolutions, and positions for all connected monitors. Includes virtual screen dimensions.",
+)
+def multi_monitor_tool() -> str:
+    info = desktop.get_monitors()
+    monitors = info["monitors"]
+    vs = info["virtual_screen"]
+    lines = [f"Monitor count: {len(monitors)}"]
+    for i, m in enumerate(monitors, 1):
+        primary = " (Primary)" if m["primary"] else ""
+        lines.append(
+            f"  Monitor {i}{primary}: {m['width']}x{m['height']} at ({m['x']},{m['y']})"
+        )
+    lines.append(
+        f"Virtual screen: {vs['width']}x{vs['height']} at ({vs['x']},{vs['y']})"
+    )
+    return "\n".join(lines)
+
+
+@mcp.tool(
+    name="OCR-Tool",
+    description="Extract text from the screen or a specific region using Windows built-in OCR (Windows 10+). Returns recognized text.",
+)
+def ocr_tool(region: tuple[int, int, int, int] = None, language: str = "en") -> str:
+    if region:
+        for val, name in [
+            (region[0], "x"),
+            (region[1], "y"),
+            (region[2], "width"),
+            (region[3], "height"),
+        ]:
+            if not isinstance(val, int) or val < 0:
+                return f"Validation Error: {name} must be a non-negative integer."
+            if val > MAX_SCREEN_COORD:
+                return f"Validation Error: {name} exceeds maximum ({MAX_SCREEN_COORD})."
+        if region[2] == 0 or region[3] == 0:
+            return "Validation Error: width and height must be greater than 0."
+
+    valid, msg = validate_text(language, max_length=10)
+    if not valid:
+        return f"Validation Error: {msg}"
+
+    import tempfile
+
+    screenshot = desktop.get_screenshot(scale=1.0)
+    if region:
+        x, y, w, h = region
+        screenshot = screenshot.crop((x, y, x + w, y + h))
+
+    tmp_path = os.path.join(tempfile.gettempdir(), "wmcp_ocr_tmp.png")
+    screenshot.save(tmp_path, format="PNG")
+
+    ps_script = dedent(f"""\
+        Add-Type -AssemblyName System.Runtime.WindowsRuntime
+        [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
+        [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
+        [Windows.Storage.StorageFile, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
+
+        $asyncInfo = [Windows.Storage.StorageFile]::GetFileFromPathAsync("{tmp_path}")
+        $typeName = 'WindowsRuntimeSystemExtensions'
+        $null = [System.WindowsRuntimeSystemExtensions].GetMethod('AsTask', [type[]]@([Windows.Foundation.IAsyncOperation[Windows.Storage.StorageFile]])).Invoke($null, @($asyncInfo))
+        $file = $asyncInfo.GetResults()
+
+        $stream = $file.OpenAsync([Windows.Storage.FileAccessMode]::Read)
+        $null = [System.WindowsRuntimeSystemExtensions].GetMethod('AsTask', [type[]]@([Windows.Foundation.IAsyncOperation[Windows.Storage.Streams.IRandomAccessStream]])).Invoke($null, @($stream))
+        $streamResult = $stream.GetResults()
+
+        $decoder = [Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($streamResult)
+        $null = [System.WindowsRuntimeSystemExtensions].GetMethod('AsTask', [type[]]@([Windows.Foundation.IAsyncOperation[Windows.Graphics.Imaging.BitmapDecoder]])).Invoke($null, @($decoder))
+        $bitmapDecoder = $decoder.GetResults()
+
+        $bitmap = $bitmapDecoder.GetSoftwareBitmapAsync()
+        $null = [System.WindowsRuntimeSystemExtensions].GetMethod('AsTask', [type[]]@([Windows.Foundation.IAsyncOperation[Windows.Graphics.Imaging.SoftwareBitmap]])).Invoke($null, @($bitmap))
+        $softwareBitmap = $bitmap.GetResults()
+
+        $ocrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+        $ocrResult = $ocrEngine.RecognizeAsync($softwareBitmap)
+        $null = [System.WindowsRuntimeSystemExtensions].GetMethod('AsTask', [type[]]@([Windows.Foundation.IAsyncOperation[Windows.Media.Ocr.OcrResult]])).Invoke($null, @($ocrResult))
+        $result = $ocrResult.GetResults()
+        $result.Text
+    """)
+
+    response, status = desktop.execute_command(ps_script, timeout=30)
+
+    # Clean up temp file
+    try:
+        os.remove(tmp_path)
+    except OSError:
+        pass
+
+    if status != 0:
+        return f"OCR failed: {response}"
+    text = response.strip()
+    if not text:
+        return "No text detected in the captured region."
+    return text
+
+
+@mcp.tool(
+    name="Audio-Tool",
+    description='Get or set system volume, mute or unmute. Use action="get" to read current volume, "set" with level (0-100) to change it, "mute" or "unmute" to toggle mute.',
+)
+def audio_tool(
+    action: Literal["get", "set", "mute", "unmute"], level: int = None
+) -> str:
+    if action == "set" and level is None:
+        return "Error: 'level' parameter required for 'set' action."
+    if level is not None and (level < 0 or level > 100):
+        return "Validation Error: level must be between 0 and 100."
+
+    # PowerShell COM interop with Windows Core Audio API
+    audio_setup = dedent("""\
+        Add-Type @"
+        using System;
+        using System.Runtime.InteropServices;
+
+        [Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IAudioEndpointVolume {
+            int NotImpl1(); int NotImpl2(); int NotImpl3(); int NotImpl4(); int NotImpl5(); int NotImpl6(); int NotImpl7(); int NotImpl8(); int NotImpl9(); int NotImpl10(); int NotImpl11(); int NotImpl12();
+            int GetMasterVolumeLevelScalar(out float fLevel);
+            int SetMasterVolumeLevelScalar(float fLevel, System.Guid pguidEventContext);
+            int GetMute(out bool bMute);
+            int SetMute(bool bMute, System.Guid pguidEventContext);
+        }
+
+        [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IMMDevice { int Activate(ref Guid iid, int dwClsCtx, IntPtr pActivationParams, [MarshalAs(UnmanagedType.IUnknown)] out object ppInterface); }
+
+        [Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IMMDeviceEnumerator { int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppDevice); }
+
+        [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorComObject { }
+
+        public class AudioHelper {
+            public static IAudioEndpointVolume GetVolumeObject() {
+                var enumerator = new MMDeviceEnumeratorComObject() as IMMDeviceEnumerator;
+                IMMDevice dev;
+                enumerator.GetDefaultAudioEndpoint(0, 1, out dev);
+                Guid iid = typeof(IAudioEndpointVolume).GUID;
+                object o;
+                dev.Activate(ref iid, 23, IntPtr.Zero, out o);
+                return o as IAudioEndpointVolume;
+            }
+        }
+"@
+    """)
+
+    if action == "get":
+        cmd = audio_setup + dedent("""\
+            $vol = [AudioHelper]::GetVolumeObject()
+            $level = 0.0
+            $vol.GetMasterVolumeLevelScalar([ref]$level)
+            $muted = $false
+            $vol.GetMute([ref]$muted)
+            "Volume: $([math]::Round($level * 100))%, Muted: $muted"
+        """)
+    elif action == "set":
+        scalar = level / 100.0
+        cmd = audio_setup + dedent(f"""\
+            $vol = [AudioHelper]::GetVolumeObject()
+            $vol.SetMasterVolumeLevelScalar({scalar}, [System.Guid]::Empty)
+            "Volume set to {level}%"
+        """)
+    elif action == "mute":
+        cmd = audio_setup + dedent("""\
+            $vol = [AudioHelper]::GetVolumeObject()
+            $vol.SetMute($true, [System.Guid]::Empty)
+            "Muted"
+        """)
+    elif action == "unmute":
+        cmd = audio_setup + dedent("""\
+            $vol = [AudioHelper]::GetVolumeObject()
+            $vol.SetMute($false, [System.Guid]::Empty)
+            "Unmuted"
+        """)
+    else:
+        return f"Unknown action: {action}"
+
+    response, status = desktop.execute_command(cmd, timeout=10)
+    if status != 0:
+        return f"Audio control failed: {response}"
+    return response.strip()
+
+
 if __name__ == "__main__":
     mcp.run()

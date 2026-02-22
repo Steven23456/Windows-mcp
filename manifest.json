@@ -1,7 +1,7 @@
 {
   "dxt_version": "0.1",
   "name": "Windows-MCP",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Lightweight MCP Server that enables Claude to interact with Windows OS",
   "long_description": "Windows MCP is a lightweight, open-source project that enables seamless integration between AI agents and the Windows operating system. Acting as an MCP server bridges the gap between LLMs and the Windows operating system, allowing agents to perform tasks such as **file navigation, application control, UI interaction, QA testing,** and more.\n\n## Key Features\n\n- **Seamless Windows Integration**: Interacts natively with Windows UI elements, opens apps, controls windows, simulates user input, and more.\n- **Use Any LLM (Vision Optional)**: Unlike many automation tools, Windows MCP doesn't rely on any traditional computer vision techniques or specific fine-tuned models; it works with any LLMs, reducing complexity and setup time.\n- **Rich Toolset for UI Automation**: Includes tools for basic keyboard, mouse operation and capturing window/UI state.\n- **Lightweight & Open-Source**: Minimal dependencies and easy setup with full source code available under MIT license.\n- **Customizable & Extendable**: Easily adapt or extend tools to suit your unique automation or AI integration needs.\n- **Real-Time Interaction**: Typical latency between actions (e.g., from one mouse click to the next) ranges from **1.5 to 2.3 secs**, and may slightly vary based on the number of active applications and system load, also the inferencing speed of the llm.\n\n## Requirements\n\n### UV Package Manager\nThis MCP server requires [UV](https://github.com/astral-sh/uv), a fast Python package manager. \n\n```bash\npip install uv\n```\n\nFor detailed installation instructions, see the [UV documentation](https://github.com/astral-sh/uv#installation).",
   "author": {
@@ -108,6 +108,30 @@
     {
       "name": "Scrape-Tool",
       "description": "Fetch and convert webpage content to markdown format. Provide full URL including protocol (http/https). Returns structured text content suitable for analysis."
+    },
+    {
+      "name": "Notification-Tool",
+      "description": "Show a Windows toast notification. Useful for alerting the user after long-running automations complete."
+    },
+    {
+      "name": "Process-Tool",
+      "description": "List running processes or kill a process by name/PID."
+    },
+    {
+      "name": "File-Dialog-Tool",
+      "description": "Type a file path into an active Open/Save file dialog and confirm it."
+    },
+    {
+      "name": "Multi-Monitor-Tool",
+      "description": "Get display count, resolutions, and positions for all connected monitors."
+    },
+    {
+      "name": "OCR-Tool",
+      "description": "Extract text from the screen or a specific region using Windows built-in OCR."
+    },
+    {
+      "name": "Audio-Tool",
+      "description": "Get or set system volume, mute or unmute."
     }
   ],
   "tools_generated": true,

@@ -211,6 +211,70 @@ class Desktop:
 
         return (f"{action.title()}d {app_name}.", 0)
 
+    def get_monitors(self) -> list[dict]:
+        """Get info about all connected monitors using ctypes Win32 API."""
+        import ctypes
+        import ctypes.wintypes
+
+        monitors = []
+        user32 = ctypes.windll.user32
+
+        # Get virtual screen dimensions
+        SM_CXVIRTUALSCREEN = 78
+        SM_CYVIRTUALSCREEN = 79
+        SM_XVIRTUALSCREEN = 76
+        SM_YVIRTUALSCREEN = 77
+        virtual_w = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+        virtual_h = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+        virtual_x = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+        virtual_y = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+
+        # MONITORINFO struct
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.wintypes.DWORD),
+                ("rcMonitor", ctypes.wintypes.RECT),
+                ("rcWork", ctypes.wintypes.RECT),
+                ("dwFlags", ctypes.wintypes.DWORD),
+            ]
+
+        MONITORINFOF_PRIMARY = 0x00000001
+
+        def callback(hMonitor, hdcMonitor, lprcMonitor, dwData):
+            info = MONITORINFO()
+            info.cbSize = ctypes.sizeof(MONITORINFO)
+            user32.GetMonitorInfoW(hMonitor, ctypes.byref(info))
+            rc = info.rcMonitor
+            monitors.append(
+                {
+                    "x": rc.left,
+                    "y": rc.top,
+                    "width": rc.right - rc.left,
+                    "height": rc.bottom - rc.top,
+                    "primary": bool(info.dwFlags & MONITORINFOF_PRIMARY),
+                }
+            )
+            return True
+
+        MONITORENUMPROC = ctypes.WINFUNCTYPE(
+            ctypes.c_bool,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.wintypes.RECT),
+            ctypes.POINTER(ctypes.c_int),
+        )
+        user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(callback), 0)
+
+        return {
+            "monitors": monitors,
+            "virtual_screen": {
+                "x": virtual_x,
+                "y": virtual_y,
+                "width": virtual_w,
+                "height": virtual_h,
+            },
+        }
+
     def get_screenshot(self, scale: float = 0.7) -> Image.Image:
         screenshot = pyautogui.screenshot()
         size = (screenshot.width * scale, screenshot.height * scale)

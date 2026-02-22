@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Windows-MCP is an MCP server that enables AI agents to interact with Windows OS through UI automation and a11y (accessibility) tree traversal.
 
-**Version**: 0.3.0 | **Platform**: Windows 7-11 | **Python**: 3.13+ | **Entry Point**: `main.py`
+**Version**: 0.4.0 | **Platform**: Windows 7-11 | **Python**: 3.13+ | **Entry Point**: `main.py`
 
 ## Architecture
 
@@ -27,7 +27,7 @@ Windows-MCP is an MCP server that enables AI agents to interact with Windows OS 
   - **Scrollable**: Elements with scroll patterns
 - DOM correction logic handles a11y tree quirks (list items with child links, unnamed groups)
 
-**Tool Definitions (`main.py`)** - 19 MCP tools + 2 MCP resources via FastMCP
+**Tool Definitions (`main.py`)** - 25 MCP tools + 2 MCP resources via FastMCP
 - Mouse: `humancursor` library (human-like movement)
 - Keyboard: `pyautogui` library
 - `State-Tool` is primary context-gathering tool
