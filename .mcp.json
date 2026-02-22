@@ -15,13 +15,6 @@
         "@simonb97/server-win-cli"
       ]
     },
-    "context7": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@upstreamapi/context7-mcp"
-      ]
-    },
     "memory": {
       "command": "npx",
       "args": [

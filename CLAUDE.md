@@ -27,7 +27,7 @@ Windows-MCP is an MCP server that enables AI agents to interact with Windows OS 
   - **Scrollable**: Elements with scroll patterns
 - DOM correction logic handles a11y tree quirks (list items with child links, unnamed groups)
 
-**Tool Definitions (`main.py`)** - 14 MCP tools via FastMCP
+**Tool Definitions (`main.py`)** - 15 MCP tools + 2 MCP resources via FastMCP
 - Mouse: `humancursor` library (human-like movement)
 - Keyboard: `pyautogui` library
 - `State-Tool` is primary context-gathering tool
@@ -56,7 +56,7 @@ pip install -e .
 
 ## MCP Tools
 
-14 tools defined in `main.py` via `@mcp.tool()`. Key tool: `State-Tool` is the primary context-gathering tool — returns desktop state + UI elements, optionally with annotated screenshot (`use_vision=True`). All other tools are mouse/keyboard/clipboard/shell operations. See `main.py` for full definitions.
+15 tools and 2 resources defined in `main.py` via `@mcp.tool()` and `@mcp.resource()`. Key tool: `State-Tool` is the primary context-gathering tool — returns desktop state + UI elements, optionally with annotated screenshot (`use_vision=True`). Resources: `windows-mcp://current-directory` (server cwd) and `windows-mcp://security-config` (active security rules). See `main.py` for full definitions.
 
 ## Key Technical Details
 
@@ -66,6 +66,14 @@ pip install -e .
 - `MAX_WAIT_DURATION = 300` - 5 minutes max wait
 - `MAX_WHEEL_TIMES = 100` - scroll limit
 - `MAX_CLICKS = 3` - triple-click max
+
+### Command Security (v0.2.0+)
+- `BLOCKED_COMMANDS` in `src/desktop/config.py`: 11 dangerous commands (format, shutdown, rm, del, etc.)
+- `BLOCKED_ARGUMENTS`: 9 injection-risk flags (-enc, -encodedcommand, --exec, etc.)
+- `BLOCKED_OPERATORS`: `;` and `` ` `` blocked; `&` and `|` allowed (essential PS operators)
+- `MAX_COMMAND_LENGTH = 2000` - command length limit
+- `ALLOWED_PATHS`: workingDir restricted to user home + server cwd
+- Validation runs in `validate_command()` in `main.py` before any shell execution
 
 ### PyAutoGUI Configuration
 ```python
