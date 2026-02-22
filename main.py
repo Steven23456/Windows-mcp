@@ -1,9 +1,16 @@
+import os
 from contextlib import asynccontextmanager
 from fastmcp.utilities.types import Image
 from humancursor import SystemCursor
 from platform import system, release
 from markdownify import markdownify
-from src.desktop.config import BLOCKED_COMMANDS, BLOCKED_OPERATORS, MAX_COMMAND_LENGTH
+from src.desktop.config import (
+    ALLOWED_PATHS,
+    BLOCKED_ARGUMENTS,
+    BLOCKED_COMMANDS,
+    BLOCKED_OPERATORS,
+    MAX_COMMAND_LENGTH,
+)
 from src.desktop import Desktop
 from urllib.parse import urlparse
 from datetime import datetime
@@ -116,6 +123,12 @@ def validate_command(command: str) -> tuple[bool, str]:
     if first_token in BLOCKED_COMMANDS:
         return False, f"Blocked command: {first_token}"
 
+    # Check for blocked arguments (e.g., -enc, -encodedcommand)
+    tokens = command.strip().split()
+    for token in tokens[1:]:
+        if token.lower() in BLOCKED_ARGUMENTS:
+            return False, f"Blocked argument: {token}"
+
     return True, "OK"
 
 
@@ -142,6 +155,30 @@ MAX_HISTORY_SIZE = 100
 mcp = FastMCP(name="windows-mcp", instructions=instructions, lifespan=lifespan)
 
 
+# ── MCP Resources ──────────────────────────────────────────────────────────
+
+
+@mcp.resource("windows-mcp://current-directory")
+def get_current_directory() -> str:
+    """The server's current working directory."""
+    return os.getcwd()
+
+
+@mcp.resource("windows-mcp://security-config")
+def get_security_config() -> str:
+    """Active security configuration for command validation."""
+    return (
+        f"Blocked commands: {', '.join(sorted(BLOCKED_COMMANDS))}\n"
+        f"Blocked arguments: {', '.join(sorted(BLOCKED_ARGUMENTS))}\n"
+        f"Blocked operators: {BLOCKED_OPERATORS}\n"
+        f"Max command length: {MAX_COMMAND_LENGTH}\n"
+        f"Allowed paths: {ALLOWED_PATHS}"
+    )
+
+
+# ── MCP Tools ──────────────────────────────────────────────────────────────
+
+
 @mcp.tool(
     name="Launch-Tool",
     description='Launch an application from the Windows Start Menu by name (e.g., "notepad", "calculator", "chrome")',
@@ -163,6 +200,14 @@ def powershell_tool(command: str, workingDir: str = None) -> str:
     valid, msg = validate_command(command)
     if not valid:
         return f"Security Error: {msg}"
+
+    # Validate working directory against allowed paths
+    if workingDir and ALLOWED_PATHS:
+        resolved = os.path.normpath(os.path.abspath(workingDir)).lower()
+        if not any(
+            resolved.startswith(os.path.normpath(p).lower()) for p in ALLOWED_PATHS
+        ):
+            return f"Security Error: Working directory '{workingDir}' is outside allowed paths."
 
     response, status = desktop.execute_command(command, working_dir=workingDir)
 
