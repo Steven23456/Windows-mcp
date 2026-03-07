@@ -24,6 +24,16 @@ import ipaddress
 import requests
 import socket
 import time
+import comtypes
+
+
+def ensure_com():
+    """Initialize COM on the current thread if not already initialized."""
+    try:
+        comtypes.CoInitialize()
+    except OSError:
+        pass  # Already initialized
+
 
 # PyAutoGUI safety: FAILSAFE=True allows aborting by moving mouse to corner
 # Set to False only if corner-abort causes issues with your automation
@@ -185,6 +195,7 @@ def get_security_config() -> str:
     description='Launch an application from the Windows Start Menu by name (e.g., "notepad", "calculator", "chrome")',
 )
 def launch_tool(name: str) -> str:
+    ensure_com()
     _, status = desktop.launch_app(name)
     if status != 0:
         return f"Failed to launch {name.title()}."
@@ -197,6 +208,7 @@ def launch_tool(name: str) -> str:
     description="Execute PowerShell commands and return the output with status code",
 )
 def powershell_tool(command: str, workingDir: str = None) -> str:
+    ensure_com()
     # Validate command against security rules
     valid, msg = validate_command(command)
     if not valid:
@@ -233,6 +245,7 @@ def powershell_tool(command: str, workingDir: str = None) -> str:
     description="Get the history of executed PowerShell commands with timestamps, exit codes, and truncated output.",
 )
 def command_history_tool(limit: int = 10) -> str:
+    ensure_com()
     if limit < 1:
         limit = 1
     if limit > MAX_HISTORY_SIZE:
@@ -255,6 +268,7 @@ def command_history_tool(limit: int = 10) -> str:
     description="Capture comprehensive desktop state including focused/opened applications, interactive UI elements (buttons, text fields, menus), informative content (text, labels, status), and scrollable areas. Optionally includes visual screenshot when use_vision=True. Essential for understanding current desktop context and available UI interactions.",
 )
 def state_tool(use_vision: bool = False) -> str | list:
+    ensure_com()
     desktop_state = desktop.get_state(use_vision=use_vision)
     interactive_elements = desktop_state.tree_state.interactive_elements_to_string()
     informative_elements = desktop_state.tree_state.informative_elements_to_string()
@@ -309,6 +323,7 @@ def click_tool(
     button: Literal["left", "right", "middle"] = "left",
     clicks: int = 1,
 ) -> str:
+    ensure_com()
     # Input validation
     valid, msg = validate_coordinates(loc)
     if not valid:
@@ -331,6 +346,7 @@ def click_tool(
     description="Type text into input fields, text areas, or focused elements. Set clear=True to replace existing text, False to append. Click on target element coordinates first.",
 )
 def type_tool(loc: tuple[int, int], text: str, clear: bool = False) -> str:
+    ensure_com()
     # Input validation
     valid, msg = validate_coordinates(loc)
     if not valid:
@@ -363,6 +379,7 @@ def type_tool(loc: tuple[int, int], text: str, clear: bool = False) -> str:
     description='Switch to a specific application window (e.g., "notepad", "calculator", "chrome", etc.) and bring to foreground.',
 )
 def switch_tool(name: str) -> str:
+    ensure_com()
     _, status = desktop.switch_app(name)
     if status != 0:
         return f"Failed to switch to {name.title()} window."
@@ -380,6 +397,7 @@ def scroll_tool(
     direction: Literal["up", "down", "left", "right"] = "down",
     wheel_times: int = 1,
 ) -> str:
+    ensure_com()
     # Input validation
     if loc:
         valid, msg = validate_coordinates(loc)
@@ -424,6 +442,7 @@ def scroll_tool(
     description="Drag and drop operation from source coordinates to destination coordinates. Useful for moving files, resizing windows, or drag-and-drop interactions.",
 )
 def drag_tool(from_loc: tuple[int, int], to_loc: tuple[int, int]) -> str:
+    ensure_com()
     # Input validation
     valid, msg = validate_coordinates(from_loc, "from_loc")
     if not valid:
@@ -513,6 +532,7 @@ def scrape_tool(url: str) -> str:
     description="Take a screenshot of the entire screen or a specific region. Much faster than State-Tool when you only need a visual check. Optionally specify a region as (x, y, width, height) to capture a portion of the screen.",
 )
 def screenshot_tool(region: tuple[int, int, int, int] = None):
+    ensure_com()
     screenshot = desktop.get_screenshot()
     if region:
         x, y, w, h = region
@@ -536,6 +556,7 @@ def screenshot_tool(region: tuple[int, int, int, int] = None):
 def window_tool(
     name: str, action: Literal["minimize", "maximize", "restore", "close"]
 ) -> str:
+    ensure_com()
     valid, msg = validate_text(name, max_length=200)
     if not valid:
         return f"Validation Error: {msg}"
@@ -553,6 +574,7 @@ def find_element_tool(
     search: str,
     element_type: Literal["interactive", "text", "scrollable"] = "interactive",
 ) -> str:
+    ensure_com()
     valid, msg = validate_text(search, max_length=500)
     if not valid:
         return f"Validation Error: {msg}"
@@ -593,6 +615,7 @@ def find_element_tool(
     description="Wait until a UI element or text appears on screen, polling at regular intervals. Returns element details when found or a timeout message. Useful for waiting for apps to load or dialogs to appear.",
 )
 def wait_for_tool(text: str, timeout: int = 10, poll_interval: float = 1.0) -> str:
+    ensure_com()
     valid, msg = validate_text(text, max_length=500)
     if not valid:
         return f"Validation Error: {msg}"
@@ -631,6 +654,7 @@ def wait_for_tool(text: str, timeout: int = 10, poll_interval: float = 1.0) -> s
     description="Show a Windows toast notification. Useful for alerting the user after long-running automations complete.",
 )
 def notification_tool(title: str, message: str) -> str:
+    ensure_com()
     valid, msg = validate_text(title, max_length=200)
     if not valid:
         return f"Validation Error (title): {msg}"
@@ -675,6 +699,7 @@ def notification_tool(title: str, message: str) -> str:
 def process_tool(
     action: Literal["list", "kill"], name: str = None, pid: int = None
 ) -> str:
+    ensure_com()
     if action == "list":
         if name:
             valid, msg = validate_text(name, max_length=200)
@@ -717,6 +742,7 @@ def process_tool(
     description="Type a file path into an active Open/Save file dialog and confirm it. Useful for automating file selection in native Windows dialogs.",
 )
 def file_dialog_tool(path: str, action: Literal["open", "save"] = "open") -> str:
+    ensure_com()
     valid, msg = validate_text(path, max_length=500)
     if not valid:
         return f"Validation Error: {msg}"
@@ -765,6 +791,7 @@ def file_dialog_tool(path: str, action: Literal["open", "save"] = "open") -> str
     description="Get display count, resolutions, and positions for all connected monitors. Includes virtual screen dimensions.",
 )
 def multi_monitor_tool() -> str:
+    ensure_com()
     info = desktop.get_monitors()
     monitors = info["monitors"]
     vs = info["virtual_screen"]
@@ -785,6 +812,7 @@ def multi_monitor_tool() -> str:
     description="Get comprehensive system information including OS, CPU, memory, disks, GPU, network, battery, and top processes. No parameters needed.",
 )
 def system_info_tool() -> str:
+    ensure_com()
     ps_script = r"""
 $r = ""
 
@@ -876,6 +904,7 @@ $r
     description="Extract text from the screen or a specific region using Windows built-in OCR (Windows 10+). Returns recognized text.",
 )
 def ocr_tool(region: tuple[int, int, int, int] = None, language: str = "en") -> str:
+    ensure_com()
     if region:
         for val, name in [
             (region[0], "x"),
@@ -951,6 +980,7 @@ def ocr_tool(region: tuple[int, int, int, int] = None, language: str = "en") -> 
 def audio_tool(
     action: Literal["get", "set", "mute", "unmute"], level: int = None
 ) -> str:
+    ensure_com()
     if action == "set" and level is None:
         return "Error: 'level' parameter required for 'set' action."
     if level is not None and (level < 0 or level > 100):
