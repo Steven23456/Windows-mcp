@@ -1,6 +1,6 @@
 import os
 from contextlib import asynccontextmanager
-from fastmcp.utilities.types import Image
+from fastmcp.utilities.types import Image as MCPImage
 from humancursor import SystemCursor
 from platform import system, release
 from markdownify import markdownify
@@ -24,6 +24,7 @@ import ipaddress
 import requests
 import socket
 import time
+from PIL import Image, ImageChops
 import comtypes
 
 
@@ -292,7 +293,7 @@ def state_tool(use_vision: bool = False) -> str | list:
     {scrollable_elements or "No scrollable elements found."}
     """)
     if use_vision:
-        return [state_text, Image(data=desktop_state.screenshot, format="png")]
+        return [state_text, MCPImage(data=desktop_state.screenshot, format="png")]
     return state_text
 
 
@@ -546,7 +547,7 @@ def screenshot_tool(region: tuple[int, int, int, int] = None):
             return "Validation Error: width and height must be greater than 0."
         screenshot = screenshot.crop((x, y, x + w, y + h))
     image_bytes = desktop.screenshot_in_bytes(screenshot=screenshot)
-    return Image(data=image_bytes, format="png")
+    return MCPImage(data=image_bytes, format="png")
 
 
 @mcp.tool(
@@ -1065,6 +1066,740 @@ def audio_tool(
     if status != 0:
         return f"Audio control failed: {response}"
     return response.strip()
+
+
+# ── Shared Helper: Element Lookup ─────────────────────────────────────────
+
+
+def find_control_by_search(search: str) -> "ua.Control | None":
+    """Find a UI Automation Control by text search on its Name (DFS)."""
+    ensure_com()
+    search_lower = search.lower()
+    root = ua.GetRootControl()
+    MAX_DEPTH = 50
+    stack = [(root, 0)]
+    while stack:
+        current, depth = stack.pop()
+        if depth > MAX_DEPTH:
+            continue
+        try:
+            if search_lower in current.Name.lower() and current.Name.strip():
+                return current
+        except Exception:
+            pass
+        try:
+            children = current.GetChildren()
+            for child in reversed(children):
+                stack.append((child, depth + 1))
+        except Exception:
+            pass
+    return None
+
+
+def resolve_control(
+    search: str = None, loc: tuple[int, int] = None
+) -> "tuple[ua.Control | None, str]":
+    """Resolve a UI control by search text or coordinates. Returns (control, error_msg)."""
+    ensure_com()
+    if loc:
+        valid, msg = validate_coordinates(loc)
+        if not valid:
+            return None, f"Validation Error: {msg}"
+        x, y = loc
+        try:
+            control = ua.ControlFromPoint(x, y)
+            if control:
+                return control, ""
+            return None, f"No element found at ({x},{y})."
+        except Exception as e:
+            return None, f"Error finding element at ({x},{y}): {e}"
+    elif search:
+        valid, msg = validate_text(search, max_length=500)
+        if not valid:
+            return None, f"Validation Error: {msg}"
+        control = find_control_by_search(search)
+        if control:
+            return control, ""
+        return None, f'No element found matching "{search}".'
+    else:
+        return None, "Provide either 'search' or 'loc' parameter."
+
+
+def get_control_properties(control: "ua.Control") -> dict:
+    """Extract all available properties and patterns from a UI control."""
+    props = {
+        "name": control.Name.strip(),
+        "control_type": control.ControlTypeName,
+        "is_enabled": control.IsEnabled,
+        "is_offscreen": control.IsOffscreen,
+        "is_keyboard_focusable": control.IsKeyboardFocusable,
+    }
+
+    # Bounding box
+    try:
+        box = control.BoundingRectangle
+        if not box.isempty():
+            props["bounding_box"] = {
+                "left": box.left,
+                "top": box.top,
+                "right": box.right,
+                "bottom": box.bottom,
+                "width": box.width(),
+                "height": box.height(),
+            }
+    except Exception:
+        pass
+
+    # ValuePattern
+    try:
+        vp = control.GetValuePattern()
+        if vp:
+            props["value"] = vp.Value
+            props["is_readonly"] = vp.IsReadOnly
+    except Exception:
+        pass
+
+    # TogglePattern
+    try:
+        tp = control.GetTogglePattern()
+        if tp:
+            state_map = {0: "off", 1: "on", 2: "indeterminate"}
+            props["toggle_state"] = state_map.get(tp.ToggleState, str(tp.ToggleState))
+    except Exception:
+        pass
+
+    # SelectionItemPattern
+    try:
+        sip = control.GetSelectionItemPattern()
+        if sip:
+            props["is_selected"] = sip.IsSelected
+    except Exception:
+        pass
+
+    # RangeValuePattern
+    try:
+        rvp = control.GetRangeValuePattern()
+        if rvp:
+            props["range_value"] = rvp.Value
+            props["range_min"] = rvp.Minimum
+            props["range_max"] = rvp.Maximum
+    except Exception:
+        pass
+
+    # ExpandCollapsePattern
+    try:
+        ecp = control.GetExpandCollapsePattern()
+        if ecp:
+            state_map = {
+                0: "collapsed",
+                1: "expanded",
+                2: "partially_expanded",
+                3: "leaf",
+            }
+            props["expand_state"] = state_map.get(
+                ecp.ExpandCollapseState, str(ecp.ExpandCollapseState)
+            )
+    except Exception:
+        pass
+
+    return props
+
+
+# ── Phase 1: Inspection Tools ─────────────────────────────────────────────
+
+
+@mcp.tool(
+    name="Get-Element-Property-Tool",
+    description="Read detailed properties of a UI element including value, checked state, enabled/disabled, bounding box, and automation patterns. Find by text search or coordinates.",
+)
+def get_element_property_tool(search: str = None, loc: tuple[int, int] = None) -> str:
+    ensure_com()
+    control, err = resolve_control(search, loc)
+    if err:
+        return err
+
+    props = get_control_properties(control)
+    lines = [f"Element: {props.get('name', '(unnamed)')}"]
+    lines.append(f"  ControlType: {props.get('control_type', 'unknown')}")
+    lines.append(f"  Enabled: {props.get('is_enabled', 'unknown')}")
+    lines.append(f"  Offscreen: {props.get('is_offscreen', 'unknown')}")
+    lines.append(
+        f"  KeyboardFocusable: {props.get('is_keyboard_focusable', 'unknown')}"
+    )
+
+    if "bounding_box" in props:
+        bb = props["bounding_box"]
+        lines.append(
+            f"  BoundingBox: ({bb['left']},{bb['top']},{bb['right']},{bb['bottom']}) {bb['width']}x{bb['height']}"
+        )
+
+    if "value" in props:
+        lines.append(f"  Value: {props['value']}")
+        lines.append(f"  ReadOnly: {props.get('is_readonly', 'unknown')}")
+
+    if "toggle_state" in props:
+        lines.append(f"  ToggleState: {props['toggle_state']}")
+
+    if "is_selected" in props:
+        lines.append(f"  Selected: {props['is_selected']}")
+
+    if "range_value" in props:
+        lines.append(
+            f"  RangeValue: {props['range_value']} (min={props['range_min']}, max={props['range_max']})"
+        )
+
+    if "expand_state" in props:
+        lines.append(f"  ExpandState: {props['expand_state']}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool(
+    name="Get-Text-Tool",
+    description="Extract the text content of a specific UI element (input field value, label text, status message). Find by text search or coordinates. Faster and more precise than OCR.",
+)
+def get_text_tool(search: str = None, loc: tuple[int, int] = None) -> str:
+    ensure_com()
+    control, err = resolve_control(search, loc)
+    if err:
+        return err
+
+    # Try ValuePattern first (input fields, editable text)
+    try:
+        vp = control.GetValuePattern()
+        if vp and vp.Value:
+            return vp.Value
+    except Exception:
+        pass
+
+    # Try Name property (labels, buttons, static text)
+    name = control.Name.strip()
+    if name:
+        return name
+
+    # Try LegacyIAccessible as fallback
+    try:
+        legacy = control.GetLegacyIAccessiblePattern()
+        if legacy and legacy.Value:
+            return legacy.Value
+    except Exception:
+        pass
+
+    return f"No text found for element (ControlType: {control.ControlTypeName})."
+
+
+@mcp.tool(
+    name="Assert-Element-Tool",
+    description='Verify a UI element\'s state for testing. Returns PASS or FAIL. Properties: "exists", "enabled", "disabled", "checked", "unchecked", "value", "name", "visible", "focused". For "value" and "name", provide expected text.',
+)
+def assert_element_tool(
+    search: str,
+    property: str,
+    expected: str = "",
+    loc: tuple[int, int] = None,
+) -> str:
+    ensure_com()
+    valid, msg = validate_text(search, max_length=500)
+    if not valid:
+        return f"Validation Error: {msg}"
+
+    # Special case: "exists" check
+    if property == "exists":
+        control, _ = resolve_control(search, loc)
+        if control:
+            return f'PASS: Element "{search}" exists ({control.ControlTypeName}: {control.Name.strip()}).'
+        return f'FAIL: Element "{search}" does not exist.'
+
+    control, err = resolve_control(search, loc)
+    if err:
+        return f"FAIL: Cannot find element — {err}"
+
+    props = get_control_properties(control)
+
+    match property:
+        case "enabled":
+            actual = props.get("is_enabled", False)
+            if actual:
+                return f'PASS: "{search}" is enabled.'
+            return f'FAIL: "{search}" is not enabled.'
+
+        case "disabled":
+            actual = props.get("is_enabled", True)
+            if not actual:
+                return f'PASS: "{search}" is disabled.'
+            return f'FAIL: "{search}" is not disabled (it is enabled).'
+
+        case "checked":
+            actual = props.get("toggle_state", None)
+            if actual == "on":
+                return f'PASS: "{search}" is checked.'
+            return f'FAIL: "{search}" is not checked (toggle_state={actual}).'
+
+        case "unchecked":
+            actual = props.get("toggle_state", None)
+            if actual == "off":
+                return f'PASS: "{search}" is unchecked.'
+            return f'FAIL: "{search}" is not unchecked (toggle_state={actual}).'
+
+        case "value":
+            actual = props.get("value", "")
+            if str(actual) == str(expected):
+                return f'PASS: "{search}" value is "{expected}".'
+            return f'FAIL: "{search}" value is "{actual}", expected "{expected}".'
+
+        case "name":
+            actual = props.get("name", "")
+            if expected.lower() in actual.lower():
+                return (
+                    f'PASS: "{search}" name contains "{expected}" (full: "{actual}").'
+                )
+            return f'FAIL: "{search}" name is "{actual}", expected to contain "{expected}".'
+
+        case "visible":
+            offscreen = props.get("is_offscreen", True)
+            if not offscreen:
+                return f'PASS: "{search}" is visible (on-screen).'
+            return f'FAIL: "{search}" is offscreen.'
+
+        case "focused":
+            try:
+                focused = ua.GetFocusedControl()
+                if focused and search.lower() in focused.Name.lower():
+                    return f'PASS: "{search}" is focused.'
+                actual_name = focused.Name.strip() if focused else "(none)"
+                return f'FAIL: "{search}" is not focused (focused: "{actual_name}").'
+            except Exception as e:
+                return f"FAIL: Could not check focus — {e}"
+
+        case _:
+            return f'Unknown property: "{property}". Use: exists, enabled, disabled, checked, unchecked, value, name, visible, focused.'
+
+
+# ── Phase 2: Pattern Interaction Tools ────────────────────────────────────
+
+
+@mcp.tool(
+    name="Checkbox-Toggle-Tool",
+    description='Toggle a checkbox by name. Use target_state="on" to check, "off" to uncheck, or "toggle" to flip. Returns before/after state.',
+)
+def checkbox_toggle_tool(
+    search: str,
+    loc: tuple[int, int] = None,
+    target_state: Literal["on", "off", "toggle"] = "toggle",
+) -> str:
+    ensure_com()
+    control, err = resolve_control(search, loc)
+    if err:
+        return err
+
+    # Read current state
+    try:
+        tp = control.GetTogglePattern()
+    except Exception:
+        tp = None
+
+    if tp is None:
+        # Fallback: try clicking the element
+        try:
+            box = control.BoundingRectangle
+            x, y = box.xcenter(), box.ycenter()
+            cursor.click_on((x, y))
+            return f'Clicked "{control.Name.strip()}" (no TogglePattern available — used click fallback).'
+        except Exception as e:
+            return f"Error: Element has no TogglePattern and click fallback failed: {e}"
+
+    state_map = {0: "off", 1: "on", 2: "indeterminate"}
+    before = state_map.get(tp.ToggleState, str(tp.ToggleState))
+
+    if target_state != "toggle" and before == target_state:
+        return f'Already in desired state: "{control.Name.strip()}" is {before}.'
+
+    tp.Toggle()
+    time.sleep(0.3)
+
+    # Re-read state
+    try:
+        tp2 = control.GetTogglePattern()
+        after = state_map.get(tp2.ToggleState, str(tp2.ToggleState))
+    except Exception:
+        after = "unknown"
+
+    return f'Toggled "{control.Name.strip()}": {before} → {after}'
+
+
+@mcp.tool(
+    name="Select-Option-Tool",
+    description="Select an item from a dropdown, combobox, or list by text. Expands the control if needed and selects the matching option.",
+)
+def select_option_tool(search: str, option: str, loc: tuple[int, int] = None) -> str:
+    ensure_com()
+    control, err = resolve_control(search, loc)
+    if err:
+        return err
+
+    valid, msg = validate_text(option, max_length=500)
+    if not valid:
+        return f"Validation Error: {msg}"
+
+    # Try to expand the control first
+    try:
+        ecp = control.GetExpandCollapsePattern()
+        if ecp and ecp.ExpandCollapseState == 0:  # Collapsed
+            ecp.Expand()
+            time.sleep(0.5)
+    except Exception:
+        # No expand pattern — try clicking to open
+        try:
+            box = control.BoundingRectangle
+            cursor.click_on((box.xcenter(), box.ycenter()))
+            time.sleep(0.5)
+        except Exception:
+            pass
+
+    # Search children for the option
+    option_lower = option.lower()
+    MAX_DEPTH = 10
+    stack = [(control, 0)]
+    found = None
+    while stack:
+        current, depth = stack.pop()
+        if depth > MAX_DEPTH:
+            continue
+        try:
+            if option_lower in current.Name.lower() and current.Name.strip():
+                found = current
+                break
+        except Exception:
+            pass
+        try:
+            children = current.GetChildren()
+            for child in reversed(children):
+                stack.append((child, depth + 1))
+        except Exception:
+            pass
+
+    if not found:
+        # Collapse back if we expanded
+        try:
+            ecp = control.GetExpandCollapsePattern()
+            if ecp:
+                ecp.Collapse()
+        except Exception:
+            pass
+        return f'Option "{option}" not found in "{control.Name.strip()}".'
+
+    # Try SelectionItemPattern
+    try:
+        sip = found.GetSelectionItemPattern()
+        if sip:
+            sip.Select()
+            return f'Selected "{found.Name.strip()}" in "{control.Name.strip()}".'
+    except Exception:
+        pass
+
+    # Fallback: click the option
+    try:
+        box = found.BoundingRectangle
+        cursor.click_on((box.xcenter(), box.ycenter()))
+        return f'Clicked option "{found.Name.strip()}" in "{control.Name.strip()}".'
+    except Exception as e:
+        return f"Error selecting option: {e}"
+
+
+@mcp.tool(
+    name="Focus-Tool",
+    description="Set keyboard focus to a UI element by name or coordinates, without clicking. Useful for testing tab order and focus behavior.",
+)
+def focus_tool(search: str = None, loc: tuple[int, int] = None) -> str:
+    ensure_com()
+    control, err = resolve_control(search, loc)
+    if err:
+        return err
+
+    try:
+        control.SetFocus()
+        return f'Focused: "{control.Name.strip()}" ({control.ControlTypeName})'
+    except Exception as e:
+        return f"Failed to set focus: {e}"
+
+
+# ── Phase 3: Independent Tools ────────────────────────────────────────────
+
+
+@mcp.tool(
+    name="Hover-Tool",
+    description="Move cursor to coordinates and hover for a duration. Triggers hover states like tooltips and dropdown menus. Returns the element name under cursor.",
+)
+def hover_tool(loc: tuple[int, int], duration: float = 1.0) -> str:
+    ensure_com()
+    valid, msg = validate_coordinates(loc)
+    if not valid:
+        return f"Validation Error: {msg}"
+    if duration < 0 or duration > 30:
+        return "Validation Error: duration must be between 0 and 30 seconds."
+
+    x, y = loc
+    cursor.move_to(loc)
+    time.sleep(duration)
+
+    # Report what's under cursor after hover
+    try:
+        control = ua.ControlFromPoint(x, y)
+        name = control.Name.strip() if control else "(unknown)"
+        ctrl_type = control.ControlTypeName if control else ""
+        return f"Hovered at ({x},{y}) for {duration}s — element: {name} [{ctrl_type}]"
+    except Exception:
+        return f"Hovered at ({x},{y}) for {duration}s."
+
+
+@mcp.tool(
+    name="Compare-Screenshot-Tool",
+    description="Compare current screen (or region) against a baseline image file. Returns MATCH/MISMATCH with pixel difference percentage. Saves current as baseline if file doesn't exist.",
+)
+def compare_screenshot_tool(
+    baseline: str,
+    region: tuple[int, int, int, int] = None,
+    threshold: float = 5.0,
+) -> str:
+    ensure_com()
+    valid, msg = validate_text(baseline, max_length=500)
+    if not valid:
+        return f"Validation Error: {msg}"
+    if threshold < 0 or threshold > 100:
+        return "Validation Error: threshold must be between 0 and 100."
+
+    # Capture current screenshot
+    current = desktop.get_screenshot(scale=1.0)
+    if region:
+        x, y, w, h = region
+        for val, name in [(x, "x"), (y, "y"), (w, "width"), (h, "height")]:
+            if not isinstance(val, int) or val < 0:
+                return f"Validation Error: {name} must be a non-negative integer."
+            if val > MAX_SCREEN_COORD:
+                return f"Validation Error: {name} exceeds maximum ({MAX_SCREEN_COORD})."
+        current = current.crop((x, y, x + w, y + h))
+
+    # Load or create baseline
+    if not os.path.exists(baseline):
+        current.save(baseline, format="PNG")
+        return f"No baseline found. Saved current screenshot as baseline: {baseline}"
+
+    try:
+        baseline_img = Image.open(baseline)
+    except Exception as e:
+        return f"Error loading baseline: {e}"
+
+    # Resize if dimensions differ
+    if current.size != baseline_img.size:
+        return (
+            f"MISMATCH: Size differs — current {current.size} vs baseline {baseline_img.size}. "
+            f"Delete baseline to regenerate."
+        )
+
+    # Pixel-by-pixel comparison
+    diff = ImageChops.difference(current.convert("RGB"), baseline_img.convert("RGB"))
+    pixels = list(diff.getdata())
+    total_pixels = len(pixels)
+    diff_pixels = sum(1 for r, g, b in pixels if r + g + b > 30)  # threshold per pixel
+    diff_pct = (diff_pixels / total_pixels) * 100 if total_pixels > 0 else 0
+
+    if diff_pct <= threshold:
+        return f"MATCH (diff: {diff_pct:.2f}%, threshold: {threshold}%)"
+    else:
+        # Save diff image for inspection
+        diff_path = baseline.replace(".png", "_diff.png")
+        try:
+            diff_enhanced = ImageChops.multiply(
+                diff, Image.new("RGB", diff.size, (5, 5, 5))
+            )
+            diff_enhanced.save(diff_path, format="PNG")
+        except Exception:
+            diff_path = "(could not save diff)"
+        return f"MISMATCH (diff: {diff_pct:.2f}%, threshold: {threshold}%). Diff saved: {diff_path}"
+
+
+# ── Phase 4: Complex Tools ────────────────────────────────────────────────
+
+
+@mcp.tool(
+    name="Get-Table-Tool",
+    description="Extract tabular data from a grid, table, or list control. Returns data as a markdown table. Find the table by text search or coordinates.",
+)
+def get_table_tool(
+    search: str = None, loc: tuple[int, int] = None, max_rows: int = 50
+) -> str:
+    ensure_com()
+    control, err = resolve_control(search, loc)
+    if err:
+        return err
+
+    if max_rows < 1 or max_rows > 500:
+        return "Validation Error: max_rows must be between 1 and 500."
+
+    # Try GridPattern first
+    try:
+        gp = control.GetGridPattern()
+        if gp:
+            row_count = min(gp.RowCount, max_rows)
+            col_count = gp.ColumnCount
+            if row_count == 0 or col_count == 0:
+                return "Table is empty (0 rows or 0 columns)."
+
+            rows = []
+            for r in range(row_count):
+                row = []
+                for c in range(col_count):
+                    try:
+                        cell = gp.GetItem(r, c)
+                        row.append(cell.Name.strip() if cell else "")
+                    except Exception:
+                        row.append("")
+                rows.append(row)
+
+            # Build markdown table
+            if not rows:
+                return "No data extracted from table."
+            header = rows[0]
+            lines = ["| " + " | ".join(header) + " |"]
+            lines.append("| " + " | ".join(["---"] * len(header)) + " |")
+            for row in rows[1:]:
+                lines.append("| " + " | ".join(row) + " |")
+            return "\n".join(lines)
+    except Exception:
+        pass
+
+    # Fallback: traverse children to extract row/cell data
+    rows = []
+    try:
+        children = control.GetChildren()
+        for i, child in enumerate(children):
+            if i >= max_rows:
+                break
+            # Try to get cells from row children
+            cells = child.GetChildren()
+            if cells:
+                row = [c.Name.strip() for c in cells]
+                rows.append(row)
+            elif child.Name.strip():
+                rows.append([child.Name.strip()])
+    except Exception as e:
+        return f"Error extracting table data: {e}"
+
+    if not rows:
+        return f'No tabular data found in "{control.Name.strip()}".'
+
+    # Normalize column count
+    max_cols = max(len(r) for r in rows)
+    for row in rows:
+        while len(row) < max_cols:
+            row.append("")
+
+    header = rows[0]
+    lines = ["| " + " | ".join(header) + " |"]
+    lines.append("| " + " | ".join(["---"] * len(header)) + " |")
+    for row in rows[1:]:
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines)
+
+
+@mcp.tool(
+    name="Record-Replay-Tool",
+    description='Save and replay sequences of UI actions. Use action="save" with steps and name to save, "replay" with name to execute, "load" to view steps, "list" to see all recordings.',
+)
+def record_replay_tool(
+    action: Literal["save", "replay", "load", "list"],
+    name: str = None,
+    steps: list[dict] = None,
+) -> str:
+    ensure_com()
+    import json
+
+    recordings_dir = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "recordings"
+    )
+    os.makedirs(recordings_dir, exist_ok=True)
+
+    if action == "list":
+        files = [f for f in os.listdir(recordings_dir) if f.endswith(".json")]
+        if not files:
+            return "No recordings saved."
+        return "Saved recordings:\n" + "\n".join(
+            f"  - {f.replace('.json', '')}" for f in files
+        )
+
+    if not name:
+        return "Error: 'name' parameter required for save/replay/load."
+
+    valid, msg = validate_text(name, max_length=100)
+    if not valid:
+        return f"Validation Error: {msg}"
+
+    # Sanitize name for filename
+    safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ").strip()
+    filepath = os.path.join(recordings_dir, f"{safe_name}.json")
+
+    if action == "save":
+        if not steps:
+            return "Error: 'steps' parameter required for save action."
+        if len(steps) > 100:
+            return "Validation Error: Maximum 100 steps per recording."
+        # Validate step format
+        for i, step in enumerate(steps):
+            if "tool" not in step or "params" not in step:
+                return f'Validation Error: Step {i} must have "tool" and "params" keys.'
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump({"name": name, "steps": steps}, f, indent=2)
+        return f'Saved recording "{name}" with {len(steps)} steps to {filepath}.'
+
+    if action == "load":
+        if not os.path.exists(filepath):
+            return f'Recording "{name}" not found.'
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        steps_text = json.dumps(data["steps"], indent=2)
+        return f'Recording "{name}" ({len(data["steps"])} steps):\n{steps_text}'
+
+    if action == "replay":
+        if not os.path.exists(filepath):
+            return f'Recording "{name}" not found.'
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Map tool names to functions
+        tool_map = {
+            "Click-Tool": click_tool,
+            "Type-Tool": type_tool,
+            "Key-Tool": key_tool,
+            "Shortcut-Tool": shortcut_tool,
+            "Move-Tool": move_tool,
+            "Scroll-Tool": scroll_tool,
+            "Wait-Tool": wait_tool,
+            "Drag-Tool": drag_tool,
+            "Launch-Tool": launch_tool,
+            "Switch-Tool": switch_tool,
+            "Focus-Tool": focus_tool,
+            "Checkbox-Toggle-Tool": checkbox_toggle_tool,
+            "Select-Option-Tool": select_option_tool,
+            "Hover-Tool": hover_tool,
+        }
+
+        results = []
+        for i, step in enumerate(data["steps"]):
+            tool_name = step["tool"]
+            params = step["params"]
+            func = tool_map.get(tool_name)
+            if not func:
+                results.append(f"Step {i + 1}: SKIP — unknown tool '{tool_name}'")
+                continue
+            try:
+                result = func(**params)
+                results.append(f"Step {i + 1} ({tool_name}): {result}")
+            except Exception as e:
+                results.append(f"Step {i + 1} ({tool_name}): ERROR — {e}")
+                break  # Stop on error
+        return f'Replay "{name}" complete:\n' + "\n".join(results)
+
+    return f"Unknown action: {action}"
 
 
 if __name__ == "__main__":
