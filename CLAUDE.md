@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Windows-MCP is an MCP server that enables AI agents to interact with Windows OS through UI automation and a11y (accessibility) tree traversal.
 
-**Version**: 0.5.2 | **Platform**: Windows 7-11 | **Python**: 3.13+ | **Entry Point**: `main.py`
+**Version**: 0.5.3 | **Platform**: Windows 7-11 | **Python**: 3.13+ | **Entry Point**: `main.py`
 
 ## Architecture
 

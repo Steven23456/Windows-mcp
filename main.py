@@ -198,21 +198,21 @@ def get_security_config() -> str:
 )
 def launch_tool(name: str) -> str:
     ensure_com()
-    _, status = desktop.launch_app(name)
+    result, status = desktop.launch_app(name)
     if status != 0:
-        return f"Failed to launch {name.title()}."
-    else:
-        return f"Launched {name.title()}."
+        return f"Failed: {result}"
+    return f"Launched {name.title()}."
 
 
 @mcp.tool(
     name="Start-Process-Tool",
-    description='Launch a detached process that runs independently (survives after MCP server restarts). Use for GUI apps, scripts, long-running tasks. Returns the PID for tracking. Examples: executable="python" args=["script.py"], executable="powershell" args=["-File", "app.ps1"].',
+    description='Launch a detached process that runs independently (survives after MCP server restarts). Returns the PID for tracking. Set gui=True for scripts that create windows (WPF, tkinter, GUI apps). Examples: executable="python" args=["script.py"], executable="powershell" args=["-File", "app.ps1"] gui=True.',
 )
 def start_process_tool(
     executable: str,
     args: list[str] = None,
     workingDir: str = None,
+    gui: bool = False,
 ) -> str:
     ensure_com()
     # Validate executable against blocked commands
@@ -238,19 +238,34 @@ def start_process_tool(
     cmd = [executable] + (args or [])
 
     try:
-        # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
-        creation_flags = (
-            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-        )
-        proc = subprocess.Popen(
-            cmd,
-            cwd=workingDir,
-            creationflags=creation_flags,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-        )
-        return f"Started detached process: {executable} (PID: {proc.pid})"
+        if gui:
+            # GUI mode: CREATE_NEW_PROCESS_GROUP only — keeps window station
+            # intact so ShowDialog/WPF Dispatcher can render windows properly.
+            # CREATE_NO_WINDOW hides the console but preserves the message pump.
+            creation_flags = (
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+            )
+            proc = subprocess.Popen(
+                cmd,
+                cwd=workingDir,
+                creationflags=creation_flags,
+                stdin=subprocess.DEVNULL,
+            )
+        else:
+            # Background mode: fully detached, no console, no stdio
+            creation_flags = (
+                subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            )
+            proc = subprocess.Popen(
+                cmd,
+                cwd=workingDir,
+                creationflags=creation_flags,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+            )
+        mode = "GUI" if gui else "detached"
+        return f"Started {mode} process: {executable} (PID: {proc.pid})"
     except FileNotFoundError:
         return f"Error: Executable not found: {executable}"
     except Exception as e:
@@ -434,11 +449,10 @@ def type_tool(loc: tuple[int, int], text: str, clear: bool = False) -> str:
 )
 def switch_tool(name: str) -> str:
     ensure_com()
-    _, status = desktop.switch_app(name)
+    result, status = desktop.switch_app(name)
     if status != 0:
-        return f"Failed to switch to {name.title()} window."
-    else:
-        return f"Switched to {name.title()} window."
+        return f"Failed: {result}"
+    return result
 
 
 @mcp.tool(
@@ -1124,12 +1138,40 @@ def audio_tool(
 # ── Shared Helper: Element Lookup ─────────────────────────────────────────
 
 
+INTERACTIVE_CONTROL_TYPES = {
+    "ButtonControl",
+    "CheckBoxControl",
+    "ComboBoxControl",
+    "EditControl",
+    "HyperlinkControl",
+    "ListControl",
+    "ListItemControl",
+    "MenuBarControl",
+    "MenuControl",
+    "MenuItemControl",
+    "RadioButtonControl",
+    "ScrollBarControl",
+    "SliderControl",
+    "SpinnerControl",
+    "TabControl",
+    "TabItemControl",
+    "TreeControl",
+    "TreeItemControl",
+    "DataGridControl",
+}
+
+
 def find_control_by_search(search: str) -> "ua.Control | None":
-    """Find a UI Automation Control by text search on its Name (DFS)."""
+    """Find a UI Automation Control by text search on its Name (DFS).
+
+    Prefers interactive controls (buttons, inputs, combos) over static
+    text/labels when multiple elements match the search string.
+    """
     ensure_com()
     search_lower = search.lower()
     root = ua.GetRootControl()
     MAX_DEPTH = 50
+    first_match = None
     stack = [(root, 0)]
     while stack:
         current, depth = stack.pop()
@@ -1137,7 +1179,12 @@ def find_control_by_search(search: str) -> "ua.Control | None":
             continue
         try:
             if search_lower in current.Name.lower() and current.Name.strip():
-                return current
+                # Interactive control? Return immediately.
+                if current.ControlTypeName in INTERACTIVE_CONTROL_TYPES:
+                    return current
+                # Otherwise remember first match as fallback
+                if first_match is None:
+                    first_match = current
         except Exception:
             pass
         try:
@@ -1146,7 +1193,7 @@ def find_control_by_search(search: str) -> "ua.Control | None":
                 stack.append((child, depth + 1))
         except Exception:
             pass
-    return None
+    return first_match
 
 
 def resolve_control(

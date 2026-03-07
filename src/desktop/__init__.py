@@ -121,16 +121,18 @@ class Desktop:
         apps = {app.name: app for app in apps_list}
         matched_app = process.extractOne(name, list(apps.keys()), score_cutoff=40)
         if matched_app is None:
-            return (f"Application {name.title()} not found.", 1)
-        app_name, _ = matched_app
+            return (f"No window matching '{name}' found.", 1)
+        app_name, score = matched_app
         app = apps.get(app_name)
         # Restore if minimized, then bring to foreground
         SW_RESTORE = 9
         ctypes.windll.user32.ShowWindow(app.handle, SW_RESTORE)
         if SetWindowTopmost(app.handle, isTopmost=True):
-            return (f"{app_name.title()} switched to foreground.", 0)
+            # Clear topmost so window behaves normally after switching
+            SetWindowTopmost(app.handle, isTopmost=False)
+            return (f"Switched to '{app_name}' (score: {score}).", 0)
         else:
-            return (f"Failed to switch to {app_name.title()}.", 1)
+            return (f"Failed to bring '{app_name}' to foreground.", 1)
 
     def get_app_size(self, control: Control):
         window = control.BoundingRectangle
@@ -193,7 +195,7 @@ class Desktop:
         app_names = {app.name: app for app in apps}
         matched = process.extractOne(name, list(app_names.keys()), score_cutoff=40)
         if matched is None:
-            return (f"Application '{name}' not found.", 1)
+            return (f"No window matching '{name}' found.", 1)
         app_name, score = matched
         app = app_names[app_name]
         handle = app.handle
