@@ -99,7 +99,7 @@ class Desktop:
 
     def launch_app(self, name: str):
         apps_map = self.get_apps_from_start_menu()
-        matched_app = process.extractOne(name, apps_map.keys())
+        matched_app = process.extractOne(name, apps_map.keys(), score_cutoff=40)
         if matched_app is None:
             return (f"Application {name.title()} not found in start menu.", 1)
         app_name, _ = matched_app
@@ -115,12 +115,18 @@ class Desktop:
         return response, status
 
     def switch_app(self, name: str) -> tuple[str, int]:
-        apps = {app.name: app for app in self.desktop_state.apps}
-        matched_app: tuple[str, float] = process.extractOne(name, list(apps.keys()))
+        import ctypes
+
+        apps_list = self.get_apps()
+        apps = {app.name: app for app in apps_list}
+        matched_app = process.extractOne(name, list(apps.keys()), score_cutoff=40)
         if matched_app is None:
             return (f"Application {name.title()} not found.", 1)
         app_name, _ = matched_app
         app = apps.get(app_name)
+        # Restore if minimized, then bring to foreground
+        SW_RESTORE = 9
+        ctypes.windll.user32.ShowWindow(app.handle, SW_RESTORE)
         if SetWindowTopmost(app.handle, isTopmost=True):
             return (f"{app_name.title()} switched to foreground.", 0)
         else:
@@ -133,11 +139,11 @@ class Desktop:
         return Size(width=window.width(), height=window.height())
 
     def is_app_visible(self, app) -> bool:
-        is_minimized = self.get_app_status(app) != "Minimized"
+        is_not_minimized = self.get_app_status(app) != "Minimized"
         size = self.get_app_size(app)
         area = size.width * size.height
         is_overlay = self.is_overlay_app(app)
-        return not is_overlay and is_minimized and area > 10
+        return not is_overlay and is_not_minimized and area > 10
 
     def is_overlay_app(self, element: Control) -> bool:
         no_children = len(element.GetChildren()) == 0
@@ -185,7 +191,7 @@ class Desktop:
 
         apps = self.get_apps()
         app_names = {app.name: app for app in apps}
-        matched = process.extractOne(name, list(app_names.keys()))
+        matched = process.extractOne(name, list(app_names.keys()), score_cutoff=40)
         if matched is None:
             return (f"Application '{name}' not found.", 1)
         app_name, score = matched
