@@ -25,6 +25,7 @@ import requests
 import socket
 import time
 from PIL import Image, ImageChops
+import subprocess
 import comtypes
 
 
@@ -202,6 +203,58 @@ def launch_tool(name: str) -> str:
         return f"Failed to launch {name.title()}."
     else:
         return f"Launched {name.title()}."
+
+
+@mcp.tool(
+    name="Start-Process-Tool",
+    description='Launch a detached process that runs independently (survives after MCP server restarts). Use for GUI apps, scripts, long-running tasks. Returns the PID for tracking. Examples: executable="python" args=["script.py"], executable="powershell" args=["-File", "app.ps1"].',
+)
+def start_process_tool(
+    executable: str,
+    args: list[str] = None,
+    workingDir: str = None,
+) -> str:
+    ensure_com()
+    # Validate executable against blocked commands
+    exe_name = os.path.basename(executable).lower()
+    exe_name = exe_name.removesuffix(".exe").removesuffix(".cmd").removesuffix(".bat")
+    if exe_name in BLOCKED_COMMANDS:
+        return f"Security Error: Blocked executable: {exe_name}"
+
+    # Validate args against blocked arguments
+    if args:
+        for arg in args:
+            if arg.lower() in BLOCKED_ARGUMENTS:
+                return f"Security Error: Blocked argument: {arg}"
+
+    # Validate working directory against allowed paths
+    if workingDir and ALLOWED_PATHS:
+        resolved = os.path.normpath(os.path.abspath(workingDir)).lower()
+        if not any(
+            resolved.startswith(os.path.normpath(p).lower()) for p in ALLOWED_PATHS
+        ):
+            return f"Security Error: Working directory '{workingDir}' is outside allowed paths."
+
+    cmd = [executable] + (args or [])
+
+    try:
+        # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
+        creation_flags = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        )
+        proc = subprocess.Popen(
+            cmd,
+            cwd=workingDir,
+            creationflags=creation_flags,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+        return f"Started detached process: {executable} (PID: {proc.pid})"
+    except FileNotFoundError:
+        return f"Error: Executable not found: {executable}"
+    except Exception as e:
+        return f"Error starting process: {e}"
 
 
 @mcp.tool(
