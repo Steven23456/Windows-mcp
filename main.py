@@ -1902,5 +1902,386 @@ def record_replay_tool(
     return f"Unknown action: {action}"
 
 
-if __name__ == "__main__":
-    mcp.run()
+# ── Disk Analysis & File Management Tools ─────────────────────────────────────
+
+import re as _re
+from datetime import datetime as _datetime
+
+
+def _sanitize_path(val: str) -> str:
+    """Reject paths with PowerShell metacharacters that could enable injection."""
+    if _re.search(r"['\"`$;|&{}()]", val):
+        raise ValueError(f"Path contains unsafe characters: {val!r}")
+    return val
+
+
+def _sanitize_name(val: str) -> str:
+    """Reject filenames with path separators or PS metacharacters."""
+    if _re.search(r"['\"`$;|&{}()\\/]", val):
+        raise ValueError(f"Name contains unsafe characters: {val!r}")
+    return val
+
+
+def _validate_date(val: str, param: str) -> str:
+    """Validate date is YYYY-MM-DD format."""
+    try:
+        _datetime.strptime(val, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError(f"Invalid date for {param}: must be YYYY-MM-DD, got {val!r}")
+    return val
+
+
+def _validate_extension(val: str) -> str:
+    """Validate extension is alphanumeric only."""
+    cleaned = val.strip().strip(".")
+    if not _re.match(r"^[a-zA-Z0-9]+$", cleaned):
+        raise ValueError(f"Invalid extension: {val!r}")
+    return cleaned
+
+
+def _check_allowed_path(path: str) -> str:
+    """Verify path is within ALLOWED_PATHS restrictions."""
+    if ALLOWED_PATHS:
+        resolved = os.path.normpath(os.path.abspath(path)).lower()
+        if not any(
+            resolved.startswith(os.path.normpath(ap).lower()) for ap in ALLOWED_PATHS
+        ):
+            raise ValueError(f"Path not in allowed paths: {path}")
+    return path
+
+
+@mcp.tool(
+    name="Disk-Analysis-Tool",
+    description="Analyze disk usage for a folder or drive. Returns top subfolders by size, free/used space, and file count. Parameters: path (folder path, default C:\\), depth (subfolder depth 1-3, default 1), minSizeMB (minimum folder size to report, default 100).",
+)
+def disk_analysis_tool(path: str = "C:\\", depth: int = 1, minSizeMB: int = 100) -> str:
+    try:
+        path = _sanitize_path(path)
+        _check_allowed_path(path)
+    except ValueError as e:
+        return f"Error: {e}"
+    depth = max(1, min(3, depth))
+    ps_script = f"""
+$target = '{path}'
+$depth = {depth}
+$minBytes = {minSizeMB} * 1MB
+$r = ""
+
+# Drive info
+$drive = Get-PSDrive -PSProvider FileSystem | Where-Object {{ $target.StartsWith($_.Root) }} | Select-Object -First 1
+if ($drive) {{
+    $r += "=== Drive $($drive.Name): ===`n"
+    $r += "  Used: $([math]::Round($drive.Used/1GB,1)) GB`n"
+    $r += "  Free: $([math]::Round($drive.Free/1GB,1)) GB`n"
+    $r += "  Total: $([math]::Round(($drive.Used+$drive.Free)/1GB,1)) GB`n`n"
+}}
+
+# Folder sizes
+$r += "=== Folders > {minSizeMB} MB in $target (depth $depth) ===`n"
+$folders = Get-ChildItem -Path $target -Directory -Depth ($depth - 1) -Force -ErrorAction SilentlyContinue | ForEach-Object {{
+    $size = (Get-ChildItem $_.FullName -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
+    if ($size -gt $minBytes) {{
+        [PSCustomObject]@{{ Name = $_.Name; SizeGB = [math]::Round($size/1GB,2); SizeMB = [math]::Round($size/1MB,0); Path = $_.FullName }}
+    }}
+}} | Sort-Object SizeGB -Descending
+foreach ($f in $folders) {{
+    $r += "  $($f.SizeGB.ToString('0.00').PadLeft(8)) GB  $($f.Name)`n"
+}}
+
+# File count
+$fileCount = (Get-ChildItem -Path $target -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object).Count
+$r += "`nTotal files: $fileCount`n"
+
+Write-Output $r
+"""
+    valid, msg = validate_command(ps_script)
+    if not valid:
+        return f"Security Error: {msg}"
+    response, status = desktop.execute_command(ps_script, timeout=120)
+    if status != 0:
+        return f"Disk analysis failed. Check server logs."
+    return response.strip()
+
+
+@mcp.tool(
+    name="Disk-Cleanup-Tool",
+    description="Find reclaimable disk space: temp files, caches (npm, pip, bun, nuget), node_modules, Recycle Bin, browser caches, Windows Update cache. Returns sizes for each category. Does NOT delete anything — only reports.",
+)
+def disk_cleanup_tool() -> str:
+    ps_script = r"""
+$r = "=== Reclaimable Disk Space ===`n`n"
+
+# User Temp
+$size = (Get-ChildItem $env:TEMP -Recurse -Force -File -EA SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB
+$r += "User Temp:           $([math]::Round($size,2)) GB  ($env:TEMP)`n"
+
+# Windows Temp
+$size = (Get-ChildItem "C:\Windows\Temp" -Recurse -Force -File -EA SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB
+$r += "Windows Temp:        $([math]::Round($size,2)) GB  (C:\Windows\Temp)`n"
+
+# npm cache
+$npmPath = "$env:LOCALAPPDATA\npm-cache"
+if (Test-Path $npmPath) {
+    $size = (Get-ChildItem $npmPath -Recurse -Force -File -EA SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB
+    $r += "npm cache:           $([math]::Round($size,2)) GB  ($npmPath)`n"
+}
+
+# pip cache
+$pipPath = "$env:LOCALAPPDATA\pip\Cache"
+if (Test-Path $pipPath) {
+    $size = (Get-ChildItem $pipPath -Recurse -Force -File -EA SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB
+    $r += "pip cache:           $([math]::Round($size,2)) GB  ($pipPath)`n"
+}
+
+# bun cache
+$bunPath = "$env:USERPROFILE\.bun\install\cache"
+if (Test-Path $bunPath) {
+    $size = (Get-ChildItem $bunPath -Recurse -Force -File -EA SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB
+    $r += "bun cache:           $([math]::Round($size,2)) GB  ($bunPath)`n"
+}
+
+# Windows Update
+$size = (Get-ChildItem "C:\Windows\SoftwareDistribution" -Recurse -Force -File -EA SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB
+$r += "Windows Update:      $([math]::Round($size,2)) GB`n"
+
+# Chrome cache
+$chromePath = "$env:LOCALAPPDATA\Google\Chrome\User Data"
+if (Test-Path $chromePath) {
+    $size = (Get-ChildItem $chromePath -Recurse -Force -File -EA SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB
+    $r += "Chrome data:         $([math]::Round($size,2)) GB`n"
+}
+
+# Recycle Bin
+try {
+    $shell = New-Object -ComObject Shell.Application
+    $rbSize = ($shell.NameSpace(0xA).Items() | ForEach-Object { $_.Size } | Measure-Object -Sum).Sum / 1GB
+    $r += "Recycle Bin:         $([math]::Round($rbSize,2)) GB`n"
+} catch {
+    $r += "Recycle Bin:         (could not measure)`n"
+}
+
+$r += "`n=== node_modules (> 100 MB) ===`n"
+Get-ChildItem -Path $env:USERPROFILE -Directory -Recurse -Force -Filter "node_modules" -EA SilentlyContinue -Depth 3 | Select-Object -First 20 | ForEach-Object {
+    $size = (Get-ChildItem $_.FullName -Recurse -Force -File -EA SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB
+    if ($size -gt 0.1) { $r += "  $([math]::Round($size,2).ToString('0.00').PadLeft(6)) GB  $($_.FullName)`n" }
+}
+
+Write-Output $r
+"""
+    response, status = desktop.execute_command(ps_script, timeout=300)
+    if status != 0:
+        return f"Disk cleanup scan failed: {response}"
+    return response.strip()
+
+
+@mcp.tool(
+    name="File-Search-Tool",
+    description="Search for files by name pattern, extension, size, or date. Parameters: path (search root), pattern (wildcard, e.g. '*.pdf'), minSizeMB (optional), maxSizeMB (optional), newerThan (optional, e.g. '2026-01-01'), olderThan (optional), limit (max results, default 50).",
+)
+def file_search_tool(
+    path: str,
+    pattern: str = "*",
+    minSizeMB: float = 0,
+    maxSizeMB: float = 0,
+    newerThan: str = "",
+    olderThan: str = "",
+    limit: int = 50,
+) -> str:
+    try:
+        path = _sanitize_path(path)
+        _check_allowed_path(path)
+        if not _re.match(r"^[a-zA-Z0-9*?._\-\\ ]+$", pattern):
+            return f"Error: pattern contains unsafe characters: {pattern!r}"
+        if newerThan:
+            newerThan = _validate_date(newerThan, "newerThan")
+        if olderThan:
+            olderThan = _validate_date(olderThan, "olderThan")
+    except ValueError as e:
+        return f"Error: {e}"
+    limit = min(limit, 200)
+    filters = []
+    if minSizeMB > 0:
+        filters.append(f"$_.Length -gt {int(minSizeMB * 1024 * 1024)}")
+    if maxSizeMB > 0:
+        filters.append(f"$_.Length -lt {int(maxSizeMB * 1024 * 1024)}")
+    if newerThan:
+        filters.append(f"$_.LastWriteTime -gt '{newerThan}'")
+    if olderThan:
+        filters.append(f"$_.LastWriteTime -lt '{olderThan}'")
+
+    where_clause = ""
+    if filters:
+        where_clause = "| Where-Object { " + " -and ".join(filters) + " }"
+
+    ps_script = f"""
+$results = Get-ChildItem -Path '{path}' -Filter '{pattern}' -Recurse -Force -File -EA SilentlyContinue {where_clause} | Sort-Object Length -Descending | Select-Object -First {limit}
+$r = "Found $($results.Count) files:`n`n"
+foreach ($f in $results) {{
+    $sizeMB = [math]::Round($f.Length/1MB, 1)
+    $date = $f.LastWriteTime.ToString('yyyy-MM-dd')
+    $r += "$($sizeMB.ToString().PadLeft(10)) MB  $date  $($f.FullName)`n"
+}}
+Write-Output $r
+"""
+    valid, msg = validate_command(ps_script)
+    if not valid:
+        return f"Security Error: {msg}"
+    response, status = desktop.execute_command(ps_script, timeout=120)
+    if status != 0:
+        return f"File search failed. Check server logs."
+    return response.strip()
+
+
+@mcp.tool(
+    name="File-Manage-Tool",
+    description="Manage files: copy, move, rename, or get info. Actions: 'copy' (src→dst), 'move' (src→dst), 'rename' (path, newName), 'info' (path — returns size, dates, attributes), 'list' (path — list directory contents with sizes).",
+)
+def file_manage_tool(
+    action: str,
+    path: str,
+    destination: str = "",
+    newName: str = "",
+) -> str:
+    try:
+        path = _sanitize_path(path)
+        _check_allowed_path(path)
+        if destination:
+            destination = _sanitize_path(destination)
+            _check_allowed_path(destination)
+        if newName:
+            _sanitize_name(newName)
+    except ValueError as e:
+        return f"Error: {e}"
+    if action == "info":
+        ps_script = f"""
+$item = Get-Item -LiteralPath '{path}' -Force
+$r = "Path: $($item.FullName)`n"
+$r += "Type: $(if ($item.PSIsContainer) {{ 'Directory' }} else {{ 'File' }})`n"
+if (-not $item.PSIsContainer) {{
+    $r += "Size: $([math]::Round($item.Length/1MB,2)) MB ($($item.Length) bytes)`n"
+}}
+$r += "Created: $($item.CreationTime.ToString('yyyy-MM-dd HH:mm:ss'))`n"
+$r += "Modified: $($item.LastWriteTime.ToString('yyyy-MM-dd HH:mm:ss'))`n"
+$r += "Accessed: $($item.LastAccessTime.ToString('yyyy-MM-dd HH:mm:ss'))`n"
+$r += "Attributes: $($item.Attributes)`n"
+if ($item.PSIsContainer) {{
+    $childCount = (Get-ChildItem -LiteralPath '{path}' -Force -EA SilentlyContinue).Count
+    $r += "Children: $childCount items`n"
+}}
+Write-Output $r
+"""
+    elif action == "list":
+        ps_script = f"""
+$items = Get-ChildItem -LiteralPath '{path}' -Force -EA SilentlyContinue | Sort-Object {{ -not $_.PSIsContainer }}, Name
+$r = "Contents of {path}:`n`n"
+foreach ($item in $items) {{
+    if ($item.PSIsContainer) {{
+        $r += "  [DIR]                $($item.Name)`n"
+    }} else {{
+        $sizeMB = [math]::Round($item.Length/1MB, 1)
+        $r += "  $($sizeMB.ToString().PadLeft(10)) MB  $($item.Name)`n"
+    }}
+}}
+$r += "`n$($items.Count) items`n"
+Write-Output $r
+"""
+    elif action == "copy":
+        if not destination:
+            return "Error: 'destination' required for copy action"
+        ps_script = f"Copy-Item -LiteralPath '{path}' -Destination '{destination}' -Recurse -Force; Write-Output 'Copied: {path} -> {destination}'"
+    elif action == "move":
+        if not destination:
+            return "Error: 'destination' required for move action"
+        ps_script = f"Move-Item -LiteralPath '{path}' -Destination '{destination}' -Force; Write-Output 'Moved: {path} -> {destination}'"
+    elif action == "rename":
+        if not newName:
+            return "Error: 'newName' required for rename action"
+        ps_script = f"Rename-Item -LiteralPath '{path}' -NewName '{newName}' -Force; Write-Output 'Renamed to: {newName}'"
+    else:
+        return f"Unknown action: {action}. Use: info, list, copy, move, rename"
+
+    valid, msg = validate_command(ps_script)
+    if not valid:
+        return f"Security Error: {msg}"
+    response, status = desktop.execute_command(ps_script, timeout=60)
+    if status != 0:
+        return f"File operation failed. Check server logs."
+    return response.strip()
+
+
+@mcp.tool(
+    name="Duplicate-Finder-Tool",
+    description="Find duplicate files by size + hash in a folder. Parameters: path (folder to scan), minSizeMB (minimum file size, default 1), extensions (comma-separated, e.g. 'pdf,jpg', default all).",
+)
+def duplicate_finder_tool(
+    path: str,
+    minSizeMB: float = 1,
+    extensions: str = "",
+) -> str:
+    try:
+        path = _sanitize_path(path)
+        _check_allowed_path(path)
+    except ValueError as e:
+        return f"Error: {e}"
+
+    ext_filter = ""
+    if extensions:
+        exts = extensions.replace(" ", "").split(",")
+        validated_exts = []
+        for e in exts:
+            try:
+                validated_exts.append(_validate_extension(e))
+            except ValueError as ve:
+                return f"Error: {ve}"
+        ext_patterns = " -or ".join(
+            [f'$_.Extension -eq ".{e}"' for e in validated_exts]
+        )
+        ext_filter = f"| Where-Object {{ {ext_patterns} }}"
+
+    ps_script = f"""
+$minBytes = {int(minSizeMB * 1024 * 1024)}
+$files = Get-ChildItem -Path '{path}' -Recurse -Depth 5 -Force -File -EA SilentlyContinue | Where-Object {{ $_.Length -gt $minBytes }} {ext_filter}
+
+# Group by size first (fast pre-filter)
+$sizeGroups = $files | Group-Object Length | Where-Object {{ $_.Count -gt 1 }}
+$r = "Scanning $($files.Count) files for duplicates...`n`n"
+$dupSets = 0
+$dupBytes = 0
+
+foreach ($group in $sizeGroups) {{
+    # Hash files with same size
+    $hashes = @{{}}
+    foreach ($f in $group.Group) {{
+        try {{
+            $hash = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256 -EA SilentlyContinue).Hash
+            if ($hash) {{
+                if (-not $hashes[$hash]) {{ $hashes[$hash] = @() }}
+                $hashes[$hash] += $f
+            }}
+        }} catch {{}}
+    }}
+    foreach ($h in $hashes.GetEnumerator()) {{
+        if ($h.Value.Count -gt 1) {{
+            $dupSets++
+            $sizeMB = [math]::Round($h.Value[0].Length/1MB, 1)
+            $wastedMB = [math]::Round($h.Value[0].Length * ($h.Value.Count - 1) / 1MB, 1)
+            $dupBytes += $h.Value[0].Length * ($h.Value.Count - 1)
+            $r += "=== Duplicate set ($($h.Value.Count) copies, $sizeMB MB each, $wastedMB MB wasted) ===`n"
+            foreach ($f in $h.Value) {{
+                $r += "  $($f.FullName)`n"
+            }}
+            $r += "`n"
+        }}
+    }}
+}}
+
+$r += "Summary: $dupSets duplicate sets, $([math]::Round($dupBytes/1MB,1)) MB reclaimable`n"
+Write-Output $r
+"""
+    valid, msg = validate_command(ps_script)
+    if not valid:
+        return f"Security Error: {msg}"
+    response, status = desktop.execute_command(ps_script, timeout=300)
+    if status != 0:
+        return f"Duplicate scan failed. Check server logs."
+    return response.strip()

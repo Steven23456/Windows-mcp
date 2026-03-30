@@ -147,3 +147,6 @@ desktop.ini
 # Project specific - DO commit these
 !uv.lock
 !CLAUDE.md
+.env.tmp
+.mcp.json
+/.claude

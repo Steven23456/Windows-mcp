@@ -1,10 +1,7 @@
 import random
 from uiautomation import Control
 
-
-def random_point_within_bounding_box(
-    node: Control, scale_factor: float = 1.0
-) -> tuple[int, int]:
+def random_point_within_bounding_box(node: Control, scale_factor: float = 1.0) -> tuple[int, int]:
     """
     Generate a random point within a scaled-down bounding box.
 
@@ -16,10 +13,8 @@ def random_point_within_bounding_box(
         tuple: A random point (x, y) within the scaled-down bounding box
     """
     box = node.BoundingRectangle
-    if box.isempty() or box.width() <= 0 or box.height() <= 0:
-        return (box.left, box.top)
-    scaled_width = max(1, int(box.width() * scale_factor))
-    scaled_height = max(1, int(box.height() * scale_factor))
+    scaled_width = int(box.width() * scale_factor)
+    scaled_height = int(box.height() * scale_factor)
     scaled_left = box.left + (box.width() - scaled_width) // 2
     scaled_top = box.top + (box.height() - scaled_height) // 2
     x = random.randint(scaled_left, scaled_left + scaled_width)
