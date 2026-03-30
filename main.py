@@ -404,8 +404,10 @@ def click_tool(
     cursor.move_to(loc)
     control = desktop.get_element_under_cursor()
     pg.mouseDown()
-    pg.click(button=button, clicks=clicks)
-    pg.mouseUp()
+    try:
+        pg.click(button=button, clicks=clicks)
+    finally:
+        pg.mouseUp()
     num_clicks = {1: "Single", 2: "Double", 3: "Triple"}
     return f"{num_clicks.get(clicks)} {button} Clicked on {control.Name} Element with ControlType {control.ControlTypeName} at ({x},{y})."
 
@@ -546,8 +548,20 @@ def move_tool(to_loc: tuple[int, int]) -> str:
     description='Execute keyboard shortcuts using key combinations. Pass keys as list (e.g., ["ctrl", "c"] for copy, ["alt", "tab"] for app switching, ["win", "r"] for Run dialog).',
 )
 def shortcut_tool(shortcut: list[str]) -> str:
-    pg.hotkey(*shortcut)
-    return f"Pressed {'+'.join(shortcut)}."
+    ensure_com()
+    if not shortcut:
+        return "Validation Error: shortcut must be a non-empty list of key names."
+    if len(shortcut) > 10:
+        return "Validation Error: shortcut cannot contain more than 10 keys."
+    for k in shortcut:
+        valid, msg = validate_text(k, max_length=50)
+        if not valid:
+            return f"Validation Error: {msg}"
+    try:
+        pg.hotkey(*shortcut)
+        return f"Pressed {'+'.join(shortcut)}."
+    except Exception as e:
+        return f"Error pressing shortcut: {e}"
 
 
 @mcp.tool(
@@ -555,8 +569,17 @@ def shortcut_tool(shortcut: list[str]) -> str:
     description='Press individual keyboard keys. Supports special keys like "enter", "escape", "tab", "space", "backspace", "delete", arrow keys ("up", "down", "left", "right"), function keys ("f1"-"f12").',
 )
 def key_tool(key: str = "") -> str:
-    pg.press(key)
-    return f"Pressed the key {key}."
+    ensure_com()
+    if not key:
+        return "Validation Error: key must be a non-empty string."
+    valid, msg = validate_text(key, max_length=50)
+    if not valid:
+        return f"Validation Error: {msg}"
+    try:
+        pg.press(key)
+        return f"Pressed the key {key}."
+    except Exception as e:
+        return f"Error pressing key: {e}"
 
 
 @mcp.tool(
@@ -776,6 +799,9 @@ def process_tool(
             cmd = f'Get-Process -Name "{name}" -ErrorAction Stop | Select-Object Name, Id, @{{N="MemoryMB";E={{[math]::Round($_.WorkingSet64/1MB,1)}}}} | Format-Table -AutoSize | Out-String'
         else:
             cmd = 'Get-Process | Select-Object Name, Id, @{N="MemoryMB";E={[math]::Round($_.WorkingSet64/1MB,1)}} | Sort-Object MemoryMB -Descending | Select-Object -First 30 | Format-Table -AutoSize | Out-String'
+        valid, msg = validate_command(cmd)
+        if not valid:
+            return f"Security Error: {msg}"
         response, status = desktop.execute_command(cmd, timeout=15)
         if status != 0:
             return f"Failed to list processes: {response}"
@@ -796,6 +822,9 @@ def process_tool(
             if pid < 0 or pid > 99999:
                 return "Validation Error: PID must be between 0 and 99999."
             cmd = f"Stop-Process -Id {pid} -Force -ErrorAction Stop"
+        valid, msg = validate_command(cmd)
+        if not valid:
+            return f"Security Error: {msg}"
         response, status = desktop.execute_command(cmd, timeout=10)
         if status != 0:
             return f"Failed to kill process: {response}"
@@ -1665,6 +1694,11 @@ def compare_screenshot_tool(
     valid, msg = validate_text(baseline, max_length=500)
     if not valid:
         return f"Validation Error: {msg}"
+    try:
+        baseline = _sanitize_path(baseline)
+        _check_allowed_path(baseline)
+    except ValueError as e:
+        return f"Error: {e}"
     if threshold < 0 or threshold > 100:
         return "Validation Error: threshold must be between 0 and 100."
 
@@ -1884,6 +1918,7 @@ def record_replay_tool(
         }
 
         results = []
+        failed_step = None
         for i, step in enumerate(data["steps"]):
             tool_name = step["tool"]
             params = step["params"]
@@ -1896,7 +1931,10 @@ def record_replay_tool(
                 results.append(f"Step {i + 1} ({tool_name}): {result}")
             except Exception as e:
                 results.append(f"Step {i + 1} ({tool_name}): ERROR — {e}")
+                failed_step = i + 1
                 break  # Stop on error
+        if failed_step is not None:
+            return f'Replay "{name}" FAILED at step {failed_step}:\n' + "\n".join(results)
         return f'Replay "{name}" complete:\n' + "\n".join(results)
 
     return f"Unknown action: {action}"
@@ -1910,7 +1948,7 @@ from datetime import datetime as _datetime
 
 def _sanitize_path(val: str) -> str:
     """Reject paths with PowerShell metacharacters that could enable injection."""
-    if _re.search(r"['\"`$;|&{}()]", val):
+    if _re.search(r"['\"`$;|&{}()\[\]]", val):
         raise ValueError(f"Path contains unsafe characters: {val!r}")
     return val
 
@@ -1944,7 +1982,9 @@ def _check_allowed_path(path: str) -> str:
     if ALLOWED_PATHS:
         resolved = os.path.normpath(os.path.abspath(path)).lower()
         if not any(
-            resolved.startswith(os.path.normpath(ap).lower()) for ap in ALLOWED_PATHS
+            resolved == os.path.normpath(ap).lower()
+            or resolved.startswith(os.path.normpath(ap).lower() + os.sep)
+            for ap in ALLOWED_PATHS
         ):
             raise ValueError(f"Path not in allowed paths: {path}")
     return path
@@ -1999,7 +2039,7 @@ Write-Output $r
         return f"Security Error: {msg}"
     response, status = desktop.execute_command(ps_script, timeout=120)
     if status != 0:
-        return f"Disk analysis failed. Check server logs."
+        return f"Disk analysis failed: {response.strip()}"
     return response.strip()
 
 
@@ -2073,7 +2113,7 @@ Write-Output $r
     # legitimate PowerShell newline escapes but would be blocked by BLOCKED_OPERATORS.
     response, status = desktop.execute_command(ps_script, timeout=300)
     if status != 0:
-        return f"Disk cleanup scan failed. Check server logs."
+        return f"Disk cleanup scan failed: {response.strip()}"
     return response.strip()
 
 
@@ -2131,7 +2171,7 @@ Write-Output $r
         return f"Security Error: {msg}"
     response, status = desktop.execute_command(ps_script, timeout=120)
     if status != 0:
-        return f"File search failed. Check server logs."
+        return f"File search failed: {response.strip()}"
     return response.strip()
 
 
@@ -2208,7 +2248,7 @@ Write-Output $r
         return f"Security Error: {msg}"
     response, status = desktop.execute_command(ps_script, timeout=60)
     if status != 0:
-        return f"File operation failed. Check server logs."
+        return f"File operation failed: {response.strip()}"
     return response.strip()
 
 
@@ -2286,5 +2326,5 @@ Write-Output $r
         return f"Security Error: {msg}"
     response, status = desktop.execute_command(ps_script, timeout=300)
     if status != 0:
-        return f"Duplicate scan failed. Check server logs."
+        return f"Duplicate scan failed: {response.strip()}"
     return response.strip()
