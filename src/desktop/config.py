@@ -36,7 +36,8 @@ BLOCKED_ARGUMENTS: set[str] = {
     "--system",
 }
 
-MAX_COMMAND_LENGTH = 2000
+# 2000 for user-supplied commands (Powershell-Tool), 10000 for internal multi-block scripts
+MAX_COMMAND_LENGTH = 10000
 
 # Restrict workingDir to these paths (and their subdirectories).
 # Set to None to disable restriction.

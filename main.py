@@ -2068,9 +2068,12 @@ Get-ChildItem -Path $env:USERPROFILE -Directory -Recurse -Force -Filter "node_mo
 
 Write-Output $r
 """
+    # Note: validate_command() is intentionally NOT called here because this script
+    # is a static raw string with no user input and contains backticks (`n) which are
+    # legitimate PowerShell newline escapes but would be blocked by BLOCKED_OPERATORS.
     response, status = desktop.execute_command(ps_script, timeout=300)
     if status != 0:
-        return f"Disk cleanup scan failed: {response}"
+        return f"Disk cleanup scan failed. Check server logs."
     return response.strip()
 
 

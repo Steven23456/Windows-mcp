@@ -56,7 +56,7 @@ pip install -e .
 
 ## MCP Tools
 
-37 tools and 2 resources defined in `main.py` via `@mcp.tool()` and `@mcp.resource()`. Key tool: `State-Tool` is the primary context-gathering tool — returns desktop state + UI elements, optionally with annotated screenshot (`use_vision=True`). Resources: `windows-mcp://current-directory` (server cwd) and `windows-mcp://security-config` (active security rules).
+42 tools and 2 resources defined in `main.py` via `@mcp.tool()` and `@mcp.resource()`. Key tool: `State-Tool` is the primary context-gathering tool — returns desktop state + UI elements, optionally with annotated screenshot (`use_vision=True`). Resources: `windows-mcp://current-directory` (server cwd) and `windows-mcp://security-config` (active security rules).
 
 ### Testing & Inspection Tools (v0.5.0)
 - `Get-Element-Property-Tool`: Read element properties (value, checked state, enabled, bounding box, automation patterns)

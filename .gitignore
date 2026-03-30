@@ -150,3 +150,11 @@ desktop.ini
 .env.tmp
 .mcp.json
 /.claude
+
+# Dropbox conflicted copies
+*conflicted copy*
+
+# Test artifacts
+test_baseline.png
+recordings/
+.dropboxignore
