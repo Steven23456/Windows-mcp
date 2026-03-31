@@ -2027,28 +2027,38 @@ if ($drive) {{
     $r += "  Total: $([math]::Round(($drive.Used+$drive.Free)/1GB,1)) GB`n`n"
 }}
 
-# Folder sizes
+# Folder sizes — single-pass: enumerate all files once, group by top-level subfolder
 $r += "=== Folders > {minSizeMB} MB in $target (depth $depth) ===`n"
-$folders = Get-ChildItem -Path $target -Directory -Depth ($depth - 1) -Force -ErrorAction SilentlyContinue | ForEach-Object {{
-    $size = (Get-ChildItem $_.FullName -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
-    if ($size -gt $minBytes) {{
-        [PSCustomObject]@{{ Name = $_.Name; SizeGB = [math]::Round($size/1GB,2); SizeMB = [math]::Round($size/1MB,0); Path = $_.FullName }}
-    }}
-}} | Sort-Object SizeGB -Descending
-foreach ($f in $folders) {{
-    $r += "  $($f.SizeGB.ToString('0.00').PadLeft(8)) GB  $($f.Name)`n"
+$totalFiles = 0
+$folderSizes = @{{}}
+foreach ($f in [System.IO.Directory]::EnumerateFiles($target, '*', [System.IO.SearchOption]::AllDirectories)) {{
+    try {{
+        $info = [System.IO.FileInfo]::new($f)
+        $totalFiles++
+        $rel = $f.Substring($target.TrimEnd('\\').Length + 1)
+        $parts = $rel.Split('\\')
+        if ($parts.Count -gt 1) {{
+            $topKey = $parts[0]
+            if ($depth -ge 2 -and $parts.Count -gt 2) {{ $topKey = $parts[0] + '\\' + $parts[1] }}
+            if ($depth -ge 3 -and $parts.Count -gt 3) {{ $topKey = $parts[0] + '\\' + $parts[1] + '\\' + $parts[2] }}
+            if (-not $folderSizes.ContainsKey($topKey)) {{ $folderSizes[$topKey] = [long]0 }}
+            $folderSizes[$topKey] += $info.Length
+        }}
+    }} catch {{ }}
+}}
+$sorted = $folderSizes.GetEnumerator() | Where-Object {{ $_.Value -gt $minBytes }} | Sort-Object Value -Descending
+foreach ($s in $sorted) {{
+    $r += "  $([math]::Round($s.Value/1GB,2).ToString('0.00').PadLeft(8)) GB  $($s.Key)`n"
 }}
 
-# File count
-$fileCount = (Get-ChildItem -Path $target -Recurse -Force -File -ErrorAction SilentlyContinue | Measure-Object).Count
-$r += "`nTotal files: $fileCount`n"
+$r += "`nTotal files: $totalFiles`n"
 
 Write-Output $r
 """
     valid, msg = validate_command(ps_script, trusted=True)
     if not valid:
         return f"Security Error: {msg}"
-    response, status = desktop.execute_command(ps_script, timeout=120)
+    response, status = desktop.execute_command(ps_script, timeout=300)
     if status != 0:
         return f"Disk analysis failed: {response.strip()}"
     return response.strip()
