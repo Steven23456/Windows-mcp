@@ -37,6 +37,15 @@ sys.modules["fastmcp"] = _fastmcp_module_mock
 sys.modules["fastmcp.utilities"] = MagicMock()
 sys.modules["fastmcp.utilities.types"] = MagicMock()
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _mock_ensure_com():
+    """Prevent COM initialization in all tests — no Windows COM runtime needed."""
+    with patch("main.ensure_com"):
+        yield
+
 
 # ── validate_command ─────────────────────────────────────────────────────────
 

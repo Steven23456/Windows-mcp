@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1] - 2026-03-31
+
+### Fixed
+- Fix 17 failing tests in `test_existing_tools.py` — `ensure_com()` (COM thread init) was not mocked, causing `comtypes.CoInitialize()` to crash in test context
+- Added `autouse` pytest fixture to mock `ensure_com` across all existing-tool tests
+- Synced version across `pyproject.toml`, `manifest.json`, and `CLAUDE.md` (were out of sync at 0.5.3/0.4.1)
+
 ## [0.6.0] - 2026-03-30
 
 ### Added
