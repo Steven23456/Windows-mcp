@@ -1934,7 +1934,9 @@ def record_replay_tool(
                 failed_step = i + 1
                 break  # Stop on error
         if failed_step is not None:
-            return f'Replay "{name}" FAILED at step {failed_step}:\n' + "\n".join(results)
+            return f'Replay "{name}" FAILED at step {failed_step}:\n' + "\n".join(
+                results
+            )
         return f'Replay "{name}" complete:\n' + "\n".join(results)
 
     return f"Unknown action: {action}"
@@ -2328,3 +2330,7 @@ Write-Output $r
     if status != 0:
         return f"Duplicate scan failed: {response.strip()}"
     return response.strip()
+
+
+if __name__ == "__main__":
+    mcp.run()
