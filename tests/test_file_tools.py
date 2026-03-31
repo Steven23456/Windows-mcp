@@ -235,17 +235,12 @@ class TestDiskAnalysisTool:
     def test_depth_clamped(self):
         from main import disk_analysis_tool
 
-        # depth=10 should be clamped to 3 — we can verify by checking the PS script.
-        # validate_command must also be mocked: the PS script contains semicolons which
-        # are BLOCKED_OPERATORS, so without mocking it would return early before calling
-        # execute_command and call_args would be None.
         with patch("main.desktop") as mock_desktop:
             mock_desktop.execute_command.return_value = ("test output", 0)
             with patch("main.ALLOWED_PATHS", []):
-                with patch("main.validate_command", return_value=(True, "OK")):
-                    disk_analysis_tool(path="C:\\Users", depth=10)
-                    call_args = mock_desktop.execute_command.call_args[0][0]
-                    assert "$depth = 3" in call_args  # clamped to max 3
+                disk_analysis_tool(path="C:\\Users", depth=10)
+                call_args = mock_desktop.execute_command.call_args[0][0]
+                assert "$depth = 3" in call_args  # clamped to max 3
 
     def test_default_params_work(self):
         from main import disk_analysis_tool
@@ -256,9 +251,8 @@ class TestDiskAnalysisTool:
                 0,
             )
             with patch("main.ALLOWED_PATHS", []):
-                with patch("main.validate_command", return_value=(True, "OK")):
-                    result = disk_analysis_tool()
-                    assert "Drive" in result
+                result = disk_analysis_tool()
+                assert "Drive" in result
 
 
 class TestDiskCleanupTool:
@@ -301,9 +295,8 @@ class TestFileSearchTool:
         with patch("main.desktop") as mock_desktop:
             mock_desktop.execute_command.return_value = ("Found 5 files:", 0)
             with patch("main.ALLOWED_PATHS", []):
-                with patch("main.validate_command", return_value=(True, "OK")):
-                    result = file_search_tool(path="C:\\Users", pattern="*.pdf")
-                    assert "Found" in result
+                result = file_search_tool(path="C:\\Users", pattern="*.pdf")
+                assert "Found" in result
 
 
 class TestFileManageTool:
@@ -383,11 +376,10 @@ class TestDuplicateFinderTool:
         with patch("main.desktop") as mock_desktop:
             mock_desktop.execute_command.return_value = ("Summary: 0 duplicate sets", 0)
             with patch("main.ALLOWED_PATHS", []):
-                with patch("main.validate_command", return_value=(True, "OK")):
-                    result = duplicate_finder_tool(
-                        path="C:\\Users", extensions="pdf,jpg,png"
-                    )
-                    assert "duplicate" in result.lower() or "Summary" in result
+                result = duplicate_finder_tool(
+                    path="C:\\Users", extensions="pdf,jpg,png"
+                )
+                assert "duplicate" in result.lower() or "Summary" in result
 
     def test_uses_sha256(self):
         from main import duplicate_finder_tool
@@ -395,8 +387,7 @@ class TestDuplicateFinderTool:
         with patch("main.desktop") as mock_desktop:
             mock_desktop.execute_command.return_value = ("Summary: 0", 0)
             with patch("main.ALLOWED_PATHS", []):
-                with patch("main.validate_command", return_value=(True, "OK")):
-                    duplicate_finder_tool(path="C:\\Users")
-                    call_args = mock_desktop.execute_command.call_args[0][0]
-                    assert "SHA256" in call_args
-                    assert "MD5" not in call_args
+                duplicate_finder_tool(path="C:\\Users")
+                call_args = mock_desktop.execute_command.call_args[0][0]
+                assert "SHA256" in call_args
+                assert "MD5" not in call_args

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.2] - 2026-03-31
+
+### Fixed
+- **Disk-Analysis, File-Search, Process-Tool, File-Manage, Duplicate-Finder**: all returned `Security Error: blocked operator` because `validate_command()` rejected legitimate `;` and `` ` `` in server-generated PS scripts. Added `trusted=True` parameter to skip operator checks for internal scripts while preserving injection protection for user-supplied commands (Powershell-Tool).
+- **Disk-Cleanup-Tool**: now also passes through `validate_command(trusted=True)` instead of bypassing validation entirely.
+- **Restore missing `mcp.run()` entry point** — accidentally removed in v0.6.0, preventing the MCP server from starting its stdio transport loop.
+- Removed `validate_command` mock workarounds from tests (no longer needed with `trusted` parameter).
+
 ## [0.6.1] - 2026-03-31
 
 ### Fixed

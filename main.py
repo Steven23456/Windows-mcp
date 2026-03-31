@@ -115,15 +115,24 @@ def validate_text(text: str, max_length: int = MAX_TEXT_LENGTH) -> tuple[bool, s
     return True, "OK"
 
 
-def validate_command(command: str) -> tuple[bool, str]:
-    """Validate a PowerShell command against security rules."""
+def validate_command(command: str, *, trusted: bool = False) -> tuple[bool, str]:
+    """Validate a PowerShell command against security rules.
+
+    Args:
+        command: The PowerShell command string to validate.
+        trusted: If True, skip operator checks (`;`, `` ` ``). Use for
+                 server-generated scripts where semicolons and backticks are
+                 legitimate PS syntax. User-supplied values in these scripts
+                 must be pre-validated with validate_text() / _sanitize_path().
+    """
     if len(command) > MAX_COMMAND_LENGTH:
         return False, f"Command exceeds maximum length ({MAX_COMMAND_LENGTH} chars)."
 
-    # Check for blocked operators (injection protection)
-    for op in BLOCKED_OPERATORS:
-        if op in command:
-            return False, f"Command contains blocked operator: {op!r}"
+    # Check for blocked operators (injection protection) — only for user input
+    if not trusted:
+        for op in BLOCKED_OPERATORS:
+            if op in command:
+                return False, f"Command contains blocked operator: {op!r}"
 
     # Extract first token and check against blocked commands
     first_token = command.strip().split()[0].lower() if command.strip() else ""
@@ -799,7 +808,7 @@ def process_tool(
             cmd = f'Get-Process -Name "{name}" -ErrorAction Stop | Select-Object Name, Id, @{{N="MemoryMB";E={{[math]::Round($_.WorkingSet64/1MB,1)}}}} | Format-Table -AutoSize | Out-String'
         else:
             cmd = 'Get-Process | Select-Object Name, Id, @{N="MemoryMB";E={[math]::Round($_.WorkingSet64/1MB,1)}} | Sort-Object MemoryMB -Descending | Select-Object -First 30 | Format-Table -AutoSize | Out-String'
-        valid, msg = validate_command(cmd)
+        valid, msg = validate_command(cmd, trusted=True)
         if not valid:
             return f"Security Error: {msg}"
         response, status = desktop.execute_command(cmd, timeout=15)
@@ -822,7 +831,7 @@ def process_tool(
             if pid < 0 or pid > 99999:
                 return "Validation Error: PID must be between 0 and 99999."
             cmd = f"Stop-Process -Id {pid} -Force -ErrorAction Stop"
-        valid, msg = validate_command(cmd)
+        valid, msg = validate_command(cmd, trusted=True)
         if not valid:
             return f"Security Error: {msg}"
         response, status = desktop.execute_command(cmd, timeout=10)
@@ -2036,7 +2045,7 @@ $r += "`nTotal files: $fileCount`n"
 
 Write-Output $r
 """
-    valid, msg = validate_command(ps_script)
+    valid, msg = validate_command(ps_script, trusted=True)
     if not valid:
         return f"Security Error: {msg}"
     response, status = desktop.execute_command(ps_script, timeout=120)
@@ -2110,9 +2119,9 @@ Get-ChildItem -Path $env:USERPROFILE -Directory -Recurse -Force -Filter "node_mo
 
 Write-Output $r
 """
-    # Note: validate_command() is intentionally NOT called here because this script
-    # is a static raw string with no user input and contains backticks (`n) which are
-    # legitimate PowerShell newline escapes but would be blocked by BLOCKED_OPERATORS.
+    valid, msg = validate_command(ps_script, trusted=True)
+    if not valid:
+        return f"Security Error: {msg}"
     response, status = desktop.execute_command(ps_script, timeout=300)
     if status != 0:
         return f"Disk cleanup scan failed: {response.strip()}"
@@ -2168,7 +2177,7 @@ foreach ($f in $results) {{
 }}
 Write-Output $r
 """
-    valid, msg = validate_command(ps_script)
+    valid, msg = validate_command(ps_script, trusted=True)
     if not valid:
         return f"Security Error: {msg}"
     response, status = desktop.execute_command(ps_script, timeout=120)
@@ -2245,7 +2254,7 @@ Write-Output $r
     else:
         return f"Unknown action: {action}. Use: info, list, copy, move, rename"
 
-    valid, msg = validate_command(ps_script)
+    valid, msg = validate_command(ps_script, trusted=True)
     if not valid:
         return f"Security Error: {msg}"
     response, status = desktop.execute_command(ps_script, timeout=60)
@@ -2323,7 +2332,7 @@ foreach ($group in $sizeGroups) {{
 $r += "Summary: $dupSets duplicate sets, $([math]::Round($dupBytes/1MB,1)) MB reclaimable`n"
 Write-Output $r
 """
-    valid, msg = validate_command(ps_script)
+    valid, msg = validate_command(ps_script, trusted=True)
     if not valid:
         return f"Security Error: {msg}"
     response, status = desktop.execute_command(ps_script, timeout=300)
