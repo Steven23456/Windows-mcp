@@ -2241,6 +2241,404 @@ Write-Output $r
     return f"Unknown action: {action}"
 
 
+# ── Storage Tool ──────────────────────────────────────────────────────────────
+
+
+@mcp.tool(
+    name="Storage-Tool",
+    description='Storage analysis and cleanup. Actions: "breakdown" (file type breakdown by extension with sizes), '
+    '"stale" (find files untouched for N days), "compress" (preview zip compression of stale files), '
+    '"compress-run" (execute compression), "dedup" (preview duplicate removal), '
+    '"dedup-run" (remove duplicates to Recycle Bin, keep first by path), '
+    '"archive" (preview moving old files to dated archive folders), '
+    '"archive-run" (execute archive move). All destructive actions use Recycle Bin.',
+)
+def storage_tool(
+    action: Literal[
+        "breakdown",
+        "stale",
+        "compress",
+        "compress-run",
+        "dedup",
+        "dedup-run",
+        "archive",
+        "archive-run",
+    ],
+    path: str,
+    days: int = 365,
+    minSizeMB: float = 0,
+    extensions: str = "",
+) -> str:
+    ensure_com()
+    try:
+        path = _sanitize_path(path)
+        _check_allowed_path(path)
+    except ValueError as e:
+        return f"Error: {e}"
+    days = max(1, min(3650, days))
+
+    # Build extension filter clause for PS (shared by several actions)
+    ext_filter = ""
+    if extensions.strip():
+        for ext in extensions.split(","):
+            ext = ext.strip().lstrip(".")
+            try:
+                _validate_extension(ext)
+            except ValueError as e:
+                return f"Error: {e}"
+        ext_list = "|".join(
+            f"\\.{e.strip().lstrip('.')}" for e in extensions.split(",")
+        )
+        ext_filter = f"| Where-Object {{ $_.Extension -match '^({ext_list})$' }}"
+
+    min_bytes_filter = ""
+    if minSizeMB > 0:
+        min_bytes_filter = (
+            f"| Where-Object {{ $_.Length -ge {int(minSizeMB * 1048576)} }}"
+        )
+
+    if action == "breakdown":
+        ps_script = f"""
+$target = '{path}'
+$r = "=== File Type Breakdown: $target ===`n`n"
+$files = [System.IO.Directory]::EnumerateFiles($target, '*', [System.IO.SearchOption]::AllDirectories)
+$extMap = @{{}}
+$totalSize = [long]0
+$totalCount = 0
+foreach ($f in $files) {{
+    try {{
+        $info = [System.IO.FileInfo]::new($f)
+        $ext = if ($info.Extension) {{ $info.Extension.ToLower() }} else {{ '(no ext)' }}
+        if (-not $extMap.ContainsKey($ext)) {{ $extMap[$ext] = @{{ Count = 0; Size = [long]0 }} }}
+        $extMap[$ext].Count++
+        $extMap[$ext].Size += $info.Length
+        $totalSize += $info.Length
+        $totalCount++
+    }} catch {{ }}
+}}
+$sorted = $extMap.GetEnumerator() | Sort-Object {{ $_.Value.Size }} -Descending | Select-Object -First 30
+foreach ($s in $sorted) {{
+    $pct = if ($totalSize -gt 0) {{ [math]::Round($s.Value.Size / $totalSize * 100, 1) }} else {{ 0 }}
+    $r += "  $($s.Key.PadRight(12)) $([math]::Round($s.Value.Size/1GB,2).ToString('0.00').PadLeft(8)) GB  $($s.Value.Count.ToString().PadLeft(6)) files  ($pct%)`n"
+}}
+$r += "`nTotal: $([math]::Round($totalSize/1GB,2)) GB in $totalCount files`n"
+Write-Output $r
+"""
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=300)
+        if status != 0:
+            return f"Breakdown failed: {response.strip()}"
+        return response.strip()
+
+    elif action == "stale":
+        ps_script = f"""
+$target = '{path}'
+$cutoff = (Get-Date).AddDays(-{days})
+$minBytes = {int(minSizeMB * 1048576)}
+$r = "=== Stale Files (untouched for {days}+ days) in $target ===`n`n"
+$files = Get-ChildItem -Path $target -Recurse -File -Force -ErrorAction SilentlyContinue {ext_filter} {min_bytes_filter} | Where-Object {{ $_.LastWriteTime -lt $cutoff -and $_.LastAccessTime -lt $cutoff }} | Sort-Object Length -Descending | Select-Object -First 50
+$totalSize = [long]0
+$count = 0
+foreach ($f in $files) {{
+    $count++
+    $totalSize += $f.Length
+    $sizeMB = [math]::Round($f.Length / 1MB, 1)
+    $age = [math]::Round(((Get-Date) - $f.LastWriteTime).TotalDays)
+    $r += "  $($sizeMB.ToString().PadLeft(10)) MB  $($age.ToString().PadLeft(5))d ago  $($f.FullName)`n"
+}}
+$r += "`nShowing $count files, total: $([math]::Round($totalSize/1MB,1)) MB`n"
+if ($count -eq 50) {{ $r += "(Results capped at 50 — use extensions or minSizeMB to narrow)`n" }}
+Write-Output $r
+"""
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=120)
+        if status != 0:
+            return f"Stale scan failed: {response.strip()}"
+        return response.strip()
+
+    elif action == "compress":
+        ps_script = f"""
+$target = '{path}'
+$cutoff = (Get-Date).AddDays(-{days})
+$minBytes = {int(minSizeMB * 1048576)}
+$r = "=== Compression Preview: files untouched for {days}+ days ===`n`n"
+$files = Get-ChildItem -Path $target -Recurse -File -Force -ErrorAction SilentlyContinue {ext_filter} {min_bytes_filter} | Where-Object {{ $_.LastWriteTime -lt $cutoff -and $_.LastAccessTime -lt $cutoff -and $_.Extension -ne '.zip' -and $_.Extension -ne '.7z' -and $_.Extension -ne '.gz' }}
+$totalSize = [long]0
+$count = 0
+$byFolder = @{{}}
+foreach ($f in $files) {{
+    $count++
+    $totalSize += $f.Length
+    $folder = $f.DirectoryName
+    if (-not $byFolder.ContainsKey($folder)) {{ $byFolder[$folder] = @{{ Count = 0; Size = [long]0 }} }}
+    $byFolder[$folder].Count++
+    $byFolder[$folder].Size += $f.Length
+}}
+$sorted = $byFolder.GetEnumerator() | Sort-Object {{ $_.Value.Size }} -Descending | Select-Object -First 20
+foreach ($s in $sorted) {{
+    $r += "  $([math]::Round($s.Value.Size/1MB,1).ToString().PadLeft(10)) MB  $($s.Value.Count.ToString().PadLeft(5)) files  $($s.Key)`n"
+}}
+$r += "`nTotal: $count files, $([math]::Round($totalSize/1MB,1)) MB`n"
+$r += "Would create .zip archives per folder. Use 'compress-run' to execute.`n"
+Write-Output $r
+"""
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=120)
+        if status != 0:
+            return f"Compress preview failed: {response.strip()}"
+        return response.strip()
+
+    elif action == "compress-run":
+        ps_script = f"""
+$target = '{path}'
+$cutoff = (Get-Date).AddDays(-{days})
+$minBytes = {int(minSizeMB * 1048576)}
+$r = "=== Compression Run ===`n`n"
+$files = Get-ChildItem -Path $target -Recurse -File -Force -ErrorAction SilentlyContinue {ext_filter} {min_bytes_filter} | Where-Object {{ $_.LastWriteTime -lt $cutoff -and $_.LastAccessTime -lt $cutoff -and $_.Extension -ne '.zip' -and $_.Extension -ne '.7z' -and $_.Extension -ne '.gz' }}
+
+# Group by parent folder
+$groups = $files | Group-Object DirectoryName
+$archiveCount = 0
+$totalSaved = [long]0
+$shell = New-Object -ComObject Shell.Application
+
+foreach ($g in $groups) {{
+    $folder = $g.Name
+    $stamp = Get-Date -Format 'yyyyMMdd'
+    $zipName = Join-Path $folder "_archive_$stamp.zip"
+    $counter = 1
+    while (Test-Path $zipName) {{
+        $zipName = Join-Path $folder "_archive_$($stamp)_$counter.zip"
+        $counter++
+    }}
+    try {{
+        Compress-Archive -Path ($g.Group | ForEach-Object {{ $_.FullName }}) -DestinationPath $zipName -CompressionLevel Optimal -ErrorAction Stop
+        $zipSize = (Get-Item $zipName).Length
+        $origSize = ($g.Group | Measure-Object -Property Length -Sum).Sum
+        $saved = $origSize - $zipSize
+
+        # Move originals to Recycle Bin
+        foreach ($f in $g.Group) {{
+            $shell.Namespace(0).ParseName($f.FullName).InvokeVerb('delete')
+        }}
+
+        $archiveCount++
+        $totalSaved += $saved
+        $r += "  Created: $zipName ($([math]::Round($zipSize/1MB,1)) MB from $([math]::Round($origSize/1MB,1)) MB, $($g.Count) files)`n"
+    }} catch {{
+        $r += "  FAILED: $folder - $($_.Exception.Message)`n"
+    }}
+}}
+$r += "`nCreated $archiveCount archives, saved $([math]::Round($totalSaved/1MB,1)) MB`n"
+$r += "Original files moved to Recycle Bin (recoverable).`n"
+Write-Output $r
+"""
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=600)
+        if status != 0:
+            return f"Compression failed: {response.strip()}"
+        return response.strip()
+
+    elif action == "dedup":
+        ps_script = f"""
+$target = '{path}'
+$minBytes = {int(max(minSizeMB, 0.001) * 1048576)}
+$r = "=== Duplicate Preview ===`n`n"
+$files = Get-ChildItem -Path $target -Recurse -File -Force -ErrorAction SilentlyContinue {ext_filter} | Where-Object {{ $_.Length -ge $minBytes }}
+
+# Group by size first (fast pre-filter)
+$sizeGroups = $files | Group-Object Length | Where-Object {{ $_.Count -gt 1 }}
+$dupSets = 0
+$reclaimable = [long]0
+$dupDetails = @()
+
+foreach ($sg in $sizeGroups) {{
+    # Hash files with same size
+    $hashes = @{{}}
+    foreach ($f in $sg.Group) {{
+        $hash = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256 -ErrorAction SilentlyContinue).Hash
+        if ($hash) {{
+            if (-not $hashes.ContainsKey($hash)) {{ $hashes[$hash] = @() }}
+            $hashes[$hash] += $f
+        }}
+    }}
+    foreach ($h in $hashes.GetEnumerator()) {{
+        if ($h.Value.Count -gt 1) {{
+            $dupSets++
+            $sorted = $h.Value | Sort-Object FullName
+            $keep = $sorted[0]
+            $extras = $sorted[1..($sorted.Count-1)]
+            $setSize = ($extras | Measure-Object -Property Length -Sum).Sum
+            $reclaimable += $setSize
+            $sizeMB = [math]::Round($keep.Length / 1MB, 1)
+            $r += "--- Set $dupSets ($sizeMB MB each, $($h.Value.Count) copies) ---`n"
+            $r += "  KEEP:   $($keep.FullName)`n"
+            foreach ($e in $extras) {{
+                $r += "  REMOVE: $($e.FullName)`n"
+            }}
+            $r += "`n"
+            if ($dupSets -ge 20) {{ break }}
+        }}
+    }}
+    if ($dupSets -ge 20) {{ break }}
+}}
+$r += "Found $dupSets duplicate sets, $([math]::Round($reclaimable/1MB,1)) MB reclaimable`n"
+$r += "Keep strategy: first by path (logical location). Use 'dedup-run' to execute.`n"
+Write-Output $r
+"""
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=300)
+        if status != 0:
+            return f"Dedup preview failed: {response.strip()}"
+        return response.strip()
+
+    elif action == "dedup-run":
+        ps_script = f"""
+$target = '{path}'
+$minBytes = {int(max(minSizeMB, 0.001) * 1048576)}
+$r = "=== Duplicate Removal ===`n`n"
+$files = Get-ChildItem -Path $target -Recurse -File -Force -ErrorAction SilentlyContinue {ext_filter} | Where-Object {{ $_.Length -ge $minBytes }}
+
+$sizeGroups = $files | Group-Object Length | Where-Object {{ $_.Count -gt 1 }}
+$dupSets = 0
+$removed = 0
+$reclaimedBytes = [long]0
+$shell = New-Object -ComObject Shell.Application
+
+foreach ($sg in $sizeGroups) {{
+    $hashes = @{{}}
+    foreach ($f in $sg.Group) {{
+        $hash = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256 -ErrorAction SilentlyContinue).Hash
+        if ($hash) {{
+            if (-not $hashes.ContainsKey($hash)) {{ $hashes[$hash] = @() }}
+            $hashes[$hash] += $f
+        }}
+    }}
+    foreach ($h in $hashes.GetEnumerator()) {{
+        if ($h.Value.Count -gt 1) {{
+            $dupSets++
+            $sorted = $h.Value | Sort-Object FullName
+            $extras = $sorted[1..($sorted.Count-1)]
+            foreach ($e in $extras) {{
+                try {{
+                    $shell.Namespace(0).ParseName($e.FullName).InvokeVerb('delete')
+                    $removed++
+                    $reclaimedBytes += $e.Length
+                }} catch {{
+                    $r += "  FAILED: $($e.FullName) - $($_.Exception.Message)`n"
+                }}
+            }}
+        }}
+    }}
+}}
+$r += "Processed $dupSets duplicate sets`n"
+$r += "Removed $removed files ($([math]::Round($reclaimedBytes/1MB,1)) MB) to Recycle Bin`n"
+$r += "Kept first copy by path (logical location) for each set.`n"
+Write-Output $r
+"""
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=600)
+        if status != 0:
+            return f"Dedup run failed: {response.strip()}"
+        return response.strip()
+
+    elif action == "archive":
+        ps_script = f"""
+$target = '{path}'
+$cutoff = (Get-Date).AddDays(-{days})
+$minBytes = {int(minSizeMB * 1048576)}
+$r = "=== Archive Preview: files untouched for {days}+ days ===`n`n"
+$files = Get-ChildItem -Path $target -File -Force -ErrorAction SilentlyContinue {ext_filter} {min_bytes_filter} | Where-Object {{ $_.LastWriteTime -lt $cutoff -and $_.LastAccessTime -lt $cutoff }}
+$totalSize = [long]0
+$count = 0
+$byQuarter = @{{}}
+foreach ($f in $files) {{
+    $count++
+    $totalSize += $f.Length
+    $yr = $f.LastWriteTime.Year
+    $q = [math]::Ceiling($f.LastWriteTime.Month / 3)
+    $key = "$yr-Q$q"
+    if (-not $byQuarter.ContainsKey($key)) {{ $byQuarter[$key] = @{{ Count = 0; Size = [long]0 }} }}
+    $byQuarter[$key].Count++
+    $byQuarter[$key].Size += $f.Length
+}}
+$sorted = $byQuarter.GetEnumerator() | Sort-Object Name
+foreach ($s in $sorted) {{
+    $r += "  _archive/$($s.Key)/  $($s.Value.Count.ToString().PadLeft(5)) files  $([math]::Round($s.Value.Size/1MB,1).ToString().PadLeft(8)) MB`n"
+}}
+$r += "`nTotal: $count files, $([math]::Round($totalSize/1MB,1)) MB`n"
+$r += "Would move to _archive/<year>-Q<quarter>/ subfolders. Use 'archive-run' to execute.`n"
+$r += "Note: only archives files in the root of '$target', not subfolders.`n"
+Write-Output $r
+"""
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=60)
+        if status != 0:
+            return f"Archive preview failed: {response.strip()}"
+        return response.strip()
+
+    elif action == "archive-run":
+        ps_script = f"""
+$target = '{path}'
+$cutoff = (Get-Date).AddDays(-{days})
+$minBytes = {int(minSizeMB * 1048576)}
+$r = "=== Archive Run ===`n`n"
+$files = Get-ChildItem -Path $target -File -Force -ErrorAction SilentlyContinue {ext_filter} {min_bytes_filter} | Where-Object {{ $_.LastWriteTime -lt $cutoff -and $_.LastAccessTime -lt $cutoff }}
+$moved = 0
+$totalSize = [long]0
+
+foreach ($f in $files) {{
+    $yr = $f.LastWriteTime.Year
+    $q = [math]::Ceiling($f.LastWriteTime.Month / 3)
+    $archiveDir = Join-Path $target "_archive/$yr-Q$q"
+    if (-not (Test-Path $archiveDir)) {{
+        New-Item -Path $archiveDir -ItemType Directory -Force | Out-Null
+    }}
+    $dest = Join-Path $archiveDir $f.Name
+    $counter = 1
+    while (Test-Path $dest) {{
+        $base = [System.IO.Path]::GetFileNameWithoutExtension($f.Name)
+        $ext = $f.Extension
+        $dest = Join-Path $archiveDir "$($base)_$counter$ext"
+        $counter++
+    }}
+    try {{
+        Move-Item -LiteralPath $f.FullName -Destination $dest -Force
+        $moved++
+        $totalSize += $f.Length
+    }} catch {{
+        $r += "  FAILED: $($f.Name) - $($_.Exception.Message)`n"
+    }}
+}}
+$r += "Moved $moved files ($([math]::Round($totalSize/1MB,1)) MB) to _archive/ subfolders`n"
+$r += "Organized by quarter (e.g., _archive/2025-Q3/).`n"
+Write-Output $r
+"""
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=120)
+        if status != 0:
+            return f"Archive run failed: {response.strip()}"
+        return response.strip()
+
+    return f"Unknown action: {action}"
+
+
 # ── Disk Analysis & File Management Tools ─────────────────────────────────────
 
 import re as _re

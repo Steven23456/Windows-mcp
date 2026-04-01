@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.0] - 2026-04-01
+
+### Added
+- **Storage-Tool**: 8-action storage analysis and cleanup tool with preview/execute safety pattern
+  - `breakdown`: File type breakdown by extension with sizes and percentages
+  - `stale`: Find files untouched for N days, sorted by size
+  - `compress` / `compress-run`: Preview then zip stale files into per-folder archives, originals to Recycle Bin
+  - `dedup` / `dedup-run`: Preview then remove duplicate files (SHA-256, keep first by path), extras to Recycle Bin
+  - `archive` / `archive-run`: Preview then move old files into `_archive/<year>-Q<quarter>/` folders
+- Parameters: `path`, `days` (1-3650), `minSizeMB`, `extensions` filter
+- 22 new tests in `test_storage_tool.py`, 135 total passing
+
+### Security
+- All destructive operations (`compress-run`, `dedup-run`) send files to Recycle Bin via Shell.Application COM — fully recoverable
+- `archive-run` uses Move-Item (non-destructive, files are relocated not deleted)
+- Preview/execute split: agents must explicitly choose `-run` actions after reviewing previews
+- Days parameter clamped to 1-3650, extension validation, ALLOWED_PATHS enforcement
+
+### Changed
+- Semicolons inside `{}` now allowed in Powershell-Tool (brace-depth tracking) — enables calculated properties like `@{N='x';E={...}}`
+
 ## [0.7.0] - 2026-03-31
 
 ### Added
