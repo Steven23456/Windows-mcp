@@ -92,6 +92,31 @@ class TestValidateCommand:
         assert ok is False
         assert "blocked operator" in msg.lower()
 
+    def test_semicolon_inside_braces_allowed(self):
+        """Semicolons inside {} are hashtable syntax, not command chaining."""
+        from main import validate_command
+
+        # Calculated property — common PowerShell pattern
+        cmd = "Get-Process | Select-Object @{N='MemMB';E={[math]::Round($_.WorkingSet64/1MB,1)}}"
+        ok, _ = validate_command(cmd)
+        assert ok is True
+
+    def test_semicolon_in_nested_braces_allowed(self):
+        from main import validate_command
+
+        cmd = "Get-Process | ForEach-Object { @{N='x';E={$_.Name}} }"
+        ok, _ = validate_command(cmd)
+        assert ok is True
+
+    def test_semicolon_after_braces_blocked(self):
+        """Semicolon at top-level after a closed brace is still command chaining."""
+        from main import validate_command
+
+        cmd = "Get-Process | ForEach-Object { $_ }; Remove-Item C:\\"
+        ok, msg = validate_command(cmd)
+        assert ok is False
+        assert "blocked operator" in msg.lower()
+
     def test_pipe_allowed(self):
         """| is a legitimate PowerShell operator and must NOT be blocked."""
         from main import validate_command

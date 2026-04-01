@@ -130,9 +130,20 @@ def validate_command(command: str, *, trusted: bool = False) -> tuple[bool, str]
 
     # Check for blocked operators (injection protection) — only for user input
     if not trusted:
-        for op in BLOCKED_OPERATORS:
-            if op in command:
-                return False, f"Command contains blocked operator: {op!r}"
+        # Backticks are always blocked (escape injection: `n, `0, etc.)
+        if "`" in command:
+            return False, "Command contains blocked operator: '`'"
+        # Semicolons: only block at top-level (brace depth 0) where they act as
+        # statement separators (command chaining). Inside {} they are legitimate
+        # PowerShell hashtable/scriptblock syntax (e.g., @{N='x';E={$_.Val}}).
+        depth = 0
+        for ch in command:
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth = max(0, depth - 1)
+            elif ch == ";" and depth == 0:
+                return False, "Command contains blocked operator: ';'"
 
     # Extract first token and check against blocked commands
     first_token = command.strip().split()[0].lower() if command.strip() else ""
