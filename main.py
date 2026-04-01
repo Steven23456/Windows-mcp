@@ -1951,6 +1951,285 @@ def record_replay_tool(
     return f"Unknown action: {action}"
 
 
+# ── Security & Network Tools ──────────────────────────────────────────────────
+
+
+@mcp.tool(
+    name="Security-Audit-Tool",
+    description="Run a comprehensive Windows security audit. Returns quick boolean summary followed by detailed sections: Defender, Firewall, UAC, BitLocker, pending updates, PowerShell execution policy, open shares, Remote Desktop status. No parameters needed.",
+)
+def security_audit_tool() -> str:
+    ensure_com()
+    ps_script = r"""
+$r = ""
+
+# --- Defender ---
+$def = try { Get-MpComputerStatus -ErrorAction Stop } catch { $null }
+if ($def) {
+    $defOn = $def.AntivirusEnabled -and $def.RealTimeProtectionEnabled
+    $defStatus = if ($defOn) { "ON" } else { "OFF" }
+    $r += "=== Windows Defender ===`n"
+    $r += "  Antivirus Enabled: $($def.AntivirusEnabled)`n"
+    $r += "  Real-Time Protection: $($def.RealTimeProtectionEnabled)`n"
+    $r += "  Signatures Updated: $($def.AntivirusSignatureLastUpdated.ToString('yyyy-MM-dd HH:mm'))`n"
+    $r += "  Last Quick Scan: $($def.QuickScanEndTime.ToString('yyyy-MM-dd HH:mm'))`n"
+    $r += "  Last Full Scan: $($def.FullScanEndTime.ToString('yyyy-MM-dd HH:mm'))`n"
+    $threats = try { Get-MpThreatDetection -ErrorAction Stop | Select-Object -First 5 } catch { @() }
+    if ($threats.Count -gt 0) {
+        $r += "  Recent Threats ($($threats.Count)):`n"
+        foreach ($t in $threats) {
+            $r += "    - $($t.ThreatID) at $($t.InitialDetectionTime.ToString('yyyy-MM-dd HH:mm'))`n"
+        }
+    } else { $r += "  Recent Threats: None`n" }
+} else {
+    $defStatus = "N/A"
+    $r += "=== Windows Defender ===`n  Not available`n"
+}
+
+# --- Firewall ---
+$fw = Get-NetFirewallProfile -ErrorAction SilentlyContinue
+$fwOn = 0; $fwTotal = 0
+if ($fw) {
+    $r += "`n=== Firewall ===`n"
+    foreach ($p in $fw) {
+        $fwTotal++
+        if ($p.Enabled) { $fwOn++ }
+        $r += "  $($p.Name): $(if ($p.Enabled) {'Enabled'} else {'DISABLED'})`n"
+    }
+}
+$fwStatus = if ($fwTotal -eq 0) { "N/A" } elseif ($fwOn -eq $fwTotal) { "ON" } elseif ($fwOn -gt 0) { "PARTIAL" } else { "OFF" }
+
+# --- UAC ---
+$uac = try { Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name EnableLUA -ErrorAction Stop } catch { -1 }
+$consent = try { Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name ConsentPromptBehaviorAdmin -ErrorAction Stop } catch { -1 }
+$uacStatus = if ($uac -eq 1) { "ON" } elseif ($uac -eq 0) { "OFF" } else { "N/A" }
+$r += "`n=== UAC ===`n"
+$r += "  Enabled: $(if ($uac -eq 1) {'Yes'} elseif ($uac -eq 0) {'No'} else {'Unknown'})`n"
+$consentDesc = switch ($consent) { 0 {"Elevate without prompting"} 1 {"Prompt for credentials on secure desktop"} 2 {"Prompt for consent on secure desktop"} 3 {"Prompt for credentials"} 4 {"Prompt for consent"} 5 {"Prompt for consent for non-Windows binaries (default)"} default {"Unknown ($consent)"} }
+$r += "  Admin Prompt Behavior: $consentDesc`n"
+
+# --- BitLocker ---
+$bl = try { Get-BitLockerVolume -ErrorAction Stop } catch { $null }
+$blStatus = "N/A"
+$r += "`n=== BitLocker ===`n"
+if ($bl) {
+    foreach ($v in $bl) {
+        $r += "  $($v.MountPoint) $($v.VolumeType): $($v.ProtectionStatus)`n"
+        if ($v.ProtectionStatus -eq 'On') { $blStatus = "ON" }
+        elseif ($blStatus -ne "ON") { $blStatus = "OFF" }
+    }
+} else { $r += "  Not available (Windows Home or not supported)`n" }
+
+# --- Pending Updates ---
+$r += "`n=== Updates ===`n"
+$hotfixes = Get-CimInstance -ClassName Win32_QuickFixEngineering -ErrorAction SilentlyContinue | Sort-Object InstalledOn -Descending | Select-Object -First 5
+if ($hotfixes) {
+    $r += "  Last Installed Patches:`n"
+    foreach ($h in $hotfixes) {
+        $date = if ($h.InstalledOn) { $h.InstalledOn.ToString('yyyy-MM-dd') } else { 'Unknown' }
+        $r += "    $($h.HotFixID) ($date) $($h.Description)`n"
+    }
+}
+$pending = try {
+    $s = New-Object -ComObject Microsoft.Update.Session
+    $s.CreateUpdateSearcher().Search('IsInstalled=0').Updates.Count
+} catch { -1 }
+if ($pending -ge 0) { $r += "  Pending Updates: $pending`n" }
+else { $r += "  Pending Updates: Could not check`n" }
+
+# --- PowerShell Execution Policy ---
+$r += "`n=== PowerShell Execution Policy ===`n"
+$policies = Get-ExecutionPolicy -List | Where-Object { $_.Policy -ne 'Undefined' }
+foreach ($p in $policies) { $r += "  $($p.Scope): $($p.Policy)`n" }
+if (-not $policies) { $r += "  All scopes: Undefined`n" }
+
+# --- Open Shares ---
+$shares = Get-SmbShare -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '^\w\$|^IPC\$|^ADMIN\$' }
+$r += "`n=== Open Shares ===`n"
+if ($shares) {
+    foreach ($s in $shares) { $r += "  $($s.Name): $($s.Path) ($($s.ShareType))`n" }
+} else { $r += "  None (only default admin shares)`n" }
+
+# --- Remote Desktop ---
+$rdp = try { Get-ItemPropertyValue -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -ErrorAction Stop } catch { -1 }
+$rdpStatus = if ($rdp -eq 0) { "ON" } elseif ($rdp -eq 1) { "OFF" } else { "N/A" }
+$r += "`n=== Remote Desktop ===`n"
+$r += "  $(if ($rdp -eq 0) {'ENABLED (connections allowed)'} elseif ($rdp -eq 1) {'Disabled (connections denied)'} else {'Unknown'})`n"
+
+# --- Summary ---
+$summary = "DEFENDER: $defStatus | FIREWALL: $fwStatus | UAC: $uacStatus | BITLOCKER: $blStatus | RDP: $rdpStatus"
+Write-Output "=== Quick Summary ===`n  $summary`n`n$r"
+"""
+    valid, msg = validate_command(ps_script, trusted=True)
+    if not valid:
+        return f"Security Error: {msg}"
+    response, status = desktop.execute_command(ps_script, timeout=60)
+    if status != 0:
+        return f"Security audit failed (exit {status}): {response.strip()}"
+    return response.strip()
+
+
+def _validate_hostname(target: str) -> tuple[bool, str]:
+    """Validate a hostname/IP for network operations: length, characters, SSRF."""
+    if not target or not target.strip():
+        return False, "Target is required."
+    target = target.strip()
+    valid, msg = validate_text(target, max_length=253)
+    if not valid:
+        return False, msg
+    # Only allow safe hostname characters (alphanumeric, dots, hyphens, colons for IPv6)
+    import re
+
+    if not re.match(r"^[a-zA-Z0-9._:\-]+$", target):
+        return False, f"Target contains invalid characters: {target}"
+    # SSRF check: resolve and check against blocked IP ranges
+    try:
+        ip = ipaddress.ip_address(socket.gethostbyname(target))
+        for blocked in BLOCKED_IP_RANGES:
+            if ip in blocked:
+                return False, f"Target resolves to blocked IP range: {ip}"
+    except socket.gaierror:
+        return False, f"Could not resolve hostname: {target}"
+    return True, "OK"
+
+
+@mcp.tool(
+    name="Network-Tool",
+    description='Network diagnostics and information. Actions: "status" (default) shows adapters/IPs/gateway/DNS/connectivity, "connections" shows active TCP and listening ports with process names (top 30), "ping" pings a host (requires target), "dns" resolves a hostname (requires target), "wifi" shows current connection and available networks.',
+)
+def network_tool(
+    action: Literal["status", "connections", "ping", "dns", "wifi"] = "status",
+    target: str = None,
+) -> str:
+    ensure_com()
+
+    if action == "status":
+        ps_script = r"""
+$r = ""
+
+# Adapters
+$r += "=== Network Adapters ===`n"
+$adapters = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' }
+foreach ($a in $adapters) {
+    $r += "  $($a.Name) ($($a.InterfaceDescription)): $($a.LinkSpeed)`n"
+    $ips = Get-NetIPAddress -InterfaceIndex $a.ifIndex -ErrorAction SilentlyContinue | Where-Object { $_.AddressFamily -eq 'IPv4' }
+    foreach ($ip in $ips) { $r += "    IPv4: $($ip.IPAddress)/$($ip.PrefixLength)`n" }
+    $ips6 = Get-NetIPAddress -InterfaceIndex $a.ifIndex -ErrorAction SilentlyContinue | Where-Object { $_.AddressFamily -eq 'IPv6' -and $_.IPAddress -notlike 'fe80*' }
+    foreach ($ip in $ips6) { $r += "    IPv6: $($ip.IPAddress)/$($ip.PrefixLength)`n" }
+}
+
+# Gateway
+$gw = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($gw) { $r += "`nDefault Gateway: $($gw.NextHop)`n" }
+
+# DNS Servers
+$dns = Get-DnsClientServerAddress -ErrorAction SilentlyContinue | Where-Object { $_.ServerAddresses.Count -gt 0 -and $_.AddressFamily -eq 2 } | Select-Object -First 3
+$r += "`nDNS Servers:`n"
+foreach ($d in $dns) { $r += "  $($d.InterfaceAlias): $($d.ServerAddresses -join ', ')`n" }
+
+# Connectivity
+$ping = Test-Connection -ComputerName 8.8.8.8 -Count 1 -Quiet -ErrorAction SilentlyContinue
+$r += "`nInternet Connectivity: $(if ($ping) {'OK'} else {'UNREACHABLE'})`n"
+
+Write-Output $r
+"""
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=30)
+        if status != 0:
+            return f"Network status failed: {response.strip()}"
+        return response.strip()
+
+    elif action == "connections":
+        ps_script = r"""
+$r = "=== Active Connections ===`n"
+$conns = Get-NetTCPConnection -ErrorAction SilentlyContinue |
+    Where-Object { $_.State -eq 'Established' -or $_.State -eq 'Listen' } |
+    Sort-Object State, LocalPort |
+    Select-Object -First 30
+
+foreach ($c in $conns) {
+    $proc = try { (Get-Process -Id $c.OwningProcess -ErrorAction Stop).ProcessName } catch { "PID:$($c.OwningProcess)" }
+    $remote = if ($c.State -eq 'Listen') { '*' } else { "$($c.RemoteAddress):$($c.RemotePort)" }
+    $r += "  $($c.State.ToString().PadRight(12)) $($c.LocalAddress):$($c.LocalPort) -> $remote [$proc]`n"
+}
+
+$listening = (Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue).Count
+$established = (Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue).Count
+$r += "`nTotal: $listening listening, $established established`n"
+
+Write-Output $r
+"""
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=15)
+        if status != 0:
+            return f"Connection listing failed: {response.strip()}"
+        return response.strip()
+
+    elif action == "ping":
+        if not target:
+            return "Error: 'target' parameter is required for ping action."
+        ok, msg = _validate_hostname(target)
+        if not ok:
+            return f"Validation Error: {msg}"
+        ps_script = f"Test-Connection -ComputerName '{target}' -Count 4 | Format-Table -Property Address, Latency, Status -AutoSize | Out-String"
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=30)
+        if status != 0:
+            return f"Ping failed: {response.strip()}"
+        return f"Ping {target}:\n{response.strip()}"
+
+    elif action == "dns":
+        if not target:
+            return "Error: 'target' parameter is required for dns action."
+        ok, msg = _validate_hostname(target)
+        if not ok:
+            return f"Validation Error: {msg}"
+        ps_script = f"Resolve-DnsName -Name '{target}' -ErrorAction Stop | Format-Table -AutoSize | Out-String"
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=15)
+        if status != 0:
+            return f"DNS resolution failed: {response.strip()}"
+        return f"DNS lookup for {target}:\n{response.strip()}"
+
+    elif action == "wifi":
+        ps_script = r"""
+$r = "=== WiFi Status ===`n"
+$iface = netsh wlan show interfaces 2>&1
+if ($LASTEXITCODE -eq 0 -and $iface -notmatch 'not running') {
+    $r += ($iface | Out-String).Trim() + "`n"
+} else {
+    $r += "  WiFi service not available`n"
+}
+
+$r += "`n=== Available Networks ===`n"
+$nets = netsh wlan show networks 2>&1
+if ($LASTEXITCODE -eq 0 -and $nets -notmatch 'not running') {
+    $r += ($nets | Out-String).Trim() + "`n"
+} else {
+    $r += "  Could not scan networks`n"
+}
+
+Write-Output $r
+"""
+        valid, msg = validate_command(ps_script, trusted=True)
+        if not valid:
+            return f"Security Error: {msg}"
+        response, status = desktop.execute_command(ps_script, timeout=15)
+        if status != 0:
+            return f"WiFi info failed: {response.strip()}"
+        return response.strip()
+
+    return f"Unknown action: {action}"
+
+
 # ── Disk Analysis & File Management Tools ─────────────────────────────────────
 
 import re as _re

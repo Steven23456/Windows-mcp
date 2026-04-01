@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0] - 2026-03-31
+
+### Added
+- **Security-Audit-Tool**: Comprehensive Windows security scan — Defender status, Firewall per-profile, UAC level, BitLocker, pending updates, PowerShell execution policy, open shares, Remote Desktop status. Quick boolean summary at top.
+- **Network-Tool**: Network diagnostics with 5 actions — `status` (adapters/IPs/gateway/DNS/connectivity), `connections` (active TCP + listening ports with process names), `ping` (with SSRF protection), `dns` (hostname resolution with SSRF protection), `wifi` (SSID/signal/available networks).
+- `_validate_hostname()` helper for hostname/IP input validation with SSRF protection
+- 26 new tests in `test_security_network_tools.py`
+
+### Security
+- Network-Tool `target` parameter validated against `BLOCKED_IP_RANGES` to prevent SSRF
+- Hostname input restricted to safe characters (alphanumeric, dots, hyphens, colons)
+
 ## [0.6.2] - 2026-03-31
 
 ### Fixed

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Windows-MCP is an MCP server that enables AI agents to interact with Windows OS through UI automation and a11y (accessibility) tree traversal.
 
-**Version**: 0.6.2 | **Platform**: Windows 7-11 | **Python**: 3.13+ | **Entry Point**: `main.py`
+**Version**: 0.7.0 | **Platform**: Windows 7-11 | **Python**: 3.13+ | **Entry Point**: `main.py`
 
 ## Architecture
 
@@ -56,7 +56,7 @@ pip install -e .
 
 ## MCP Tools
 
-42 tools and 2 resources defined in `main.py` via `@mcp.tool()` and `@mcp.resource()`. Key tool: `State-Tool` is the primary context-gathering tool — returns desktop state + UI elements, optionally with annotated screenshot (`use_vision=True`). Resources: `windows-mcp://current-directory` (server cwd) and `windows-mcp://security-config` (active security rules).
+44 tools and 2 resources defined in `main.py` via `@mcp.tool()` and `@mcp.resource()`. Key tool: `State-Tool` is the primary context-gathering tool — returns desktop state + UI elements, optionally with annotated screenshot (`use_vision=True`). Resources: `windows-mcp://current-directory` (server cwd) and `windows-mcp://security-config` (active security rules).
 
 ### Testing & Inspection Tools (v0.5.0)
 - `Get-Element-Property-Tool`: Read element properties (value, checked state, enabled, bounding box, automation patterns)
