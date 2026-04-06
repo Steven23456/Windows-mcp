@@ -40,3 +40,8 @@ py-modules = ["main", "windows_mcp_entry", "__main__"]
 
 [tool.setuptools.exclude-package-data]
 "*" = [".claude/*", ".mcp.json", "*.local.json"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

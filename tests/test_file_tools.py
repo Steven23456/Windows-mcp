@@ -105,11 +105,10 @@ class TestSanitizePath:
         with pytest.raises(ValueError, match="unsafe characters"):
             _sanitize_path('C:\\foo"bar')
 
-    def test_parentheses_rejected(self):
+    def test_parentheses_allowed(self):
         from main import _sanitize_path
 
-        with pytest.raises(ValueError, match="unsafe characters"):
-            _sanitize_path("C:\\foo(bar)")
+        assert _sanitize_path("C:\\Program Files (x86)") == "C:\\Program Files (x86)"
 
     def test_curly_braces_rejected(self):
         from main import _sanitize_path

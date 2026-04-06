@@ -2647,7 +2647,7 @@ from datetime import datetime as _datetime
 
 def _sanitize_path(val: str) -> str:
     """Reject paths with PowerShell metacharacters that could enable injection."""
-    if _re.search(r"['\"`$;|&{}()\[\]]", val):
+    if _re.search(r"['\"`$;|&{}\[\]]", val):
         raise ValueError(f"Path contains unsafe characters: {val!r}")
     return val
 
@@ -2681,9 +2681,10 @@ def _check_allowed_path(path: str) -> str:
     if ALLOWED_PATHS:
         resolved = os.path.normpath(os.path.abspath(path)).lower()
         if not any(
-            resolved == os.path.normpath(ap).lower()
-            or resolved.startswith(os.path.normpath(ap).lower() + os.sep)
+            resolved == norm
+            or resolved.startswith(norm if norm.endswith(os.sep) else norm + os.sep)
             for ap in ALLOWED_PATHS
+            for norm in [os.path.normpath(ap).lower()]
         ):
             raise ValueError(f"Path not in allowed paths: {path}")
     return path

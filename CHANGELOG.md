@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.2] - 2026-04-05
+
+### Fixed
+- `_check_allowed_path` failed on drive roots — `C:\` + `os.sep` produced double backslash `C:\\` that never matched
+- `_sanitize_path` blocked parentheses, rejecting legitimate paths like `C:\Program Files (x86)`
+
 ## [0.8.1] - 2026-04-05
 
 ### Changed
