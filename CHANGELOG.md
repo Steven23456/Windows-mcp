@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.8.1] - 2026-04-05
+
+### Changed
+- Added `C:\` to `ALLOWED_PATHS` — tools can now access the entire C drive
+
 ## [0.8.0] - 2026-04-01
 
 ### Added

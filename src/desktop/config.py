@@ -46,4 +46,5 @@ import os
 ALLOWED_PATHS: list[str] = [
     os.path.expanduser("~"),
     os.getcwd(),
+    "C:\\",
 ]
