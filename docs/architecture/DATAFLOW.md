@@ -127,11 +127,8 @@ The `State-Tool` represents the most complex data flow in the system, orchestrat
      │              ├──────────────────────────────┼─────────────►│
      │              │◄─────────────────────────────┼──────────────┤
      │              │               │              │              │
-     │              │ mouseDown()   │              │              │
-     │              ├──────────────────────────────►              │
-     │              │ click()       │              │              │
-     │              ├──────────────────────────────►              │
-     │              │ mouseUp()     │              │              │
+     │              │ click(x,y,    │              │              │
+     │              │  button,clicks)              │              │
      │              ├──────────────────────────────►              │
      │              │               │              │              │
      │ result str   │               │              │              │
@@ -149,7 +146,7 @@ Input:
 Processing:
   1. cursor.move_to(loc)    # Human-like cursor movement
   2. desktop.get_element_under_cursor()  # Identify target
-  3. pg.mouseDown() / pg.click() / pg.mouseUp()
+  3. pg.click(x=x, y=y, button=button, clicks=clicks)
 
 Output:
   f'{num_clicks} {button} Clicked on {control.Name} at ({x},{y})'
@@ -313,7 +310,7 @@ Processing:
   2. Add padding (20px border)
      └─► Image.new() + paste()
 
-  3. For each node (parallel):
+  3. For each node (sequential — PIL ImageDraw is not thread-safe):
      ├─► Scale bounding box
      ├─► Generate random color
      ├─► Draw rectangle outline
@@ -415,7 +412,7 @@ Opened Apps:
 ...
 
 List of Interactive Elements:
-Label: 0 App Name: {app} ControlType: {type} Control Name: {name} Shortcut: {key} Cordinates: ({x},{y})
+Label: 0 App Name: {app} ControlType: {type} Control Name: {name} Shortcut: {key} Coordinates: ({x},{y})
 Label: 1 ...
 ...
 
@@ -424,7 +421,7 @@ App Name: {app} Name: {text}
 ...
 
 List of Scrollable Elements:
-Label: {N} App Name: {app} Name: {name} Cordinates: ({x},{y}) Horizontal Scrollable: {bool} Vertical Scrollable: {bool}
+Label: {N} App Name: {app} Name: {name} Coordinates: ({x},{y}) Horizontal Scrollable: {bool} Vertical Scrollable: {bool}
 ...
 ```
 

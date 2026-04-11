@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Windows-MCP is an MCP server that enables AI agents to interact with Windows OS through UI automation and a11y (accessibility) tree traversal.
 
-**Version**: 0.8.0 | **Platform**: Windows 7-11 | **Python**: 3.13+ | **Entry Point**: `main.py`
+**Version**: 0.8.3 | **Platform**: Windows 7-11 | **Python**: 3.13+ | **Entry Point**: `main.py`
 
 ## Architecture
 
@@ -27,7 +27,7 @@ Windows-MCP is an MCP server that enables AI agents to interact with Windows OS 
   - **Scrollable**: Elements with scroll patterns
 - DOM correction logic handles a11y tree quirks (list items with child links, unnamed groups)
 
-**Tool Definitions (`main.py`)** - 25 MCP tools + 2 MCP resources via FastMCP
+**Tool Definitions (`main.py`)** - 45 MCP tools + 2 MCP resources via FastMCP
 - Mouse: `humancursor` library (human-like movement)
 - Keyboard: `pyautogui` library
 - `State-Tool` is primary context-gathering tool
@@ -94,7 +94,7 @@ pip install -e .
 - `BLOCKED_COMMANDS` in `src/desktop/config.py`: 11 dangerous commands (format, shutdown, rm, del, etc.)
 - `BLOCKED_ARGUMENTS`: 9 injection-risk flags (-enc, -encodedcommand, --exec, etc.)
 - `BLOCKED_OPERATORS`: `;` and `` ` `` blocked; `&` and `|` allowed (essential PS operators)
-- `MAX_COMMAND_LENGTH = 2000` - command length limit
+- `MAX_COMMAND_LENGTH = 10000` - command length limit (raised from 2000 to support internal multi-block scripts)
 - `ALLOWED_PATHS`: workingDir restricted to user home + server cwd
 - Validation runs in `validate_command()` in `main.py` before any shell execution
 
@@ -140,9 +140,13 @@ pg.PAUSE = 1.0       # 1-second delay between operations
 
 ## Testing
 
-No test framework is configured yet. There are no automated tests. Manual testing is done via:
+pytest is in dev dependencies but no automated test suite exists yet. Manual testing:
 ```bash
+# MCP inspector (interactive tool testing)
 npx @modelcontextprotocol/inspector python main.py
+
+# Launch test app with various UI controls (tkinter)
+python tests/test_app.py
 ```
 
 ## Code Style

@@ -37,7 +37,7 @@
    Unlike many automation tools, Windows MCP doesn't rely on any traditional computer vision techniques or specific fine-tuned models; it works with any LLMs, reducing complexity and setup time.
 
 - **Rich Toolset for UI Automation**
-  25 tools for keyboard, mouse, clipboard, shell, window management, element search, UI state capture, notifications, process management, OCR, and audio control.
+  45 tools for keyboard, mouse, clipboard, shell, window management, element search, UI state capture, notifications, process management, OCR, audio control, disk analysis, file management, network diagnostics, security auditing, and storage cleanup.
 
 - **Command Security**
   Built-in protection against dangerous commands (format, shutdown, rm, etc.), injection attacks (blocked operators and encoded command arguments), working directory restrictions, and command length limits.
@@ -185,7 +185,7 @@ The `Powershell-Tool` includes multiple layers of protection:
 - **Blocked arguments**: `-enc`, `-encodedcommand`, `--exec`, and other injection-risk flags
 - **Blocked operators**: `;` and `` ` `` (backtick) to prevent command chaining and injection
 - **Path restriction**: `workingDir` limited to user home directory and server working directory
-- **Length limit**: Commands capped at 2000 characters
+- **Length limit**: Commands capped at 10,000 characters
 
 ## Star History
 
