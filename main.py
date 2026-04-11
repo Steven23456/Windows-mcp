@@ -390,6 +390,7 @@ def state_tool(use_vision: bool = False) -> str | list:
     description='Copy text to clipboard or retrieve current clipboard content. Use "copy" mode with text parameter to copy, "paste" mode to retrieve.',
 )
 def clipboard_tool(mode: Literal["copy", "paste"], text: str = None) -> str:
+    ensure_com()
     if mode == "copy":
         if text:
             pc.copy(text)  # Copy text to system clipboard
@@ -423,11 +424,7 @@ def click_tool(
     x, y = loc
     cursor.move_to(loc)
     control = desktop.get_element_under_cursor()
-    pg.mouseDown()
-    try:
-        pg.click(button=button, clicks=clicks)
-    finally:
-        pg.mouseUp()
+    pg.click(x=x, y=y, button=button, clicks=clicks)
     num_clicks = {1: "Single", 2: "Double", 3: "Triple"}
     return f"{num_clicks.get(clicks)} {button} Clicked on {control.Name} Element with ControlType {control.ControlTypeName} at ({x},{y})."
 
@@ -553,6 +550,7 @@ def drag_tool(from_loc: tuple[int, int], to_loc: tuple[int, int]) -> str:
     description="Move mouse cursor to specific coordinates without clicking. Useful for hovering over elements or positioning cursor before other actions.",
 )
 def move_tool(to_loc: tuple[int, int]) -> str:
+    ensure_com()
     # Input validation
     valid, msg = validate_coordinates(to_loc, "to_loc")
     if not valid:
@@ -607,6 +605,7 @@ def key_tool(key: str = "") -> str:
     description="Pause execution for specified duration in seconds. Useful for waiting for applications to load, animations to complete, or adding delays between actions.",
 )
 def wait_tool(duration: int) -> str:
+    ensure_com()
     # Input validation
     if duration < 0:
         return "Validation Error: duration cannot be negative."
@@ -629,7 +628,15 @@ def scrape_tool(url: str) -> str:
     if not is_safe:
         return f"Security Error: {message}"
 
-    response = requests.get(url, timeout=10)
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+    except requests.ConnectionError:
+        return f"Error: Could not connect to {url}"
+    except requests.Timeout:
+        return f"Error: Request to {url} timed out."
+    except requests.HTTPError as e:
+        return f"Error: HTTP {e.response.status_code} for {url}"
     # Limit response size to 1MB to prevent memory issues
     MAX_RESPONSE_SIZE = 1_000_000
     html = response.text[:MAX_RESPONSE_SIZE]
@@ -2758,6 +2765,7 @@ Write-Output $r
     description="Find reclaimable disk space: temp files, caches (npm, pip, bun, nuget), node_modules, Recycle Bin, browser caches, Windows Update cache. Returns sizes for each category. Does NOT delete anything — only reports.",
 )
 def disk_cleanup_tool() -> str:
+    ensure_com()
     ps_script = r"""
 $r = "=== Reclaimable Disk Space ===`n`n"
 

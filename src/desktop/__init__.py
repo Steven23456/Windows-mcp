@@ -30,11 +30,7 @@ class Desktop:
         tree_state = tree.get_state()
         if use_vision:
             nodes = tree_state.interactive_nodes
-            annotated_screenshot = (
-                tree.annotated_screenshot(nodes=nodes, scale=0.5)
-                if use_vision
-                else None
-            )
+            annotated_screenshot = tree.annotated_screenshot(nodes=nodes, scale=0.5)
             screenshot = self.screenshot_in_bytes(screenshot=annotated_screenshot)
         else:
             screenshot = None
@@ -133,11 +129,11 @@ class Desktop:
         return Size(width=window.width(), height=window.height())
 
     def is_app_visible(self, app) -> bool:
-        is_minimized = self.get_app_status(app) != "Minimized"
+        is_not_minimized = self.get_app_status(app) != "Minimized"
         size = self.get_app_size(app)
         area = size.width * size.height
         is_overlay = self.is_overlay_app(app)
-        return not is_overlay and is_minimized and area > 10
+        return not is_overlay and is_not_minimized and area > 10
 
     def is_overlay_app(self, element: Control) -> bool:
         no_children = len(element.GetChildren()) == 0
@@ -211,7 +207,7 @@ class Desktop:
 
         return (f"{action.title()}d {app_name}.", 0)
 
-    def get_monitors(self) -> list[dict]:
+    def get_monitors(self) -> dict:
         """Get info about all connected monitors using ctypes Win32 API."""
         import ctypes
         import ctypes.wintypes
