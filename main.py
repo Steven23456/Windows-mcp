@@ -637,6 +637,8 @@ def scrape_tool(url: str) -> str:
         return f"Error: Request to {url} timed out."
     except requests.HTTPError as e:
         return f"Error: HTTP {e.response.status_code} for {url}"
+    except requests.RequestException as e:
+        return f"Error: Request failed for {url}: {e}"
     # Limit response size to 1MB to prevent memory issues
     MAX_RESPONSE_SIZE = 1_000_000
     html = response.text[:MAX_RESPONSE_SIZE]

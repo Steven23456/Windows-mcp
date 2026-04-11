@@ -415,7 +415,7 @@ Opened Apps:
 ...
 
 List of Interactive Elements:
-Label: 0 App Name: {app} ControlType: {type} Control Name: {name} Shortcut: {key} Cordinates: ({x},{y})
+Label: 0 App Name: {app} ControlType: {type} Control Name: {name} Shortcut: {key} Coordinates: ({x},{y})
 Label: 1 ...
 ...
 
@@ -424,7 +424,7 @@ App Name: {app} Name: {text}
 ...
 
 List of Scrollable Elements:
-Label: {N} App Name: {app} Name: {name} Cordinates: ({x},{y}) Horizontal Scrollable: {bool} Vertical Scrollable: {bool}
+Label: {N} App Name: {app} Name: {name} Coordinates: ({x},{y}) Horizontal Scrollable: {bool} Vertical Scrollable: {bool}
 ...
 ```
 
