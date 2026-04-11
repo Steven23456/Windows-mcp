@@ -13,14 +13,14 @@ Serves as the MCP protocol interface, exposing Windows automation capabilities a
 
 ### Responsibilities
 - Initialize FastMCP server with metadata and lifecycle handlers
-- Define and register all 14 MCP tools
+- Define and register all 45 MCP tools
 - Coordinate between MCP protocol and Desktop/Tree layers
 - Format responses for protocol compliance
 
 ### Key Configurations
 
 ```python
-pg.FAILSAFE = False    # Disable corner abort
+pg.FAILSAFE = True     # Abort by moving mouse to corner
 pg.PAUSE = 1.0         # Pause between operations
 ```
 
@@ -29,7 +29,7 @@ pg.PAUSE = 1.0         # Pause between operations
 ```python
 @asynccontextmanager
 async def lifespan(app: FastMCP):
-    await asyncio.sleep(1)  # Startup delay
+    # Server is ready immediately - no artificial delay needed
     yield
 
 mcp = FastMCP(name='windows-mcp', instructions=instructions, lifespan=lifespan)
@@ -197,7 +197,7 @@ Generates screenshot with bounding box annotations.
 1. Capture desktop screenshot
 2. Add padding (20px)
 3. For each element: draw colored bounding box + label
-4. Use parallel execution for annotation drawing
+4. Draw annotations sequentially (PIL ImageDraw is not thread-safe)
 
 ---
 

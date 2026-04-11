@@ -11,7 +11,7 @@ Windows-MCP follows a layered architecture pattern with clear separation of conc
 │  ┌────────────────────────────────────────────────────────────────────────┐ │
 │  │                         FastMCP Server                                 │ │
 │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐ │ │
-│  │  │State-Tool│ │Click-Tool│ │Type-Tool │ │Launch-Tool│ │...10 more   │ │ │
+│  │  │State-Tool│ │Click-Tool│ │Type-Tool │ │Launch-Tool│ │...41 more   │ │ │
 │  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────────┘ │ │
 │  └────────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -69,14 +69,14 @@ Windows-MCP follows a layered architecture pattern with clear separation of conc
 
 The top layer serves as the protocol interface between AI agents and the Windows automation functionality. Built on FastMCP framework, it:
 
-- Defines and registers 14 MCP tools with decorators (`@mcp.tool`)
+- Defines and registers 45 MCP tools with decorators (`@mcp.tool`)
 - Manages the server lifecycle with async context manager
 - Coordinates between user input and lower layer operations
 - Handles response formatting for MCP protocol compliance
 
 **Key Configuration:**
 ```python
-pg.FAILSAFE = False  # Disable fail-safe corner abort
+pg.FAILSAFE = True   # Abort by moving mouse to corner (security)
 pg.PAUSE = 1.0       # 1-second delay between operations
 ```
 
@@ -249,7 +249,8 @@ DEFAULT_ACTIONS = {
 
 ## Security Considerations
 
-1. **No FAILSAFE**: `pg.FAILSAFE = False` disables the mouse corner abort feature
-2. **PowerShell Execution**: Direct command execution requires trust in input sources
-3. **UI Automation Access**: Requires appropriate Windows permissions
-4. **No Input Sanitization**: Tool parameters are passed directly to system APIs
+1. **FAILSAFE Enabled**: `pg.FAILSAFE = True` allows aborting by moving mouse to corner
+2. **Command Security**: `validate_command()` blocks dangerous commands, arguments, and operators before PowerShell execution
+3. **Input Sanitization**: `_sanitize_path()`, `_sanitize_name()`, `_validate_date()`, `_validate_extension()` sanitize user-supplied parameters; `_check_allowed_path()` enforces path restrictions
+4. **SSRF Protection**: `is_url_safe()` blocks internal/private network access for HTTP tools
+5. **UI Automation Access**: Requires appropriate Windows permissions

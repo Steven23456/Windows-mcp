@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.3] - 2026-04-10
+
+### Fixed
+- **Critical**: `default_factory=[]` in `TreeState` dataclass passed a list instance instead of a callable — raises `TypeError` on Python 3.12+ and shares mutable state between instances on older versions
+- `get_appwise_nodes` crashes with `KeyError` when Taskbar or Program Manager is not visible (e.g., auto-hide taskbar, Remote Desktop)
+- Thread-unsafe `PIL.ImageDraw` in `annotated_screenshot()` — concurrent `draw.rectangle()`/`draw.text()` via `ThreadPoolExecutor` could corrupt annotated images; replaced with sequential loop
+- Click-Tool: extra `pg.mouseDown()` before `pg.click()` produced double mouse-down (drag-like behavior); `pg.click()` already handles down+up internally
+- `scrape_tool`: unhandled `requests.get()` exceptions (`ConnectionError`, `Timeout`, `HTTPError`, and other `RequestException` subclasses) produced raw tracebacks instead of user-friendly messages
+- Redundant `if use_vision` ternary inside already-true `if use_vision:` block in `Desktop.get_state()`
+- `get_monitors` return type annotation said `list[dict]` but method returns `dict`
+- `get_appwise_nodes` return type annotation missing `ScrollElementNode` from 3-tuple
+
+### Changed
+- Added missing `ensure_com()` calls to `clipboard_tool`, `move_tool`, `wait_tool`, `disk_cleanup_tool`
+- Renamed misleading variable `is_minimized` → `is_not_minimized` in `Desktop.is_app_visible()`
+- Fixed typo `Cordinates` → `Coordinates` in State-Tool output and docs
+- Updated stale docs: tool count (14/25 → 45), `FAILSAFE` (False → True), Click-Tool sequence diagram, annotation drawing (parallel → sequential), security section (added input sanitization), command length limit (2000 → 10000)
+- Bumped version to 0.8.3 in `pyproject.toml` and `manifest.json`
+
 ## [0.8.2] - 2026-04-05
 
 ### Fixed

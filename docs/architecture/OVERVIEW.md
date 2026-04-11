@@ -69,7 +69,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 ## Available Tools
 
-Windows-MCP exposes 14 tools through the MCP protocol:
+Windows-MCP exposes 45 tools through the MCP protocol. Key categories:
 
 ### Desktop State Tools
 | Tool | Purpose |
@@ -111,7 +111,7 @@ Windows-MCP exposes 14 tools through the MCP protocol:
 - **State Capture Latency**: 1.5 - 2.3 seconds (varies with application count)
 - **PyAutoGUI Pause**: 1.0 second between operations (configurable)
 - **Tree Traversal**: Parallel across applications via ThreadPoolExecutor
-- **Screenshot Annotation**: Concurrent label drawing
+- **Screenshot Annotation**: Sequential label drawing (PIL ImageDraw is not thread-safe)
 
 ## Core Dependencies
 

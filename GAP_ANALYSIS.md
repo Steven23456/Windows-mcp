@@ -18,7 +18,7 @@ Comparison of `@simonb97/server-win-cli` (v1.x) and `windows-mcp` (v0.2.0).
 | SSH connections | Yes (full CRUD) | No | Out of scope |
 | Configurable via config.json | Yes | No (hardcoded) | Not needed |
 | MCP Resources (cwd, config) | Yes | Yes (2 resources) | **Done** |
-| **UI automation** | **No** | **Yes (14 tools)** | Core advantage |
+| **UI automation** | **No** | **Yes (45 tools)** | Core advantage |
 | **Screenshot/vision** | **No** | **Yes** | Core advantage |
 | **A11y tree traversal** | **No** | **Yes** | Core advantage |
 | **Mouse/keyboard/clipboard** | **No** | **Yes (10 tools)** | Core advantage |
