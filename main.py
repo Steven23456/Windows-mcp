@@ -1,6 +1,6 @@
 import os
 from contextlib import asynccontextmanager
-from fastmcp.utilities.types import Image as MCPImage
+from mcp.server.fastmcp import Image as MCPImage
 from humancursor import SystemCursor
 from platform import system, release
 from markdownify import markdownify
@@ -14,7 +14,7 @@ from src.desktop.config import (
 from src.desktop import Desktop
 from urllib.parse import urlparse
 from datetime import datetime
-from fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP
 from textwrap import dedent
 from typing import Literal
 import uiautomation as ua
