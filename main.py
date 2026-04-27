@@ -1,7 +1,10 @@
 import os
 from contextlib import asynccontextmanager
 from mcp.server.fastmcp import Image as MCPImage
-from humancursor import SystemCursor
+# humancursor is lazy-loaded — see _LazyCursor below. Importing it eagerly
+# adds ~3s to startup (pyautogui screen calibration + bezier-curve table
+# generation), which pushes MCP `initialize` past Claude Code's bind timeout
+# and causes the server to silently fail to register tools.
 from platform import system, release
 from markdownify import markdownify
 from src.desktop.config import (
@@ -17,11 +20,13 @@ from datetime import datetime
 from mcp.server.fastmcp import FastMCP
 from textwrap import dedent
 from typing import Literal
-import uiautomation as ua
-import pyautogui as pg
+# uiautomation and pyautogui are lazy-loaded — see _LazyModule below. Each
+# adds ~0.5–1.5s to startup; combined with humancursor that pushes MCP
+# `initialize` past Claude Code's bind timeout.
 import pyperclip as pc
 import ipaddress
-import requests
+# requests is imported lazily inside scrape_tool() — top-level import added
+# ~1.5s to startup, the largest single cost after humancursor.
 import socket
 import time
 from PIL import Image, ImageChops
@@ -37,10 +42,8 @@ def ensure_com():
         pass  # Already initialized
 
 
-# PyAutoGUI safety: FAILSAFE=True allows aborting by moving mouse to corner
-# Set to False only if corner-abort causes issues with your automation
-pg.FAILSAFE = True
-pg.PAUSE = 1.0
+# PyAutoGUI safety config (FAILSAFE corner-abort + 1s op pause) is applied
+# inside ``_configure_pyautogui`` and runs once on the lazy first-import.
 
 # Security: Block internal/private network URLs to prevent SSRF attacks
 BLOCKED_IP_RANGES = [
@@ -182,7 +185,68 @@ async def lifespan(app: FastMCP):
 
 
 desktop = Desktop()
-cursor = SystemCursor()
+
+
+class _LazyModule:
+    """Defers an arbitrary module import until first attribute access.
+
+    Used for ``uiautomation`` and ``pyautogui``: heavy imports whose cost
+    would otherwise push MCP `initialize` past Claude Code's bind timeout.
+    Optional ``on_import`` runs once after the first import — used to apply
+    pyautogui safety config without forcing an eager load.
+    """
+
+    def __init__(self, module_name, on_import=None):
+        # Use object.__setattr__ to avoid recursing through our own __getattr__
+        # / __setattr__ machinery.
+        object.__setattr__(self, "_module_name", module_name)
+        object.__setattr__(self, "_module", None)
+        object.__setattr__(self, "_on_import", on_import)
+
+    def _ensure_loaded(self):
+        if self._module is None:
+            import importlib
+
+            mod = importlib.import_module(self._module_name)
+            object.__setattr__(self, "_module", mod)
+            if self._on_import is not None:
+                self._on_import(mod)
+        return self._module
+
+    def __getattr__(self, name):
+        return getattr(self._ensure_loaded(), name)
+
+    def __setattr__(self, name, value):
+        # Setting an attribute (e.g. ``pg.FAILSAFE = True``) forces the
+        # underlying module to load. This also lets the `on_import` hook
+        # run before the user's manual override.
+        setattr(self._ensure_loaded(), name, value)
+
+
+class _LazyCursor:
+    """Wrapper that defers ``humancursor.SystemCursor()`` instantiation until
+    first attribute access. Same rationale as ``_LazyModule``, but for an
+    instance constructed at import time (eager) → at first use (lazy)."""
+
+    _instance = None
+
+    def __getattr__(self, name):
+        if _LazyCursor._instance is None:
+            from humancursor import SystemCursor
+
+            _LazyCursor._instance = SystemCursor()
+        return getattr(_LazyCursor._instance, name)
+
+
+def _configure_pyautogui(pg_module):
+    """One-shot pyautogui safety config, applied after the lazy import."""
+    pg_module.FAILSAFE = True  # corner-abort
+    pg_module.PAUSE = 1.0  # 1-second delay between operations
+
+
+ua = _LazyModule("uiautomation")
+pg = _LazyModule("pyautogui", on_import=_configure_pyautogui)
+cursor = _LazyCursor()
 command_history: list[dict] = []
 MAX_HISTORY_SIZE = 100
 mcp = FastMCP(name="windows-mcp", instructions=instructions, lifespan=lifespan)
@@ -623,6 +687,8 @@ def wait_tool(duration: int) -> str:
     description="Fetch and convert webpage content to markdown format. Provide full URL including protocol (http/https). Returns structured text content suitable for analysis.",
 )
 def scrape_tool(url: str) -> str:
+    import requests
+
     # Security: Validate URL to prevent SSRF attacks
     is_safe, message = is_url_safe(url)
     if not is_safe:
