@@ -15,13 +15,17 @@ dependencies = [
     "fuzzywuzzy>=0.18.0",
     "humancursor>=1.1.5",
     "markdownify>=1.1.0",
-    "pillow>=11.2.1",
+    "pillow>=12.2.0",
     "pyautogui>=0.9.54",
     "python-levenshtein>=0.27.1",
-    "requests>=2.32.3",
+    "requests>=2.33.0",
     "uiautomation>=2.0.24",
     "pyperclip>=1.8.2",
     "comtypes>=1.4.0",
+    "python-multipart>=0.0.26",
+    "starlette>=0.49.1",
+    "pygments>=2.20.0",
+    "cryptography>=46.0.7",
 ]
 
 [project.scripts]
@@ -43,5 +47,6 @@ py-modules = ["main", "windows_mcp_entry", "__main__"]
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.2",
+    "pytest>=9.0.3",
+    "python-dotenv>=1.2.2",
 ]
