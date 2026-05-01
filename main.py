@@ -891,6 +891,10 @@ def process_tool(
             valid, msg = validate_text(name, max_length=200)
             if not valid:
                 return f"Validation Error: {msg}"
+            try:
+                name = _sanitize_name(name)
+            except ValueError as e:
+                return f"Security Error: {e}"
             cmd = f'Get-Process -Name "{name}" -ErrorAction Stop | Select-Object Name, Id, @{{N="MemoryMB";E={{[math]::Round($_.WorkingSet64/1MB,1)}}}} | Format-Table -AutoSize | Out-String'
         else:
             cmd = 'Get-Process | Select-Object Name, Id, @{N="MemoryMB";E={[math]::Round($_.WorkingSet64/1MB,1)}} | Sort-Object MemoryMB -Descending | Select-Object -First 30 | Format-Table -AutoSize | Out-String'
@@ -909,6 +913,10 @@ def process_tool(
             valid, msg = validate_text(name, max_length=200)
             if not valid:
                 return f"Validation Error: {msg}"
+            try:
+                name = _sanitize_name(name)
+            except ValueError as e:
+                return f"Security Error: {e}"
             # Security: check name against blocked commands
             if name.lower().replace(".exe", "") in BLOCKED_COMMANDS:
                 return f"Security Error: Cannot kill blocked process: {name}"

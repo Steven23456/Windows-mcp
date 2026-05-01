@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.8.4] - 2026-04-30
+
+### Security
+- **High-severity PowerShell injection in Process-Tool** (`main.py:894`, `:915`): the `name` argument was interpolated into double-quoted PS strings (`Get-Process -Name "{name}"`, `Stop-Process -Name "{name}"`) without escaping. A name like `x"; Stop-Process -Name explorer; "` could close the quote and chain arbitrary PowerShell. `validate_text` only enforced length and `validate_command(..., trusted=True)` skipped the operator check. Fixed by passing `name` through the existing `_sanitize_name` helper (rejects `'` `"` `` ` `` `$` `;` `|` `&` `{}` `()` `\` `/`) before interpolation in both call sites.
+
 ## [0.8.3] - 2026-04-10
 
 ### Fixed
