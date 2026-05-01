@@ -158,3 +158,6 @@ desktop.ini
 test_baseline.png
 recordings/
 .dropboxignore
+.mcp.json
+# Added by post-migration audit (2026-05-01)
+node_modules/
