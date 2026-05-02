@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Tests
+- Added `tests/test_process_tool_injection.py` (68 passing + 4 xfail) — regression coverage for the v0.8.4 PowerShell-injection fix in Process-Tool. Battery of 15 injection payloads (quote-breakers, command chaining, subshell expansion, pipe-to-attacker, brace/paren smuggling, path-separator smuggling) plus 7 legitimate-name positive cases for both `action="list"` and `action="kill"`. Asserts via mock that `desktop.execute_command` is **not** invoked for any payload, and that legitimate names still produce the expected `Get-Process -Name "<n>"` / `Stop-Process -Name "<n>"` PowerShell strings. Includes direct unit tests on `_sanitize_name` and an `xfail` group documenting known sanitizer gaps (glob `*`, newline injection) for future hardening.
+
 ## [0.8.4] - 2026-04-30
 
 ### Security
