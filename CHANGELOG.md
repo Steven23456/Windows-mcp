@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Documentation
+- Add CycloneDX SBOM (sbom.json).
+
 ### Security
 - **`_sanitize_name` regex hardened against glob and newline injection** (`main.py:2738`): the v0.8.4 sanitizer accepted `*`, `?`, `\n`, `\r`, and `\t`, leaving four documented gaps in the Process-Tool injection-defense surface. Glob wildcards reach PowerShell as literal stars (no expansion in `-Name`, but bypasses the intent of the allow-list) and newlines inside a double-quoted PS string can inject statements on a fresh line. Extended the rejection regex to also match `*`, `?`, `\n`, `\r`, `\t`, `\v`, `\f`, and NUL. Total enforced injection-payload coverage rises from 15 to 19; xfail count drops to 0.
 
