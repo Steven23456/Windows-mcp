@@ -96,14 +96,12 @@ INJECTION_PAYLOADS = [
 ]
 
 
-# Payloads that the v0.8.4 sanitizer does NOT block but which deserve
-# follow-up. They're listed here as xfail so we document the gap without
-# turning the regression suite red. If `_sanitize_name` is later hardened to
-# also reject `*`, `?`, `\n`, `\r`, flip `strict=True` and these will start
-# passing — that's the signal to drop the xfail and merge them into the main
-# list.
+# Payloads added in the v0.8.5 hardening pass: glob wildcards (`*`, `?`) and
+# whitespace control chars (`\n`, `\r`, `\t`) are now rejected by
+# `_sanitize_name`. Originally tracked as xfail; promoted to enforced once the
+# regex was tightened.
 KNOWN_GAP_PAYLOADS = [
-    # Glob expansion: `*` reaches PS as a literal star, not blocked here.
+    # Glob expansion: `*` reaches PS as a literal star.
     "*",
     "*.exe",
     # Newline injection inside a double-quoted PS string.
@@ -293,19 +291,13 @@ class TestNoShellTrueInProcessTool:
 
 
 class TestSanitizerKnownGaps:
-    """Payloads the v0.8.4 sanitizer doesn't reject. xfail-ed so the suite
-    stays green while documenting the gap. Flip these to passing by
-    extending _sanitize_name's regex to also reject `*`, `?`, and
-    whitespace control chars (`\\n`, `\\r`)."""
+    """Payloads originally identified as gaps in v0.8.4 and closed in the
+    v0.8.5 hardening pass: `*`, `?`, `\\n`, `\\r`, `\\t` are all now rejected
+    by `_sanitize_name`."""
 
     @pytest.mark.parametrize("payload", KNOWN_GAP_PAYLOADS)
-    @pytest.mark.xfail(
-        reason="v0.8.4 _sanitize_name does not reject glob/newline chars; "
-        "tracked as follow-up hardening.",
-        strict=False,
-    )
     def test_gap_payloads_should_be_rejected(self, payload):
         from main import _sanitize_name
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="unsafe characters"):
             _sanitize_name(payload)

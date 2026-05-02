@@ -2736,8 +2736,13 @@ def _sanitize_path(val: str) -> str:
 
 
 def _sanitize_name(val: str) -> str:
-    """Reject filenames with path separators or PS metacharacters."""
-    if _re.search(r"['\"`$;|&{}()\\/]", val):
+    """Reject filenames with path separators, PS metacharacters, glob wildcards,
+    or whitespace control chars (newlines/CR/tab) that could enable injection
+    inside a double-quoted PowerShell string."""
+    # Path separators, PS metacharacters (quotes, subshell, var-expansion,
+    # statement-chaining, pipes, brace/paren grouping), glob wildcards, and
+    # whitespace control chars (\n, \r, \t, \v, \f, NUL).
+    if _re.search(r"['\"`$;|&{}()\\/*?\n\r\t\v\f\0]", val):
         raise ValueError(f"Name contains unsafe characters: {val!r}")
     return val
 

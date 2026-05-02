@@ -2,8 +2,11 @@
 
 ## [Unreleased]
 
+### Security
+- **`_sanitize_name` regex hardened against glob and newline injection** (`main.py:2738`): the v0.8.4 sanitizer accepted `*`, `?`, `\n`, `\r`, and `\t`, leaving four documented gaps in the Process-Tool injection-defense surface. Glob wildcards reach PowerShell as literal stars (no expansion in `-Name`, but bypasses the intent of the allow-list) and newlines inside a double-quoted PS string can inject statements on a fresh line. Extended the rejection regex to also match `*`, `?`, `\n`, `\r`, `\t`, `\v`, `\f`, and NUL. Total enforced injection-payload coverage rises from 15 to 19; xfail count drops to 0.
+
 ### Tests
-- Added `tests/test_process_tool_injection.py` (68 passing + 4 xfail) — regression coverage for the v0.8.4 PowerShell-injection fix in Process-Tool. Battery of 15 injection payloads (quote-breakers, command chaining, subshell expansion, pipe-to-attacker, brace/paren smuggling, path-separator smuggling) plus 7 legitimate-name positive cases for both `action="list"` and `action="kill"`. Asserts via mock that `desktop.execute_command` is **not** invoked for any payload, and that legitimate names still produce the expected `Get-Process -Name "<n>"` / `Stop-Process -Name "<n>"` PowerShell strings. Includes direct unit tests on `_sanitize_name` and an `xfail` group documenting known sanitizer gaps (glob `*`, newline injection) for future hardening.
+- Added `tests/test_process_tool_injection.py` (72 passing) — regression coverage for the v0.8.4 PowerShell-injection fix in Process-Tool. Battery of 15 injection payloads (quote-breakers, command chaining, subshell expansion, pipe-to-attacker, brace/paren smuggling, path-separator smuggling) plus 7 legitimate-name positive cases for both `action="list"` and `action="kill"`. Asserts via mock that `desktop.execute_command` is **not** invoked for any payload, and that legitimate names still produce the expected `Get-Process -Name "<n>"` / `Stop-Process -Name "<n>"` PowerShell strings. Includes direct unit tests on `_sanitize_name` plus 4 hardening-pass payloads (glob `*`, `*.exe`, `\n`, `\r\n`) that the v0.8.5 regex now rejects.
 
 ## [0.8.4] - 2026-04-30
 
