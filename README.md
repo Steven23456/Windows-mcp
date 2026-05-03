@@ -200,6 +200,10 @@ This MCP interacts directly with your Windows operating system to perform action
 - Selecting specific sections of the text in a paragraph, as the MCP is relying on a11y tree. (⌛ Working on it.)
 - `Type-Tool` is meant for typing text, not programming in IDE because of it types program as a whole in a file. (⌛ Working on it.)
 
+## Recent updates
+
+See [CHANGELOG.md](CHANGELOG.md) for recent changes — shell-injection regex hardening on the PowerShell tool.
+
 ## 🪪License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
