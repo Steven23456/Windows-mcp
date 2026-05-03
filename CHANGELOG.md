@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+- **Replaced GPL-2.0-or-later `Levenshtein` dependency with MIT-licensed `rapidfuzz` (3.0+).** Drop-in replacement for fuzzy app-name matching in `src/desktop/__init__.py` (`launch_app`, `switch_app`, `manage_window`). The transitive `python-Levenshtein` package was the only GPL/copyleft contamination in the dependency graph; removing it eliminates distribution-friction risk for any future commercial redistribution. The score scale (0-100) is preserved between `fuzzywuzzy.process.extractOne` and `rapidfuzz.process.extractOne`, but the return shape changed from 2-tuple `(match, score)` to 3-tuple `(match, score, index)`; call sites updated to use index access (`matched[0]`) instead of unpacking. `fuzzywuzzy>=0.18.0` and `python-levenshtein>=0.27.1` removed from `pyproject.toml`; `rapidfuzz>=3.0` added.
+
+### Tests
+- Added `tests/test_fuzzy_matching.py` (9 passing) — characterization tests pinning the observable behavior of fuzzy matching across the migration. Covers `process.extractOne` API contract (return shape, list/dict_keys inputs, empty-input handling) plus method-level coverage of `Desktop.launch_app`, `Desktop.switch_app`, and `Desktop.manage_window` to verify the tuple-unpacking pattern survives the swap. Total passing tests: 207 → 216, 0 xfail.
+
 ### Documentation
 - Add CycloneDX SBOM (sbom.json).
 

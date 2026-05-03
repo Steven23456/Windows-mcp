@@ -8,7 +8,7 @@ from uiautomation import (
 )
 from src.desktop.views import DesktopState, App, Size
 from src.desktop.config import EXCLUDED_APPS
-from fuzzywuzzy import process
+from rapidfuzz import process
 from time import sleep
 from io import BytesIO
 from PIL import Image
@@ -95,10 +95,11 @@ class Desktop:
 
     def launch_app(self, name: str):
         apps_map = self.get_apps_from_start_menu()
-        matched_app = process.extractOne(name, apps_map.keys())
+        # rapidfuzz.process.extractOne returns (match, score, index/key); slice for compat.
+        matched_app = process.extractOne(name, list(apps_map.keys()))
         if matched_app is None:
             return (f"Application {name.title()} not found in start menu.", 1)
-        app_name, _ = matched_app
+        app_name = matched_app[0]
         appid = apps_map.get(app_name)
         if appid is None:
             return (f"Application {name.title()} not found in start menu.", 1)
@@ -112,10 +113,11 @@ class Desktop:
 
     def switch_app(self, name: str) -> tuple[str, int]:
         apps = {app.name: app for app in self.desktop_state.apps}
-        matched_app: tuple[str, float] = process.extractOne(name, list(apps.keys()))
+        # rapidfuzz.process.extractOne returns (match, score, index); slice for compat.
+        matched_app = process.extractOne(name, list(apps.keys()))
         if matched_app is None:
             return (f"Application {name.title()} not found.", 1)
-        app_name, _ = matched_app
+        app_name = matched_app[0]
         app = apps.get(app_name)
         if SetWindowTopmost(app.handle, isTopmost=True):
             return (f"{app_name.title()} switched to foreground.", 0)
@@ -181,10 +183,11 @@ class Desktop:
 
         apps = self.get_apps()
         app_names = {app.name: app for app in apps}
+        # rapidfuzz.process.extractOne returns (match, score, index); slice for compat.
         matched = process.extractOne(name, list(app_names.keys()))
         if matched is None:
             return (f"Application '{name}' not found.", 1)
-        app_name, score = matched
+        app_name = matched[0]
         app = app_names[app_name]
         handle = app.handle
 

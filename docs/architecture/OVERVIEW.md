@@ -122,7 +122,7 @@ Windows-MCP exposes 45 tools through the MCP protocol. Key categories:
 | `pyautogui` | Keyboard and mouse control |
 | `humancursor` | Human-like cursor movement simulation |
 | `pillow` | Image processing for screenshots |
-| `fuzzywuzzy` | Fuzzy string matching for app names |
+| `rapidfuzz` | Fuzzy string matching for app names (MIT-licensed) |
 
 ## Use Cases
 
