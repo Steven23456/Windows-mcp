@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-05-01
+
 ### Changed
 - **Replaced GPL-2.0-or-later `Levenshtein` dependency with MIT-licensed `rapidfuzz` (3.0+).** Drop-in replacement for fuzzy app-name matching in `src/desktop/__init__.py` (`launch_app`, `switch_app`, `manage_window`). The transitive `python-Levenshtein` package was the only GPL/copyleft contamination in the dependency graph; removing it eliminates distribution-friction risk for any future commercial redistribution. The score scale (0-100) is preserved between `fuzzywuzzy.process.extractOne` and `rapidfuzz.process.extractOne`, but the return shape changed from 2-tuple `(match, score)` to 3-tuple `(match, score, index)`; call sites updated to use index access (`matched[0]`) instead of unpacking. `fuzzywuzzy>=0.18.0` and `python-levenshtein>=0.27.1` removed from `pyproject.toml`; `rapidfuzz>=3.0` added.
 
