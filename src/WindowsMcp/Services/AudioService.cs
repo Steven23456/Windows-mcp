@@ -1,3 +1,4 @@
+// TODO(v0.3.0): swap to NAudio/AudioDeviceCmdlets for accurate get/set
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
 

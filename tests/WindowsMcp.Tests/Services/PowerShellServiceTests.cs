@@ -26,7 +26,7 @@ public class PowerShellServiceTests
     }
 
     [Fact]
-    public async Task RunAsync_50_concurrent_calls_no_crosstalk()
+    public async Task RunAsync_50_serialized_calls_preserve_per_caller_output()
     {
         using var svc = new PowerShellService(NullLogger.Instance);
         var tasks = Enumerable.Range(0, 50).Select(i =>
@@ -34,6 +34,15 @@ public class PowerShellServiceTests
         var results = await Task.WhenAll(tasks);
         for (int i = 0; i < 50; i++)
             results[i].Stdout.Trim().Should().Be(i.ToString());
+    }
+
+    [Fact]
+    public async Task RunAsync_dispose_throws_object_disposed_exception()
+    {
+        var svc = new PowerShellService(NullLogger.Instance);
+        svc.Dispose();
+        Func<Task> act = () => svc.RunAsync("'never reached'");
+        await act.Should().ThrowAsync<ObjectDisposedException>();
     }
 }
 

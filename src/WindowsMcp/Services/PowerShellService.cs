@@ -14,6 +14,7 @@ public sealed class PowerShellService : IPowerShellService
     private readonly SemaphoreSlim _gate = new(1, 1);
     private int _callCount;
     private DateTime _runspaceCreated;
+    private bool _disposed;
     private const int RestartAfterCalls = 1000;
     private static readonly TimeSpan RestartAfter = TimeSpan.FromMinutes(30);
 
@@ -45,11 +46,14 @@ public sealed class PowerShellService : IPowerShellService
 
     public async Task<PSResult> RunAsync(string command, CancellationToken ct = default)
     {
+        if (_disposed) throw new ObjectDisposedException(nameof(PowerShellService));
         ct.ThrowIfCancellationRequested();
         await _gate.WaitAsync(ct);
         try
         {
             MaybeRestartRunspace();
+            // Increment before invocation so recycling still triggers when calls fail.
+            _callCount++;
             using var ps = PowerShell.Create();
             ps.Runspace = _runspace;
             ps.AddScript(command);
@@ -58,18 +62,36 @@ public sealed class PowerShellService : IPowerShellService
             var errors = new List<string>();
             try
             {
+                // ct.Register fires Stop() if the token is cancelled while ps.Invoke runs.
+                // PowerShell.Stop is the documented way to interrupt a synchronous Invoke.
+                using var ctReg = ct.Register(() =>
+                {
+                    try { ps.Stop(); }
+                    catch { /* runspace may be in a state where Stop throws; best-effort */ }
+                });
+
                 var results = await Task.Run(() => ps.Invoke(), ct);
                 foreach (var item in results)
                     output.AppendLine(item?.ToString() ?? "");
                 foreach (var err in ps.Streams.Error)
                     errors.Add(err.ToString());
 
-                _callCount++;
+                int exitCode = ps.HadErrors ? 1 : 0;
+                if (!ps.HadErrors)
+                {
+                    using var psExit = PowerShell.Create();
+                    psExit.Runspace = _runspace;
+                    psExit.AddScript("if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }");
+                    var exitResults = psExit.Invoke();
+                    if (exitResults.Count > 0 && int.TryParse(exitResults[0]?.ToString(), out var parsed))
+                        exitCode = parsed;
+                }
+
                 return new PSResult(
                     Success: !ps.HadErrors,
                     Stdout: output.ToString(),
                     Stderr: string.Join('\n', errors),
-                    ExitCode: ps.HadErrors ? 1 : 0,
+                    ExitCode: exitCode,
                     Errors: errors.ToArray());
             }
             catch (Exception ex)
@@ -97,5 +119,11 @@ public sealed class PowerShellService : IPowerShellService
         }
     }
 
-    public void Dispose() => _runspace.Dispose();
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _runspace.Dispose();
+        _gate.Dispose();
+    }
 }
