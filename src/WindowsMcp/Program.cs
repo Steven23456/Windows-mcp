@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using Windows.Win32;
 using Windows.Win32.UI.HiDpi;
+using WindowsMcp.Abstractions;
+using WindowsMcp.Services;
 
 namespace WindowsMcp;
 
@@ -11,6 +13,10 @@ internal static class Program
 {
     public static async Task<int> Main(string[] args)
     {
+        // Register AppUserModelID first so WinRT ToastNotification works.
+        try { PInvoke.SetCurrentProcessExplicitAppUserModelID("org.windows-mcp.server"); }
+        catch { /* best effort */ }
+
         // Per-monitor DPI awareness V2: screen geometry and screenshots use physical pixels.
         // Required for correct HiDPI behavior across multi-monitor setups.
         // Must be called before any window/screen API. Affects ScreenshotService default
@@ -35,8 +41,33 @@ internal static class Program
         builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
         builder.Logging.SetMinimumLevel(LogLevel.Information);
 
+        // Register all services as singletons.
+        builder.Services.AddSingleton<IInputService, InputService>();
+        builder.Services.AddSingleton<IScreenshotService, ScreenshotService>();
+        builder.Services.AddSingleton<IOcrService, OcrService>();
+        builder.Services.AddSingleton<IClipboardService, ClipboardService>();
+        builder.Services.AddSingleton<IAudioService, AudioService>();
+        builder.Services.AddSingleton<IPowerShellService, PowerShellService>();
+        builder.Services.AddSingleton<IUIAutomationService, UIAutomationService>();
+        builder.Services.AddSingleton<IFileSystemService, FileSystemService>();
+        builder.Services.AddSingleton<IRegistryService, RegistryService>();
+        builder.Services.AddSingleton<IServiceControlService, ServiceControlService>();
+        builder.Services.AddSingleton<IEventLogService, EventLogService>();
+        builder.Services.AddSingleton<ITaskSchedulerService, TaskSchedulerService>();
+        builder.Services.AddSingleton<IProcessService, ProcessService>();
+        builder.Services.AddSingleton<IWindowService, WindowService>();
+        builder.Services.AddSingleton<IWmiService, WmiService>();
+        builder.Services.AddSingleton<IEnvService, EnvService>();
+        builder.Services.AddSingleton<IPowerService, PowerService>();
+        builder.Services.AddSingleton<INotificationService, NotificationService>();
+        builder.Services.AddSingleton<INetworkService, NetworkService>();
+        builder.Services.AddSingleton<IWebService, WebService>();
+
         builder.Services
-            .AddMcpServer()
+            .AddMcpServer(o =>
+            {
+                o.ServerInfo = new() { Name = "Windows-mcp", Version = "0.2.0" };
+            })
             .WithStdioServerTransport()
             .WithToolsFromAssembly();   // source generator discovers [McpServerTool] methods
 
