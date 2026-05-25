@@ -169,3 +169,6 @@ obj/
 *.suo
 .vs/
 src/WindowsMcp/Properties/launchSettings.json
+
+# Local MCP config backups (never commit; may contain user-specific paths/env)
+.mcp.json.bak*
