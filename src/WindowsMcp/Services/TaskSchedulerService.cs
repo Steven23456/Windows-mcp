@@ -47,7 +47,9 @@ public sealed class TaskSchedulerService : ITaskSchedulerService
         using var ts = new TaskService();
         var td = ts.NewTask();
         td.Actions.Add(new ExecAction(command));
-        td.Triggers.Add(new TimeTrigger(DateTime.Parse(trigger)));
+        // InvariantCulture: MCP tool args arrive as locale-neutral JSON strings;
+        // thread culture could otherwise parse "05/06/2026" differently on en-US vs en-GB.
+        td.Triggers.Add(new TimeTrigger(DateTime.Parse(trigger, System.Globalization.CultureInfo.InvariantCulture)));
         ts.RootFolder.RegisterTaskDefinition(name, td);
         return SystemTask.CompletedTask;
     }

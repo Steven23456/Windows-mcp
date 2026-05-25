@@ -37,7 +37,9 @@ public sealed class FileSystemService : IFileSystemService
         };
         var tmp = path + ".tmp." + Guid.NewGuid().ToString("N");
         await File.WriteAllTextAsync(tmp, content, enc, ct);
-        // Atomic rename with retry on Windows EBUSY
+        // Atomic rename with retry on Windows EBUSY. On any final failure
+        // (including the third attempt that rethrows), clean up the temp file
+        // before propagating to avoid orphaned .tmp.<guid> files.
         for (int i = 0; i < 3; i++)
         {
             try
@@ -49,10 +51,12 @@ public sealed class FileSystemService : IFileSystemService
             {
                 await Task.Delay(50 * (i + 1), ct);
             }
+            catch (IOException)
+            {
+                try { File.Delete(tmp); } catch { /* best-effort cleanup */ }
+                throw;
+            }
         }
-        // All 3 attempts failed — clean up tmp and rethrow
-        try { File.Delete(tmp); } catch { /* best-effort cleanup */ }
-        throw new IOException($"Atomic write to '{path}' failed after 3 attempts.");
     }
 
     public Task<FileInfoDto> GetInfoAsync(string path, CancellationToken ct = default)
