@@ -1,0 +1,50 @@
+using Microsoft.Win32;
+using WindowsMcp.Abstractions;
+using WindowsMcp.Abstractions.Models;
+
+namespace WindowsMcp.Services;
+
+public sealed class RegistryService : IRegistryService
+{
+    public Task<RegistryValueDto> GetAsync(string hive, string path, string? valueName, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var root = ResolveHive(hive);
+        using var key = root.OpenSubKey(path)
+            ?? throw new KeyNotFoundException($"Registry path not found: {hive}\\{path}");
+        var data = valueName is null
+            ? string.Join(",", key.GetValueNames())
+            : key.GetValue(valueName);
+        var kind = valueName is null ? "Names" : key.GetValueKind(valueName).ToString();
+        return Task.FromResult(new RegistryValueDto(path, valueName ?? "(default)", data, kind));
+    }
+
+    public Task SetAsync(string hive, string path, string valueName, object data, string kind, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var root = ResolveHive(hive);
+        using var key = root.CreateSubKey(path, writable: true)
+            ?? throw new InvalidOperationException($"Cannot create or open key: {hive}\\{path}");
+        var rk = kind switch
+        {
+            "String"      => RegistryValueKind.String,
+            "ExpandString"=> RegistryValueKind.ExpandString,
+            "DWord"       => RegistryValueKind.DWord,
+            "QWord"       => RegistryValueKind.QWord,
+            "Binary"      => RegistryValueKind.Binary,
+            "MultiString" => RegistryValueKind.MultiString,
+            _             => RegistryValueKind.String   // safe default
+        };
+        key.SetValue(valueName, data, rk);
+        return Task.CompletedTask;
+    }
+
+    private static RegistryKey ResolveHive(string hive) => hive.ToUpperInvariant() switch
+    {
+        "HKCU" or "HKEY_CURRENT_USER"   => Registry.CurrentUser,
+        "HKLM" or "HKEY_LOCAL_MACHINE"  => Registry.LocalMachine,
+        "HKCR" or "HKEY_CLASSES_ROOT"   => Registry.ClassesRoot,
+        "HKU"  or "HKEY_USERS"          => Registry.Users,
+        _ => throw new ArgumentException($"Unknown hive: '{hive}'", nameof(hive))
+    };
+}

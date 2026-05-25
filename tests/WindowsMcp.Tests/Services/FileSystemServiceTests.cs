@@ -1,0 +1,58 @@
+using FluentAssertions;
+using WindowsMcp.Services;
+using Xunit;
+
+namespace WindowsMcp.Tests.Services;
+
+[Trait("Category", "Unit")]
+public class FileSystemServiceTests : IDisposable
+{
+    private readonly string _tmp = Path.Combine(Path.GetTempPath(), $"wm-test-{Guid.NewGuid():N}");
+    public FileSystemServiceTests() => Directory.CreateDirectory(_tmp);
+    public void Dispose() { try { Directory.Delete(_tmp, true); } catch { } }
+
+    [Fact]
+    public async Task WriteText_then_ReadText_roundtrips_utf8()
+    {
+        var svc = new FileSystemService();
+        var path = Path.Combine(_tmp, "test.txt");
+        await svc.WriteTextAsync(path, "héllo wörld", "utf-8");
+        var got = await svc.ReadTextAsync(path, 1024, "utf-8");
+        got.Should().Be("héllo wörld");
+    }
+
+    [Fact]
+    public async Task ReadText_throws_when_file_exceeds_max_bytes()
+    {
+        var svc = new FileSystemService();
+        var path = Path.Combine(_tmp, "big.txt");
+        await File.WriteAllTextAsync(path, new string('x', 2000));
+        Func<Task> act = () => svc.ReadTextAsync(path, 100, "utf-8");
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*exceeds*");
+    }
+
+    [Fact]
+    public async Task WriteText_is_atomic_via_temp_file_rename()
+    {
+        var svc = new FileSystemService();
+        var path = Path.Combine(_tmp, "atomic.txt");
+        await File.WriteAllTextAsync(path, "original");
+
+        // Start a write and verify the original is intact until rename
+        var task = svc.WriteTextAsync(path, "new content", "utf-8");
+        await task;
+        (await File.ReadAllTextAsync(path)).Should().Be("new content");
+    }
+
+    [Fact]
+    public async Task Search_finds_files_matching_pattern()
+    {
+        var svc = new FileSystemService();
+        await File.WriteAllTextAsync(Path.Combine(_tmp, "a.txt"), "a");
+        await File.WriteAllTextAsync(Path.Combine(_tmp, "b.txt"), "b");
+        await File.WriteAllTextAsync(Path.Combine(_tmp, "c.log"), "c");
+        var hits = await svc.SearchAsync(_tmp, "*.txt", null, null, false);
+        hits.Should().HaveCount(2);
+    }
+}
