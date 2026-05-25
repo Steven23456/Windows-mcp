@@ -24,22 +24,32 @@ public sealed class ScreenshotService : IScreenshotService
 
         ct.ThrowIfCancellationRequested();
 
-        // Lock bitmap bits, copy into SKBitmap, encode via SkiaSharp.
-        var data = new byte[bmp.Width * bmp.Height * 4];
-        var bd = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height),
-                              ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-        System.Runtime.InteropServices.Marshal.Copy(bd.Scan0, data, 0, data.Length);
-        bmp.UnlockBits(bd);
+        // Zero-copy: wrap the locked GDI pixel buffer in an SKBitmap via
+        // InstallPixels (stride-aware; avoids assumption that Stride == Width*4).
+        var bd = bmp.LockBits(
+            new Rectangle(0, 0, bmp.Width, bmp.Height),
+            ImageLockMode.ReadOnly,
+            PixelFormat.Format32bppArgb);
+        try
+        {
+            var info = new SKImageInfo(bmp.Width, bmp.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
+            using var skBmp = new SKBitmap();
+            if (!skBmp.InstallPixels(info, bd.Scan0, bd.Stride))
+                throw new InvalidOperationException("SKBitmap.InstallPixels failed to wrap GDI bitmap memory.");
 
-        using var skBmp = new SKBitmap(bmp.Width, bmp.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
-        System.Runtime.InteropServices.Marshal.Copy(data, 0, skBmp.GetPixels(), data.Length);
-        using var img = SKImage.FromBitmap(skBmp);
+            ct.ThrowIfCancellationRequested();
 
-        var skFormat = format == Abstractions.Models.ImageFormat.Jpeg
-            ? SKEncodedImageFormat.Jpeg : SKEncodedImageFormat.Png;
-        using var encoded = img.Encode(skFormat, 90);
-        var bytes = encoded.ToArray();
-
-        return Task.FromResult(new ScreenshotResult(bytes, r.Width, r.Height, format));
+            var skFormat = format == Abstractions.Models.ImageFormat.Jpeg
+                ? SKEncodedImageFormat.Jpeg : SKEncodedImageFormat.Png;
+            // Encode MUST happen before UnlockBits — SKBitmap points into bd.Scan0.
+            using var img = SKImage.FromBitmap(skBmp);
+            using var encoded = img.Encode(skFormat, 90);
+            var bytes = encoded.ToArray();
+            return Task.FromResult(new ScreenshotResult(bytes, bmp.Width, bmp.Height, format));
+        }
+        finally
+        {
+            bmp.UnlockBits(bd);
+        }
     }
 }

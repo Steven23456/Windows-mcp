@@ -2,3 +2,5 @@ SendInput
 SetCursorPos
 GetCursorPos
 GetSystemMetrics
+SetProcessDpiAwarenessContext
+SetProcessDpiAwareness

@@ -4,15 +4,15 @@ namespace WindowsMcp.Services;
 
 public sealed class ClipboardService : IClipboardService
 {
-    public async Task<string?> GetTextAsync(CancellationToken ct = default)
+    public Task<string?> GetTextAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        return await TextCopy.ClipboardService.GetTextAsync();
+        return TextCopy.ClipboardService.GetTextAsync();
     }
 
-    public async Task SetTextAsync(string text, CancellationToken ct = default)
+    public Task SetTextAsync(string text, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        await TextCopy.ClipboardService.SetTextAsync(text);
+        return TextCopy.ClipboardService.SetTextAsync(text);
     }
 }
