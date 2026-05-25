@@ -35,4 +35,15 @@ public class InputServiceTests
         Func<Task> act = () => service.PressShortcutAsync("not+a+real+key");
         await act.Should().ThrowAsync<ArgumentException>();
     }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task TypeAsync_throws_when_cancellation_already_requested()
+    {
+        var service = new InputService();
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        Func<Task> act = () => service.TypeAsync("hello", cts.Token);
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
 }

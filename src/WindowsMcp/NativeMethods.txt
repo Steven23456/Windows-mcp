@@ -1,5 +1,4 @@
 SendInput
 SetCursorPos
 GetCursorPos
-mouse_event
 GetSystemMetrics

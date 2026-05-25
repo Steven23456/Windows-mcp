@@ -47,7 +47,7 @@ public sealed class InputService : IInputService
     private static int ScreenWidth  => PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CXSCREEN);
     private static int ScreenHeight => PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CYSCREEN);
 
-    private void MoveToPixel(int x, int y)
+    private void MoveCursorToVirtualDesktop(int x, int y)
     {
         _sim.Mouse.MoveMouseToPositionOnVirtualDesktop(
             x * (65535.0 / ScreenWidth),
@@ -56,9 +56,11 @@ public sealed class InputService : IInputService
 
     public Task<ClickResult> ClickAsync(int x, int y, MouseButton button = MouseButton.Left, int clicks = 1, CancellationToken ct = default)
     {
-        MoveToPixel(x, y);
+        ct.ThrowIfCancellationRequested();
+        MoveCursorToVirtualDesktop(x, y);
         for (int i = 0; i < clicks; i++)
         {
+            ct.ThrowIfCancellationRequested();
             switch (button)
             {
                 case MouseButton.Left:   _sim.Mouse.LeftButtonClick();   break;
@@ -69,30 +71,52 @@ public sealed class InputService : IInputService
         return Task.FromResult(new ClickResult(x, y, button, clicks));
     }
 
-    public async Task<DragResult> DragAsync(int fromX, int fromY, int toX, int toY, MouseButton button = MouseButton.Left, CancellationToken ct = default)
+    public Task<DragResult> DragAsync(int fromX, int fromY, int toX, int toY, MouseButton button = MouseButton.Left, CancellationToken ct = default)
     {
-        await ClickAsync(fromX, fromY, button, 1, ct);
-        _sim.Mouse.LeftButtonDown();
-        _sim.Mouse.MoveMouseTo(toX, toY);
-        _sim.Mouse.LeftButtonUp();
-        return new DragResult(fromX, fromY, toX, toY, button);
+        ct.ThrowIfCancellationRequested();
+
+        // H.InputSimulator exposes only Left/Right ButtonDown/Up; no MiddleButtonDown/Up.
+        // Reject middle-button drag rather than silently degrading to a left-button drag.
+        if (button == MouseButton.Middle)
+            throw new NotSupportedException("Middle-button drag is not supported by H.InputSimulator");
+
+        MoveCursorToVirtualDesktop(fromX, fromY);
+
+        switch (button)
+        {
+            case MouseButton.Left:  _sim.Mouse.LeftButtonDown();  break;
+            case MouseButton.Right: _sim.Mouse.RightButtonDown(); break;
+        }
+
+        MoveCursorToVirtualDesktop(toX, toY);
+
+        switch (button)
+        {
+            case MouseButton.Left:  _sim.Mouse.LeftButtonUp();  break;
+            case MouseButton.Right: _sim.Mouse.RightButtonUp(); break;
+        }
+
+        return Task.FromResult(new DragResult(fromX, fromY, toX, toY, button));
     }
 
     public Task HoverAsync(int x, int y, int durationMs = 0, CancellationToken ct = default)
     {
-        MoveToPixel(x, y);
+        ct.ThrowIfCancellationRequested();
+        MoveCursorToVirtualDesktop(x, y);
         if (durationMs > 0) return Task.Delay(durationMs, ct);
         return Task.CompletedTask;
     }
 
     public Task<TypeResult> TypeAsync(string text, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         _sim.Keyboard.TextEntry(text);
         return Task.FromResult(new TypeResult(text.Length));
     }
 
     public Task PressKeyAsync(string key, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         if (!KeyMap.TryGetValue(key, out var vk))
             throw new ArgumentException($"Unknown key: '{key}'", nameof(key));
         _sim.Keyboard.KeyPress(vk);
@@ -101,6 +125,7 @@ public sealed class InputService : IInputService
 
     public Task PressShortcutAsync(string shortcut, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var parts = shortcut.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 2)
             throw new ArgumentException($"Invalid shortcut format: '{shortcut}'", nameof(shortcut));
@@ -119,9 +144,10 @@ public sealed class InputService : IInputService
         return Task.CompletedTask;
     }
 
-    public Task ScrollAsync(int x, int y, string direction, int amount = 3, CancellationToken ct = default)
+    public async Task ScrollAsync(int x, int y, string direction, int amount = 3, CancellationToken ct = default)
     {
-        HoverAsync(x, y, 0, ct).Wait(ct);
+        ct.ThrowIfCancellationRequested();
+        await HoverAsync(x, y, 0, ct);
         switch (direction.ToLowerInvariant())
         {
             case "up":    _sim.Mouse.VerticalScroll(amount);    break;
@@ -130,6 +156,5 @@ public sealed class InputService : IInputService
             case "right": _sim.Mouse.HorizontalScroll(amount);  break;
             default: throw new ArgumentException($"Invalid direction: '{direction}'", nameof(direction));
         }
-        return Task.CompletedTask;
     }
 }
