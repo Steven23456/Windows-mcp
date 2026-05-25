@@ -15,3 +15,7 @@ GetWindowText
 CloseWindow
 DestroyWindow
 PostMessage
+ExitWindowsEx
+LockWorkStation
+SetSuspendState
+SetCurrentProcessExplicitAppUserModelID
