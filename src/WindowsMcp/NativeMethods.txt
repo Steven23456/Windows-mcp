@@ -4,3 +4,14 @@ GetCursorPos
 GetSystemMetrics
 SetProcessDpiAwarenessContext
 SetProcessDpiAwareness
+FindWindow
+ShowWindow
+SetForegroundWindow
+EnumDisplayMonitors
+GetMonitorInfo
+MONITORINFO
+IsWindow
+GetWindowText
+CloseWindow
+DestroyWindow
+PostMessage
