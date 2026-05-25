@@ -40,3 +40,18 @@ public class UIAutomationServiceTests : IClassFixture<NotepadFixture>
         results.Should().AllSatisfy(r => r.Root.Should().NotBeNull());
     }
 }
+
+// Separate class so it doesn't need the NotepadFixture — Dispose tears down before any
+// UIA call, so this test does not need a live desktop session and is Unit-trait safe.
+[Trait("Category", "Unit")]
+public class UIAutomationServiceUnitTests
+{
+    [Fact]
+    public async Task GetStateAsync_throws_after_dispose()
+    {
+        var svc = new UIAutomationService();
+        svc.Dispose();
+        Func<Task> act = () => svc.GetStateAsync();
+        await act.Should().ThrowAsync<ObjectDisposedException>();
+    }
+}

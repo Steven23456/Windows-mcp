@@ -20,7 +20,7 @@ public sealed class UIAutomationService : IUIAutomationService
     private readonly Dictionary<string, AutomationElement> _elementCache = new();
     private readonly Lock _cacheLock = new();
     private int _nextId;
-    private bool _disposed;
+    private int _disposed;   // 0 = alive, 1 = disposed; treat atomically via Interlocked
 
     public UIAutomationService()
     {
@@ -38,15 +38,35 @@ public sealed class UIAutomationService : IUIAutomationService
         }
     }
 
-    private Task<T> OnStaAsync<T>(Func<T> work)
+    private Task<T> OnStaAsync<T>(Func<T> work, CancellationToken ct = default)
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(UIAutomationService));
+        if (_disposed != 0) throw new ObjectDisposedException(nameof(UIAutomationService));
+
         var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _workQueue.Add(() =>
+
+        // Register cancellation: if ct fires while work is still backlogged in the queue,
+        // we don't want the caller's await to sit forever.
+        var ctRegistration = ct.Register(() => tcs.TrySetCanceled(ct));
+
+        try
         {
-            try { tcs.SetResult(work()); }
-            catch (Exception ex) { tcs.SetException(ex); }
-        });
+            _workQueue.Add(() =>
+            {
+                try
+                {
+                    if (ct.IsCancellationRequested) { tcs.TrySetCanceled(ct); return; }
+                    tcs.TrySetResult(work());
+                }
+                catch (Exception ex) { tcs.TrySetException(ex); }
+            });
+        }
+        catch (InvalidOperationException)   // CompleteAdding raced with us
+        {
+            tcs.TrySetException(new ObjectDisposedException(nameof(UIAutomationService)));
+        }
+
+        // Dispose registration when task completes — prevents leak if ct outlives task.
+        tcs.Task.ContinueWith(_ => ctRegistration.Dispose(), TaskScheduler.Default);
         return tcs.Task;
     }
 
@@ -57,7 +77,7 @@ public sealed class UIAutomationService : IUIAutomationService
         {
             var foreground = _automation.FocusedElement() ?? _automation.GetDesktop();
             return BuildTree(foreground, depth: 3);
-        });
+        }, ct);
     }
 
     private ElementTree BuildTree(AutomationElement el, int depth)
@@ -138,7 +158,7 @@ public sealed class UIAutomationService : IUIAutomationService
                 .Select(ToInfo)
                 .ToArray();
             return new FindElementResult(matches);
-        });
+        }, ct);
     }
 
     private static bool MatchesKind(AutomationElement el, FindKind kind) => kind switch
@@ -162,7 +182,7 @@ public sealed class UIAutomationService : IUIAutomationService
                     throw new KeyNotFoundException($"Element '{elementId}' not in cache");
             }
             return ToInfo(el);
-        });
+        }, ct);
     }
 
     public Task<string> GetTextAsync(string elementId, CancellationToken ct = default)
@@ -172,7 +192,7 @@ public sealed class UIAutomationService : IUIAutomationService
         {
             var el = ResolveCached(elementId);
             return el.Patterns.Value.PatternOrDefault?.Value.Value ?? el.Name ?? "";
-        });
+        }, ct);
     }
 
     public Task<bool> AssertElementAsync(string elementId, string state, CancellationToken ct = default)
@@ -189,7 +209,7 @@ public sealed class UIAutomationService : IUIAutomationService
                 "visible" => !el.IsOffscreen,
                 _ => throw new ArgumentException($"Unknown assertion state: '{state}'")
             };
-        });
+        }, ct);
     }
 
     public Task InteractAsync(string elementId, string action, string? value, CancellationToken ct = default)
@@ -214,7 +234,7 @@ public sealed class UIAutomationService : IUIAutomationService
                     throw new ArgumentException($"Unknown interact action: '{action}'");
             }
             return 0;
-        });
+        }, ct);
     }
 
     public Task<TableData> GetTableAsync(string elementId, CancellationToken ct = default)
@@ -239,7 +259,7 @@ public sealed class UIAutomationService : IUIAutomationService
                 }
             }
             return new TableData(headers, data);
-        });
+        }, ct);
     }
 
     public async Task<ElementInfo?> WaitForAsync(string text, int timeoutMs, int intervalMs, CancellationToken ct = default)
@@ -264,7 +284,7 @@ public sealed class UIAutomationService : IUIAutomationService
             var el = ResolveCached(elementId);
             el.Focus();
             return 0;
-        });
+        }, ct);
     }
 
     private AutomationElement ResolveCached(string id)
@@ -279,11 +299,29 @@ public sealed class UIAutomationService : IUIAutomationService
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
+        // Enqueue the COM teardown so it runs on the STA worker (UIA3Automation
+        // holds STA-affine COM references — disposing from MTA can leak or
+        // throw RPC_E_WRONG_THREAD on some Windows versions).
+        try
+        {
+            _workQueue.Add(() =>
+            {
+                try { _automation.Dispose(); }
+                catch (Exception) { /* best-effort during shutdown */ }
+            });
+        }
+        catch (InvalidOperationException) { /* queue already completed */ }
+
         _workQueue.CompleteAdding();
-        _staThread.Join(TimeSpan.FromSeconds(2));
-        _automation.Dispose();
+
+        if (!_staThread.Join(TimeSpan.FromSeconds(2)))
+        {
+            // Worker hung; leak rather than block server shutdown.
+            // (No safe way to abort an STA thread in .NET 9.)
+        }
+
         _workQueue.Dispose();
     }
 }
