@@ -93,19 +93,31 @@ public sealed class SystemTools
         return "notification shown";
     }
 
-    [McpServerTool, Description("Run a Windows security audit and return firewall, Defender, UAC, and BitLocker status.")]
+    [McpServerTool, Description("Run a Windows security audit and return firewall, Defender, UAC, and BitLocker status. Probes that require admin (Get-BitLockerVolume, some firewall profiles) return null when run unelevated; non-null fields are still useful.")]
     public async Task<string> SecurityAudit(CancellationToken ct = default)
     {
+        // Each probe is wrapped in its own try/catch so one missing cmdlet or
+        // permission failure doesn't blank out the whole report. ConvertTo-Json
+        // -Compress keeps the response small, and we always return JSON (even
+        // if all probes return null) so callers get a parseable shape.
         var script = @"
-[PSCustomObject]@{
-  firewall_enabled  = (Get-NetFirewallProfile | Where-Object Enabled).Count -gt 0
-  defender_running  = (Get-Service WinDefend -ErrorAction SilentlyContinue).Status -eq 'Running'
-  uac_level         = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction SilentlyContinue).ConsentPromptBehaviorAdmin
-  bitlocker_status  = (Get-BitLockerVolume -MountPoint C: -ErrorAction SilentlyContinue).ProtectionStatus
-} | ConvertTo-Json
+$result = [ordered]@{
+  firewall_enabled = $null
+  defender_running = $null
+  uac_level        = $null
+  bitlocker_status = $null
+}
+try { $result.firewall_enabled = [bool]((Get-NetFirewallProfile -ErrorAction Stop | Where-Object Enabled).Count -gt 0) } catch {}
+try { $result.defender_running = ((Get-Service WinDefend -ErrorAction Stop).Status -eq 'Running') } catch {}
+try { $result.uac_level = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction Stop).ConsentPromptBehaviorAdmin } catch {}
+try { $result.bitlocker_status = (Get-BitLockerVolume -MountPoint C: -ErrorAction Stop).ProtectionStatus.ToString() } catch {}
+$result | ConvertTo-Json -Compress
 ";
         var result = await _ps.RunAsync(script, ct);
-        return result.Stdout.Trim();
+        var stdout = result.Stdout.Trim();
+        return string.IsNullOrEmpty(stdout)
+            ? "{\"firewall_enabled\":null,\"defender_running\":null,\"uac_level\":null,\"bitlocker_status\":null,\"_note\":\"all probes failed; likely no admin\"}"
+            : stdout;
     }
 
     [McpServerTool, Description("Run a raw WMI query. class_name: WMI class, e.g. Win32_OperatingSystem.")]
@@ -119,13 +131,34 @@ public sealed class SystemTools
         return JsonSerializer.Serialize(rows);
     }
 
-    [McpServerTool, Description("Get, set, or list environment variables. action: get|set|list. scope: Process|User|Machine. 'set' requires confirm:true.")]
+    // Env vars whose NAME matches any of these (case-insensitive) are redacted in
+    // list/get output unless include_secrets:true. Developer machines routinely
+    // have API keys + tokens in the process environment; a default list dump would
+    // leak them into LLM transcripts. Tokens still pass through Set as plain values
+    // since the caller supplied them explicitly.
+    private static readonly string[] SecretNamePatterns =
+    {
+        "KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "AUTH",
+        "CREDENTIAL", "PRIVATE", "API_KEY", "APIKEY", "ACCESS_TOKEN", "PAT"
+    };
+
+    private static bool IsSecretName(string name)
+    {
+        foreach (var pat in SecretNamePatterns)
+        {
+            if (name.Contains(pat, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    [McpServerTool, Description("Get, set, or list environment variables. action: get|set|list. scope: Process|User|Machine. 'set' requires confirm:true. By default values for variables whose name contains KEY/TOKEN/SECRET/PASSWORD/AUTH/CREDENTIAL/PRIVATE/PAT are redacted; pass include_secrets:true to return them raw.")]
     public async Task<string> Env(
         [Description("Action: get, set, list")] string action,
         [Description("Variable name (required for get/set)")] string? name = null,
         [Description("Variable value (for set; null to delete)")] string? value = null,
         [Description("Scope: Process, User, Machine")] string scope = "Process",
         [Description("Must be true to confirm set/delete")] bool confirm = false,
+        [Description("Set true to return raw values for secret-named vars. Default false redacts them as '***REDACTED***'.")] bool include_secrets = false,
         CancellationToken ct = default)
     {
         var target = scope.ToLowerInvariant() switch
@@ -142,6 +175,8 @@ public sealed class SystemTools
                 if (string.IsNullOrWhiteSpace(name))
                     throw new ArgumentException("'get' requires name");
                 var val = await _env.GetAsync(name, target, ct);
+                if (val is not null && !include_secrets && IsSecretName(name))
+                    val = "***REDACTED***";
                 return JsonSerializer.Serialize(val);
 
             case "set":
@@ -154,6 +189,13 @@ public sealed class SystemTools
 
             case "list":
                 var vars = await _env.ListAsync(target, ct);
+                if (!include_secrets)
+                {
+                    var redacted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var kv in vars)
+                        redacted[kv.Key] = IsSecretName(kv.Key) ? "***REDACTED***" : kv.Value;
+                    vars = redacted;
+                }
                 return JsonSerializer.Serialize(vars);
 
             default:

@@ -49,20 +49,29 @@ public sealed class NetworkTools
         }
     }
 
-    [McpServerTool, Description("Manage Windows Firewall rules. action: list (read rules), add (create rule, requires confirm: true), remove (delete rule, requires confirm: true).")]
+    [McpServerTool, Description("Manage Windows Firewall rules. action: list (read enabled rules; full list is multi-MB so pass name_like to filter), add (create rule, requires confirm: true), remove (delete rule, requires confirm: true).")]
     public async Task<string> Firewall(
         [Description("Action: list, add, remove")] string action,
         [Description("Rule display name (required for add and remove)")] string? name = null,
         [Description("Traffic direction: Inbound or Outbound (required for add)")] string? direction = null,
         [Description("Firewall action: Allow or Block (required for add)")] string? action_type = null,
         [Description("Local port number (required for add)")] int? port = null,
-        [Description("Must be true to confirm add or remove operations")] bool confirm = false)
+        [Description("Must be true to confirm add or remove operations")] bool confirm = false,
+        [Description("For list: substring filter on DisplayName (case-insensitive). Default null returns enabled rules only.")] string? name_like = null,
+        [Description("For list: maximum rules returned. Default 100; the full system list can be thousands.")] int max = 100)
     {
         switch (action.ToLowerInvariant())
         {
             case "list":
             {
-                var script = "Get-NetFirewallRule | Select-Object Name,DisplayName,Enabled,Direction,Action | ConvertTo-Json -Depth 2";
+                // Default to enabled-only + max cap because Get-NetFirewallRule
+                // returns 5000+ rules on most Windows boxes; the full dump is
+                // multi-MB and overflows LLM token limits. name_like is a
+                // -like '*pattern*' contains-match (case-insensitive).
+                var filter = string.IsNullOrWhiteSpace(name_like)
+                    ? "Where-Object Enabled -eq 'True'"
+                    : $"Where-Object {{ $_.Enabled -eq 'True' -and $_.DisplayName -like '*{name_like.Replace("'", "''")}*' }}";
+                var script = $"Get-NetFirewallRule | {filter} | Select-Object -First {max} Name,DisplayName,Enabled,Direction,Action | ConvertTo-Json -Depth 2 -Compress";
                 var result = await _ps.RunAsync(script);
                 return result.Stdout;
             }
