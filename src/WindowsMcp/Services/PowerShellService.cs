@@ -1,5 +1,4 @@
-using System.Management.Automation;
-using System.Management.Automation.Runspaces;
+using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using WindowsMcp.Abstractions;
@@ -10,95 +9,85 @@ namespace WindowsMcp.Services;
 public sealed class PowerShellService : IPowerShellService
 {
     private readonly ILogger _log;
-    private Runspace? _runspace;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private int _callCount;
-    private DateTime _runspaceCreated;
     private bool _disposed;
-    private const int RestartAfterCalls = 1000;
-    private static readonly TimeSpan RestartAfter = TimeSpan.FromMinutes(30);
+
+    // System PowerShell is guaranteed present at this path on Windows 7+.
+    // Avoids the broken InitialSessionState.CreateDefault2 path in the PS NuGet
+    // SDK when running under PublishSingleFile=true: Assembly.Location returns ""
+    // in single-file mode, then Path.Combine chokes inside PSSnapInReader.
+    // Snap-in DLLs are not bundled in the single-file image.
+    private const string PowerShellExe =
+        @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
 
     public PowerShellService(ILogger<PowerShellService> log) => _log = log;
 
     // Test ctor accepting non-generic ILogger
     public PowerShellService(ILogger log) => _log = log;
 
-    // Lazy creation: InitialSessionState.CreateDefault2() probes Assembly.Location
-    // and AppContext.BaseDirectory deep inside the PowerShell SDK. With
-    // PublishSingleFile=true, Assembly.Location returns "" — that nullref bubbles up
-    // as ArgumentNullException("path1") from Path.Combine. Deferring creation to
-    // first RunAsync means any service in the DI graph that depends on
-    // IPowerShellService (NetworkTools.firewall, AudioService, etc.) can be
-    // constructed without triggering this — only the actual PS users pay the cost.
-    private Runspace EnsureRunspace()
-    {
-        if (_runspace is not null) return _runspace;
-        var iss = InitialSessionState.CreateDefault2();
-        _runspace = RunspaceFactory.CreateRunspace(iss);
-        _runspace.Open();
-        _runspaceCreated = DateTime.UtcNow;
-        _callCount = 0;
-        _log.LogInformation("PowerShell runspace created");
-        return _runspace;
-    }
-
     public async Task<PSResult> RunAsync(string command, CancellationToken ct = default)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(PowerShellService));
         ct.ThrowIfCancellationRequested();
+
         await _gate.WaitAsync(ct);
         try
         {
-            var runspace = EnsureRunspace();
-            MaybeRestartRunspace();
-            runspace = _runspace!;   // MaybeRestart may have replaced it
-            // Increment before invocation so recycling still triggers when calls fail.
-            _callCount++;
-            using var ps = PowerShell.Create();
-            ps.Runspace = runspace;
-            ps.AddScript(command);
-
-            var output = new StringBuilder();
-            var errors = new List<string>();
-            try
+            // -NoProfile: skip user profile load (faster, deterministic)
+            // -NonInteractive: never prompt
+            // -ExecutionPolicy Bypass: allow scripts
+            // -Command -: read command from stdin
+            var psi = new ProcessStartInfo
             {
-                // ct.Register fires Stop() if the token is cancelled while ps.Invoke runs.
-                // PowerShell.Stop is the documented way to interrupt a synchronous Invoke.
-                using var ctReg = ct.Register(() =>
-                {
-                    try { ps.Stop(); }
-                    catch { /* runspace may be in a state where Stop throws; best-effort */ }
-                });
+                FileName = PowerShellExe,
+                Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command -",
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8,
+            };
 
-                var results = await Task.Run(() => ps.Invoke(), ct);
-                foreach (var item in results)
-                    output.AppendLine(item?.ToString() ?? "");
-                foreach (var err in ps.Streams.Error)
-                    errors.Add(err.ToString());
+            using var proc = new Process { StartInfo = psi };
+            proc.Start();
 
-                int exitCode = ps.HadErrors ? 1 : 0;
-                if (!ps.HadErrors)
-                {
-                    using var psExit = PowerShell.Create();
-                    psExit.Runspace = runspace;
-                    psExit.AddScript("if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }");
-                    var exitResults = psExit.Invoke();
-                    if (exitResults.Count > 0 && int.TryParse(exitResults[0]?.ToString(), out var parsed))
-                        exitCode = parsed;
-                }
+            // Write the command then close stdin so PowerShell exits when done.
+            await proc.StandardInput.WriteAsync(command.AsMemory(), ct);
+            await proc.StandardInput.FlushAsync(ct);
+            proc.StandardInput.Close();
 
-                return new PSResult(
-                    Success: !ps.HadErrors,
-                    Stdout: output.ToString(),
-                    Stderr: string.Join('\n', errors),
-                    ExitCode: exitCode,
-                    Errors: errors.ToArray());
-            }
-            catch (Exception ex)
+            // Read both streams concurrently to avoid pipe deadlock on large output.
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync(ct);
+            var stderrTask = proc.StandardError.ReadToEndAsync(ct);
+
+            // Wire cancellation: kill the process tree if ct fires mid-execution.
+            using var ctReg = ct.Register(() =>
             {
-                _log.LogError(ex, "PowerShell execution failed");
-                return new PSResult(false, "", ex.Message, -1, new[] { ex.Message });
-            }
+                try { proc.Kill(entireProcessTree: true); } catch { }
+            });
+
+            await proc.WaitForExitAsync(ct);
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
+
+            var errors = string.IsNullOrEmpty(stderr)
+                ? Array.Empty<string>()
+                : stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            return new PSResult(
+                Success: proc.ExitCode == 0 && errors.Length == 0,
+                Stdout: stdout,
+                Stderr: stderr,
+                ExitCode: proc.ExitCode,
+                Errors: errors);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "PowerShell execution failed");
+            return new PSResult(false, "", ex.Message, -1, new[] { ex.Message });
         }
         finally
         {
@@ -106,26 +95,10 @@ public sealed class PowerShellService : IPowerShellService
         }
     }
 
-    private void MaybeRestartRunspace()
-    {
-        if (_runspace is null) return;
-        if (_callCount >= RestartAfterCalls || DateTime.UtcNow - _runspaceCreated > RestartAfter)
-        {
-            _log.LogInformation(
-                "Recycling PowerShell runspace ({Calls} calls / {Age} age)",
-                _callCount,
-                DateTime.UtcNow - _runspaceCreated);
-            _runspace.Dispose();
-            _runspace = null;
-            EnsureRunspace();
-        }
-    }
-
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        _runspace?.Dispose();
         _gate.Dispose();
     }
 }
