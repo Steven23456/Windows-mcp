@@ -2,6 +2,88 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-26
+
+### Changed
+- **Complete rewrite from Python to C# on the official ModelContextProtocol SDK (1.0.0).**
+  Same server identity (`Windows-mcp` in `.mcp.json`); single self-contained
+  `dist/WindowsMcp.exe` replaces the venv-launched `python main.py`.
+- Tool names normalized to snake_case (e.g. `Click-Tool` → `click`,
+  `Find-Element-Tool` → `find_element`).
+- Version reset from 0.8.x (Python) to 0.2.0 (C#) to signal the platform break.
+  The Python source tree is preserved in
+  `legacy/python-pre-csharp-conversion-archive-2026-05-26.zip` for reference;
+  the active codebase is C# under `src/WindowsMcp/` + `src/WindowsMcp.Abstractions/`.
+
+### Added (9 new tools beyond the Python set)
+- `file_read`, `file_write`, `file_info` — file content primitives
+- `http_request` — REST/HTTP client (beyond HTML scraping)
+- `wmi_query` — structured WMI queries
+- `env` — environment variable get/set/list (secret-named values redacted
+  by default; `include_secrets:true` opts out)
+- `power_action` — shutdown/reboot/logoff/lock/sleep/hibernate
+  (`confirm: true` required)
+- `firewall` — list/add/remove Windows Firewall rules
+- `archive` — zip/unzip
+- `service` — Windows service control
+- `scheduled_task` — Task Scheduler control
+- `event_log` — Windows Event Log query
+- `registry_get`, `registry_set` — registry access
+
+### Consolidated
+- `Checkbox-Toggle-Tool` + `Select-Option-Tool` → `interact_element`
+- `File-Search-Tool` + `Duplicate-Finder-Tool` → `file_search`
+- `Disk-Analysis-Tool` + `Disk-Cleanup-Tool` + `Storage-Tool` → `disk_inspect`
+- `Move-Tool` + `Hover-Tool` → `hover` (with `duration_ms: 0`)
+
+### Removed (4 tools dropped from Python set)
+- `Wait-Tool` — pure sleep; LLM can space its own calls
+- `Compare-Screenshot-Tool` — niche QA tool
+- `Record-Replay-Tool` — LLM is the orchestrator
+- `Command-History-Tool` — session-scoped PowerShell history
+
+### Fixed (during cutover audit)
+- **Stdout JSON-RPC responses lost under cp1252 default encoding.**
+  `Console.OutputEncoding` now explicitly set to UTF-8 before
+  `Host.CreateApplicationBuilder` so the SDK's `StreamWriter` has
+  `AutoFlush=true` and JSON responses reach the pipe (commit `ed76faa`).
+- **PowerShell SDK incompatible with `PublishSingleFile=true`** —
+  `InitialSessionState.CreateDefault2` deep-called `Path.Combine(null)`
+  because `Assembly.Location` returns "" in single-file mode. Replaced
+  the `System.Management.Automation` runspace with a `Process.Start
+  ("powershell.exe", ...)` shell-out. Same `IPowerShellService` API;
+  ~30 MB smaller binary (commit `0e43215`).
+- **`env(list)` leaked secret-named environment variables** verbatim
+  into LLM transcripts. Now redacts vars matching
+  `KEY/TOKEN/SECRET/PASSWORD/AUTH/CREDENTIAL/PRIVATE/PAT` to
+  `***REDACTED***` by default (commit `0897dbc`).
+- **`firewall(list)` returned 187 KB / 5910 lines** by default,
+  overflowing MCP token limits. Added `name_like` filter and `max`
+  cap; defaults to enabled rules only (commit `0897dbc`).
+- **`security_audit` returned empty string** when probes ran
+  unelevated. Each probe now in its own try/catch; always emits a
+  JSON object with `null` fields where probes failed (commit `0897dbc`).
+- **DPI awareness** set to per-monitor-V2 at process start so
+  screenshots capture physical pixels on HiDPI displays
+  (commit `ed7ba42`).
+- **UI Automation calls** properly marshaled to a dedicated STA thread
+  via `BlockingCollection<Action>` work queue (Task 7).
+- `humancursor` 3-second startup cost removed (uses straight
+  `SendInput` via `H.InputSimulator`).
+
+### Backlog (v0.3.0 candidates)
+- Native AOT compilation (blocked on FlaUI reflection)
+- CI / GitHub Actions
+- Real `audio(get/set/mute)` via NAudio or AudioDeviceCmdlets
+  (current SendKeys backend is ±2% imprecise and can't read mute state)
+- `multi_monitor` device-name lookup via `EnumDisplayDevices`
+  (current `MONITORINFOEXW` is internal in CsWin32 0.3.x; synthesizes
+  `Monitor{N}` names)
+- Real WiFi info via `Windows.Networking.Connectivity` (currently a
+  placeholder)
+- LRU eviction for `UIAutomationService` element-id cache
+  (currently grows unbounded per session)
+
 ## [0.8.5] - 2026-05-01
 
 ### Changed

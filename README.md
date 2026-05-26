@@ -1,227 +1,114 @@
-<div align="center">
+# Windows-mcp
 
-  <h1>🪟 Windows-MCP</h1>
+An MCP server for Windows desktop automation, written in C# on the official
+[`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol)
+SDK. **50 tools** across input, screen, window, UI automation, process/shell,
+file, disk, system, network, registry, and web categories.
 
-  <a href="https://github.com/CursorTouch/Windows-MCP/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-  </a>
-  <img src="https://img.shields.io/badge/python-3.13%2B-blue" alt="Python">
-  <img src="https://img.shields.io/badge/platform-Windows%207–11-blue" alt="Platform: Windows 7 to 11">
-  <img src="https://img.shields.io/github/last-commit/CursorTouch/Windows-MCP" alt="Last Commit">
-  <br>
-  <a href="https://x.com/CursorTouch">
-    <img src="https://img.shields.io/badge/follow-%40CursorTouch-1DA1F2?logo=twitter&style=flat" alt="Follow on Twitter">
-  </a>
-  <a href="https://discord.com/invite/Aue9Yj2VzS">
-    <img src="https://img.shields.io/badge/Join%20on-Discord-5865F2?logo=discord&logoColor=white&style=flat" alt="Join us on Discord">
-  </a>
+> **History:** Versions 0.x through 0.8.5 were written in Python. v0.2.0 (2026-05-26)
+> is a complete C# rewrite — see [CHANGELOG.md](CHANGELOG.md) for the migration
+> notes. The Python source tree is preserved in
+> `legacy/python-pre-csharp-conversion-archive-2026-05-26.zip`.
 
-</div>
+## Build
 
-<br>
-
-**Windows MCP** is a lightweight, open-source project that enables seamless integration between AI agents and the Windows operating system. Acting as an MCP server bridges the gap between LLMs and the Windows operating system, allowing agents to perform tasks such as **file navigation, application control, UI interaction, QA testing,** and more.
-
-## 🎥 Demos
-
-<https://github.com/user-attachments/assets/d0e7ed1d-6189-4de6-838a-5ef8e1cad54e>
-
-<https://github.com/user-attachments/assets/d2b372dc-8d00-4d71-9677-4c64f5987485>
-
-## ✨ Key Features
-
-- **Seamless Windows Integration**  
-  Interacts natively with Windows UI elements, opens apps, controls windows, simulates user input, and more.
-
-- **Use Any LLM (Vision Optional)**
-   Unlike many automation tools, Windows MCP doesn't rely on any traditional computer vision techniques or specific fine-tuned models; it works with any LLMs, reducing complexity and setup time.
-
-- **Rich Toolset for UI Automation**
-  45 tools for keyboard, mouse, clipboard, shell, window management, element search, UI state capture, notifications, process management, OCR, audio control, disk analysis, file management, network diagnostics, security auditing, and storage cleanup.
-
-- **Command Security**
-  Built-in protection against dangerous commands (format, shutdown, rm, etc.), injection attacks (blocked operators and encoded command arguments), working directory restrictions, and command length limits.
-
-- **Lightweight & Open-Source**
-  Minimal dependencies and easy setup with full source code available under MIT license.
-
-- **Customizable & Extendable**  
-  Easily adapt or extend tools to suit your unique automation or AI integration needs.
-
-- **Real-Time Interaction**  
-  Typical latency between actions (e.g., from one mouse click to the next) ranges from **1.5 to 2.3 secs**, and may slightly vary based on the number of active applications and system load, also the inferencing speed of the llm.
-
-### Supported Operating Systems
-
-- Windows 7
-- Windows 8, 8.1
-- Windows 10
-- Windows 11  
-
-## Installation
-
-### Prerequisites
-
-- Python 3.13+
-- Anthropic Claude Desktop app or other MCP Clients
-- UV (Package Manager) from Astra, install with `pip install uv`
-- DXT (Desktop Extension) from Antropic, install with `npm install -g @anthropic-ai/dxt`
-
-## 🏁 Getting Started
-
-### PyPI (Any MCP Client)
-
-Install from PyPI:
-
-```shell
-pip install windows-mcp-server
+```powershell
+git clone https://github.com/danielsimonjr/Windows-mcp.git
+cd Windows-mcp
+dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained `
+    -p:PublishSingleFile=true `
+    -p:EnableCompressionInSingleFile=true
 ```
 
-Then configure your MCP client to run `windows-mcp` as the command.
+Output: `dist/WindowsMcp.exe` (~56 MB self-contained; no .NET runtime required
+on the target machine).
 
-### Claude Code
+Requires the .NET 9 SDK for building. End users only need Windows 10 1703+
+(for per-monitor DPI awareness V2) and System PowerShell (always present on
+Windows 7+ at `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`).
 
-```shell
-claude mcp add windows-mcp -- windows-mcp
-```
+## Register with Claude Code (or any MCP host)
 
-### Gemini CLI
-
-1. Navigate to `%USERPROFILE%/.gemini` in File Explorer and open `settings.json`.
-
-2. Add the `windows-mcp` config in the `settings.json` and save it.
+Add to your MCP host config (e.g.,
+`~/.claude/local-marketplace/mcp-host/.mcp.json`):
 
 ```json
 {
-  "theme": "Default",
-  "selectedAuthType": "oauth-personal",
-//MCP Server Config
   "mcpServers": {
-    "windows-mcp": {
-      "command": "uv",
-      "args": [
-        "--directory",
-        "<path to the windows-mcp directory>",
-        "run",
-        "main.py"
-      ]
+    "Windows-mcp": {
+      "type": "stdio",
+      "command": "C:/path/to/Windows-mcp/dist/WindowsMcp.exe",
+      "args": []
     }
   }
 }
 ```
 
-3. Rerun Gemini CLI in terminal. Enjoy 🥳
+Run `/reload-plugins`. Tools appear as `mcp__Windows-mcp__*`.
 
-### Claude Desktop
+## Tool reference
 
-1. Clone the repository.
+50 tools, grouped:
 
-```shell
-git clone https://github.com/CursorTouch/Windows-MCP.git
-cd Windows-MCP
+| Category | Tools |
+|---|---|
+| Input | `click`, `drag`, `hover`, `type`, `key`, `shortcut`, `scroll`, `clipboard` |
+| Screen | `screenshot`, `ocr` |
+| Window | `window`, `switch_to_window`, `launch`, `focus`, `multi_monitor` |
+| UI Automation | `get_state`, `find_element`, `get_element`, `get_text`, `assert_element`, `interact_element`, `get_table`, `wait_for` |
+| Process / Shell | `process`, `start_process`, `powershell`, `service`, `scheduled_task`, `event_log` |
+| File | `file_search`, `file_manage`, `file_dialog`, `file_read`, `file_write`, `file_info`, `archive` |
+| Disk | `disk_inspect` |
+| System | `system_info`, `audio`, `notification`, `security_audit`, `wmi_query`, `env`, `power_action` |
+| Network | `network`, `firewall` |
+| Registry | `registry_get`, `registry_set` |
+| Web | `scrape`, `http_request` |
+
+## Safety rails
+
+Destructive tools require `confirm: true` as an argument and throw
+`ArgumentException` otherwise:
+
+- `file_write`, `file_manage(action="delete")`
+- `process(action="kill")`, `service(action="stop"|"restart")`,
+  `scheduled_task(action="delete")`
+- `registry_set`
+- `power_action`
+- `firewall(action="add"|"remove")`
+- `env(action="set")`
+
+`env(get|list)` redacts values for variables whose name contains
+`KEY/TOKEN/SECRET/PASSWORD/AUTH/CREDENTIAL/PRIVATE/PAT` (case-insensitive).
+Pass `include_secrets: true` to opt out.
+
+`scrape` and `http_request` reject private IP ranges (RFC1918, link-local,
+loopback, IPv6 `fc00::/7` + `fe80::/10`) including via DNS rebinding —
+public URLs only by default.
+
+## Performance notes
+
+On first launch, the single-file binary extracts native dependencies
+(SkiaSharp, etc.) to `%TEMP%\.net\WindowsMcp\<hash>\`, adding ~3-5 sec
+startup. Subsequent launches are warm.
+
+If you hit the 30s Claude Code startup timeout, add a Defender exclusion
+for the `dist/` folder.
+
+## Development
+
+```powershell
+dotnet build                                       # incremental
+dotnet test --filter "Category=Unit"               # fast loop (29 tests, ~1s)
+dotnet test --filter "Category=Integration"        # exercises real Windows APIs
+dotnet test --filter "Category=UIAutomation"       # launches Notepad fixture
+dotnet test                                        # full suite
 ```
 
-2. Build Desktop Extension `DXT`:
+See `docs/superpowers/specs/2026-05-24-windows-mcp-csharp-conversion-design.md`
+for the architecture spec and
+`docs/superpowers/plans/2026-05-24-windows-mcp-csharp-conversion.md` for the
+22-task implementation plan that produced this version.
 
-```shell
-npx @anthropic-ai/dxt pack
-```
+## License
 
-3. Open Claude Desktop:
-
-Go to Claude Desktop: Settings->Extensions->Install Extension (locate the `.dxt` file)-> Install
-
-Finally Enjoy 🥳.
-
-For additional Claude Desktop integration troubleshooting, see the [MCP documentation](https://modelcontextprotocol.io/quickstart/server#claude-for-desktop-integration-issues). The documentation includes helpful tips for checking logs and resolving common issues.
-
----
-
-## 🛠️MCP Tools
-
-Claude can access the following tools to interact with Windows:
-
-| Tool | Description |
-|------|-------------|
-| `State-Tool` | Combined snapshot of active apps, interactive/textual/scrollable elements, and optional annotated screenshot |
-| `Click-Tool` | Click on the screen at given coordinates (single, double, or triple click) |
-| `Type-Tool` | Type text on an element (optionally clears existing text) |
-| `Clipboard-Tool` | Copy or paste using the system clipboard |
-| `Scroll-Tool` | Scroll vertically or horizontally on the window or specific regions |
-| `Drag-Tool` | Drag from one point to another |
-| `Move-Tool` | Move mouse pointer |
-| `Shortcut-Tool` | Press keyboard shortcuts (`Ctrl+C`, `Alt+Tab`, etc.) |
-| `Key-Tool` | Press a single key |
-| `Wait-Tool` | Pause for a defined duration |
-| `Launch-Tool` | Launch an application from the start menu |
-| `Switch-Tool` | Switch to a running application |
-| `Powershell-Tool` | Execute PowerShell commands with security validation and optional working directory |
-| `Command-History-Tool` | Retrieve history of executed commands with timestamps and exit codes |
-| `Screenshot-Tool` | Take a screenshot of the full screen or a specific region |
-| `Window-Tool` | Minimize, maximize, restore, or close windows by name |
-| `Find-Element-Tool` | Search UI elements by text and return coordinates |
-| `Wait-For-Tool` | Poll until a UI element or text appears, with timeout |
-| `Scrape-Tool` | Scrape a webpage for information (with SSRF protection) |
-| `Notification-Tool` | Show a Windows toast notification |
-| `Process-Tool` | List running processes or kill by name/PID |
-| `File-Dialog-Tool` | Type a path into an open/save file dialog and confirm |
-| `Multi-Monitor-Tool` | Get display count, resolutions, and positions |
-| `OCR-Tool` | Extract text from screen or region using Windows built-in OCR |
-| `Audio-Tool` | Get/set system volume, mute/unmute |
-| `System-Info-Tool` | Get comprehensive system info (OS, CPU, RAM, disks, GPU, network, battery, top processes)
-
-### 📡 MCP Resources
-
-| Resource URI | Description |
-|--------------|-------------|
-| `windows-mcp://current-directory` | Server's current working directory |
-| `windows-mcp://security-config` | Active security rules (blocked commands, arguments, operators, allowed paths)
-
-### 🔒 Command Security
-
-The `Powershell-Tool` includes multiple layers of protection:
-
-- **Blocked commands**: `format`, `shutdown`, `rm`, `del`, `regedit`, `net`, and more
-- **Blocked arguments**: `-enc`, `-encodedcommand`, `--exec`, and other injection-risk flags
-- **Blocked operators**: `;` and `` ` `` (backtick) to prevent command chaining and injection
-- **Path restriction**: `workingDir` limited to user home directory and server working directory
-- **Length limit**: Commands capped at 10,000 characters
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=CursorTouch/Windows-MCP&type=Date)](https://www.star-history.com/#CursorTouch/Windows-MCP&Date)
-
-## ⚠️Caution
-
-This MCP interacts directly with your Windows operating system to perform actions. Use with caution and avoid deploying it in environments where such risks cannot be tolerated.
-
-## 📝 Limitations
-
-- Selecting specific sections of the text in a paragraph, as the MCP is relying on a11y tree. (⌛ Working on it.)
-- `Type-Tool` is meant for typing text, not programming in IDE because of it types program as a whole in a file. (⌛ Working on it.)
-
-## Recent updates
-
-See [CHANGELOG.md](CHANGELOG.md) for recent changes — shell-injection regex hardening on the PowerShell tool.
-
-## 🪪License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🤝Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING](CONTRIBUTING) for setup instructions and development guidelines.
-
-Made with ❤️ by [Jeomon George](https://github.com/Jeomon)
-
-## Citation
-
-```bibtex
-@software{
-  author       = {George, Jeomon},
-  title        = {Windows-MCP: Lightweight open-source project for integrating LLM agents with Windows},
-  year         = {2024},
-  publisher    = {GitHub},
-  url={https://github.com/CursorTouch/Windows-MCP}
-}
-```
+MIT — see [LICENSE](LICENSE).
