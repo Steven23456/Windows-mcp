@@ -36,6 +36,20 @@ internal static class Program
         }
 
         // CRITICAL: MCP stdio servers must log to stderr only. stdout is JSON-RPC.
+        // CRITICAL: On Windows, Console.Out defaults to the system codepage (cp1252).
+        // The MCP SDK's StdioServerTransport calls Console.OpenStandardOutput() at DI
+        // resolution time and wraps it with Console.Out's current encoding. If the
+        // encoding is not UTF-8, the underlying StreamWriter uses a BOM-less cp1252
+        // writer — but more importantly, the raw Stream returned by
+        // Console.OpenStandardOutput() is a synchronous ConsoleStream that only flushes
+        // when AutoFlush is true on the TextWriter layer. When the encoding is not
+        // explicitly set to UTF-8 before host startup, Console.Out's StreamWriter has
+        // AutoFlush=false on Windows, causing all JSON-RPC responses to be buffered
+        // internally and never flushed to the pipe before the process exits.
+        // Fix: set both encodings to UTF-8 (no BOM) before the host/DI starts.
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        Console.InputEncoding = System.Text.Encoding.UTF8;
+
         var builder = Host.CreateApplicationBuilder(args);
         builder.Logging.ClearProviders();
         builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
