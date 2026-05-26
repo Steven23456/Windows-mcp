@@ -10,7 +10,7 @@ namespace WindowsMcp.Services;
 public sealed class PowerShellService : IPowerShellService
 {
     private readonly ILogger _log;
-    private Runspace _runspace;
+    private Runspace? _runspace;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private int _callCount;
     private DateTime _runspaceCreated;
@@ -18,30 +18,28 @@ public sealed class PowerShellService : IPowerShellService
     private const int RestartAfterCalls = 1000;
     private static readonly TimeSpan RestartAfter = TimeSpan.FromMinutes(30);
 
-    public PowerShellService(ILogger<PowerShellService> log)
-    {
-        _log = log;
-        _runspace = CreateRunspace();
-    }
+    public PowerShellService(ILogger<PowerShellService> log) => _log = log;
 
     // Test ctor accepting non-generic ILogger
-    public PowerShellService(ILogger log)
-    {
-        _log = log;
-        _runspace = CreateRunspace();
-    }
+    public PowerShellService(ILogger log) => _log = log;
 
-    private Runspace CreateRunspace()
+    // Lazy creation: InitialSessionState.CreateDefault2() probes Assembly.Location
+    // and AppContext.BaseDirectory deep inside the PowerShell SDK. With
+    // PublishSingleFile=true, Assembly.Location returns "" — that nullref bubbles up
+    // as ArgumentNullException("path1") from Path.Combine. Deferring creation to
+    // first RunAsync means any service in the DI graph that depends on
+    // IPowerShellService (NetworkTools.firewall, AudioService, etc.) can be
+    // constructed without triggering this — only the actual PS users pay the cost.
+    private Runspace EnsureRunspace()
     {
-        // CreateDefault2() loads only the core engine — no snap-ins that require
-        // full PS install DLLs not shipped with the NuGet SDK package.
+        if (_runspace is not null) return _runspace;
         var iss = InitialSessionState.CreateDefault2();
-        var rs = RunspaceFactory.CreateRunspace(iss);
-        rs.Open();
+        _runspace = RunspaceFactory.CreateRunspace(iss);
+        _runspace.Open();
         _runspaceCreated = DateTime.UtcNow;
         _callCount = 0;
         _log.LogInformation("PowerShell runspace created");
-        return rs;
+        return _runspace;
     }
 
     public async Task<PSResult> RunAsync(string command, CancellationToken ct = default)
@@ -51,11 +49,13 @@ public sealed class PowerShellService : IPowerShellService
         await _gate.WaitAsync(ct);
         try
         {
+            var runspace = EnsureRunspace();
             MaybeRestartRunspace();
+            runspace = _runspace!;   // MaybeRestart may have replaced it
             // Increment before invocation so recycling still triggers when calls fail.
             _callCount++;
             using var ps = PowerShell.Create();
-            ps.Runspace = _runspace;
+            ps.Runspace = runspace;
             ps.AddScript(command);
 
             var output = new StringBuilder();
@@ -80,7 +80,7 @@ public sealed class PowerShellService : IPowerShellService
                 if (!ps.HadErrors)
                 {
                     using var psExit = PowerShell.Create();
-                    psExit.Runspace = _runspace;
+                    psExit.Runspace = runspace;
                     psExit.AddScript("if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }");
                     var exitResults = psExit.Invoke();
                     if (exitResults.Count > 0 && int.TryParse(exitResults[0]?.ToString(), out var parsed))
@@ -108,6 +108,7 @@ public sealed class PowerShellService : IPowerShellService
 
     private void MaybeRestartRunspace()
     {
+        if (_runspace is null) return;
         if (_callCount >= RestartAfterCalls || DateTime.UtcNow - _runspaceCreated > RestartAfter)
         {
             _log.LogInformation(
@@ -115,7 +116,8 @@ public sealed class PowerShellService : IPowerShellService
                 _callCount,
                 DateTime.UtcNow - _runspaceCreated);
             _runspace.Dispose();
-            _runspace = CreateRunspace();
+            _runspace = null;
+            EnsureRunspace();
         }
     }
 
@@ -123,7 +125,7 @@ public sealed class PowerShellService : IPowerShellService
     {
         if (_disposed) return;
         _disposed = true;
-        _runspace.Dispose();
+        _runspace?.Dispose();
         _gate.Dispose();
     }
 }
