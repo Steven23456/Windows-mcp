@@ -2,430 +2,372 @@
 
 ## Component Overview
 
-This document provides detailed documentation for each component in the Windows-MCP architecture, including their responsibilities, interfaces, and implementation details.
+This document provides detailed documentation for each component in the Windows-MCP C# architecture, including tool classes, service interfaces, service implementations, and data models.
 
 ---
 
-## MCP Server Component (`main.py`)
+## Program.cs — Host and DI Entry Point
 
 ### Purpose
-Serves as the MCP protocol interface, exposing Windows automation capabilities as callable tools to AI agents.
-
-### Responsibilities
-- Initialize FastMCP server with metadata and lifecycle handlers
-- Define and register all 45 MCP tools
-- Coordinate between MCP protocol and Desktop/Tree layers
-- Format responses for protocol compliance
-
-### Key Configurations
-
-```python
-pg.FAILSAFE = True     # Abort by moving mouse to corner
-pg.PAUSE = 1.0         # Pause between operations
-```
-
-### Server Initialization
-
-```python
-@asynccontextmanager
-async def lifespan(app: FastMCP):
-    # Server is ready immediately - no artificial delay needed
-    yield
-
-mcp = FastMCP(name='windows-mcp', instructions=instructions, lifespan=lifespan)
-```
-
-### Tool Registry
-
-| Tool | Function | Parameters | Return Type |
-|------|----------|------------|-------------|
-| `Launch-Tool` | `launch_tool` | `name: str` | `str` |
-| `Powershell-Tool` | `powershell_tool` | `command: str` | `str` |
-| `State-Tool` | `state_tool` | `use_vision: bool = False` | `str \| list[str, Image]` |
-| `Clipboard-Tool` | `clipboard_tool` | `mode: Literal['copy', 'paste'], text: str = None` | `str` |
-| `Click-Tool` | `click_tool` | `loc: tuple[int,int], button: Literal[...], clicks: int` | `str` |
-| `Type-Tool` | `type_tool` | `loc: tuple[int,int], text: str, clear: bool` | `str` |
-| `Switch-Tool` | `switch_tool` | `name: str` | `str` |
-| `Scroll-Tool` | `scroll_tool` | `loc: tuple, type: Literal[...], direction: Literal[...], wheel_times: int` | `str` |
-| `Drag-Tool` | `drag_tool` | `from_loc: tuple, to_loc: tuple` | `str` |
-| `Move-Tool` | `move_tool` | `to_loc: tuple[int,int]` | `str` |
-| `Shortcut-Tool` | `shortcut_tool` | `shortcut: list[str]` | `str` |
-| `Key-Tool` | `key_tool` | `key: str` | `str` |
-| `Wait-Tool` | `wait_tool` | `duration: int` | `str` |
-| `Scrape-Tool` | `scrape_tool` | `url: str` | `str` |
-
----
-
-## Desktop Class (`src/desktop/__init__.py`)
-
-### Purpose
-Primary interface for Windows OS interactions including application management, command execution, and state capture.
+Configures the .NET Generic Host, registers all 20 services as singletons, and starts the MCP server with stdio transport.
 
 ### Location
-`src/desktop/__init__.py:14`
+`src/WindowsMcp/Program.cs`
 
-### Interface
+### Startup Sequence
 
-```python
-class Desktop:
-    def __init__(self) -> None
-    def get_state(self, use_vision: bool = False) -> DesktopState
-    def get_apps(self) -> list[App]
-    def launch_app(self, name: str) -> tuple[str, int]
-    def switch_app(self, name: str) -> tuple[str, int]
-    def execute_command(self, command: str) -> tuple[str, int]
-    def get_screenshot(self, scale: float = 0.7) -> Image.Image
-    def get_element_under_cursor(self) -> Control
-    def get_taskbar(self) -> Control
-    def get_app_status(self, control: Control) -> str
-    def get_app_size(self, control: Control) -> Size
-    def is_app_visible(self, app: Control) -> bool
-    def is_overlay_app(self, element: Control) -> bool
-    def screenshot_in_bytes(self, screenshot: Image.Image) -> bytes
-    def get_apps_from_start_menu(self) -> dict[str, str]
-```
+```csharp
+public static async Task<int> Main(string[] args)
+{
+    // 1. Register AppUserModelID for WinRT toast notifications
+    PInvoke.SetCurrentProcessExplicitAppUserModelID("org.windows-mcp.server");
 
-### Key Methods
+    // 2. Per-Monitor DPI Awareness V2 — physical pixel coordinates on HiDPI
+    PInvoke.SetProcessDpiAwarenessContext(new DPI_AWARENESS_CONTEXT((nint)(-4)));
 
-#### `get_state(use_vision: bool = False) -> DesktopState`
-Captures comprehensive desktop state including running applications, UI tree, and optional annotated screenshot.
+    // 3. Force UTF-8 to prevent JSON-RPC response buffering on Windows (cp1252 default)
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    Console.InputEncoding  = System.Text.Encoding.UTF8;
 
-**Flow:**
-1. Create `Tree` instance with `self` reference
-2. Get tree state via `tree.get_state()`
-3. If `use_vision`, generate annotated screenshot
-4. Enumerate running applications
-5. Compose and return `DesktopState`
+    // 4. Build host and configure DI
+    var builder = Host.CreateApplicationBuilder(args);
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
+    builder.Services.AddSingleton<IInputService, InputService>();
+    // ... (20 services)
 
-#### `launch_app(name: str) -> tuple[str, int]`
-Launches application from Start Menu using fuzzy name matching.
+    // 5. Configure MCP server
+    builder.Services
+        .AddMcpServer(o => { o.ServerInfo = new() { Name = "Windows-mcp", Version = "0.2.0" }; })
+        .WithStdioServerTransport()
+        .WithToolsFromAssembly(); // discovers [McpServerTool] at compile time
 
-**Flow:**
-1. Get Start Menu apps via PowerShell `Get-StartApps`
-2. Fuzzy match input name against app list
-3. Execute `Start-Process` for matched app
-4. Return status tuple
-
-#### `execute_command(command: str) -> tuple[str, int]`
-Executes PowerShell command via subprocess.
-
-```python
-result = subprocess.run(
-    ['powershell', '-Command'] + command.split(),
-    capture_output=True, check=True
-)
-return (result.stdout.decode('latin1'), result.returncode)
-```
-
-#### `get_apps() -> list[App]`
-Enumerates visible top-level windows.
-
-**Filtering Criteria:**
-- Not in `EXCLUDED_APPS`
-- Not an overlay app
-- Control type is Window or Pane
-
----
-
-## Tree Class (`src/tree/__init__.py`)
-
-### Purpose
-Handles UI Automation accessibility tree traversal and element extraction with parallel processing.
-
-### Location
-`src/tree/__init__.py:15`
-
-### Interface
-
-```python
-class Tree:
-    def __init__(self, desktop: 'Desktop') -> None
-    def get_state(self) -> TreeState
-    def get_appwise_nodes(self, node: Control) -> tuple[list, list, list]
-    def get_nodes(self, node: Control) -> tuple[list, list, list]
-    def annotated_screenshot(self, nodes: list, scale: float = 0.7) -> Image.Image
-    def get_annotated_image_data(self) -> tuple[Image.Image, list]
-```
-
-### Key Methods
-
-#### `get_state() -> TreeState`
-Initiates UI tree traversal and returns categorized elements.
-
-```python
-def get_state(self) -> TreeState:
-    sleep(1.0)  # Allow UI to settle
-    root = GetRootControl()
-    interactive, informative, scrollable = self.get_appwise_nodes(node=root)
-    return TreeState(
-        interactive_nodes=interactive,
-        informative_nodes=informative,
-        scrollable_nodes=scrollable
-    )
-```
-
-#### `get_appwise_nodes(node: Control) -> tuple`
-Parallel traversal of visible application windows.
-
-**Processing:**
-1. Filter visible apps (excluding `AVOIDED_APPS`)
-2. Always include Taskbar and Program Manager
-3. Include foreground app if available
-4. Launch parallel `get_nodes()` for each app
-5. Aggregate results from all futures
-
-#### `get_nodes(node: Control) -> tuple`
-Recursive DFS traversal of single application's UI tree.
-
-**Element Classification:**
-
-| Category | Detection Function | Output Type |
-|----------|-------------------|-------------|
-| Interactive | `is_element_interactive()` | `TreeElementNode` |
-| Informative | `is_element_text()` | `TextElementNode` |
-| Scrollable | `is_element_scrollable()` | `ScrollElementNode` |
-
-**DOM Correction Logic (`dom_correction()`):**
-- Fixes list items containing links
-- Handles unnamed group controls
-- Corrects links containing headings
-
-#### `annotated_screenshot(nodes, scale) -> Image.Image`
-Generates screenshot with bounding box annotations.
-
-**Process:**
-1. Capture desktop screenshot
-2. Add padding (20px)
-3. For each element: draw colored bounding box + label
-4. Draw annotations sequentially (PIL ImageDraw is not thread-safe)
-
----
-
-## Data Models (`src/desktop/views.py`)
-
-### DesktopState
-
-```python
-@dataclass
-class DesktopState:
-    apps: list[App]              # Background applications
-    active_app: Optional[App]    # Foreground application
-    screenshot: bytes | None     # PNG screenshot data
-    tree_state: TreeState        # UI element tree
-```
-
-**Methods:**
-- `active_app_to_string()`: Format active app info
-- `apps_to_string()`: Format all apps info
-
-### App
-
-```python
-@dataclass
-class App:
-    name: str                                      # Window title
-    depth: int                                     # Z-order depth
-    status: Literal['Maximized', 'Minimized', 'Normal']
-    size: Size                                     # Window dimensions
-    handle: int                                    # Native window handle
-```
-
-### Size
-
-```python
-@dataclass
-class Size:
-    width: int
-    height: int
-```
-
----
-
-## Data Models (`src/tree/views.py`)
-
-### TreeState
-
-```python
-@dataclass
-class TreeState:
-    interactive_nodes: list[TreeElementNode]
-    informative_nodes: list[TextElementNode]
-    scrollable_nodes: list[ScrollElementNode]
-```
-
-**Methods:**
-- `interactive_elements_to_string()`: Format interactive elements
-- `informative_elements_to_string()`: Format text elements
-- `scrollable_elements_to_string()`: Format scrollable regions
-
-### TreeElementNode
-
-```python
-@dataclass
-class TreeElementNode:
-    name: str              # Element name/label
-    control_type: str      # UI Automation control type
-    bounding_box: BoundingBox
-    shortcut: str          # Accelerator key
-    center: Center         # Click coordinates
-    app_name: str          # Parent application
-```
-
-### TextElementNode
-
-```python
-@dataclass
-class TextElementNode:
-    name: str       # Text content
-    app_name: str   # Parent application
-```
-
-### ScrollElementNode
-
-```python
-@dataclass
-class ScrollElementNode:
-    name: str
-    app_name: str
-    center: Center
-    bounding_box: BoundingBox
-    horizontal_scrollable: bool
-    vertical_scrollable: bool
-```
-
-### Geometry Types
-
-```python
-@dataclass
-class Center:
-    x: int
-    y: int
-
-@dataclass
-class BoundingBox:
-    left: int
-    top: int
-    right: int
-    bottom: int
-```
-
----
-
-## Configuration Components
-
-### Desktop Configuration (`src/desktop/config.py`)
-
-```python
-AVOIDED_APPS: Set[str] = {'Recording toolbar'}
-EXCLUDED_APPS: Set[str] = {'Program Manager', 'Taskbar'}.union(AVOIDED_APPS)
-```
-
-| Constant | Purpose |
-|----------|---------|
-| `AVOIDED_APPS` | Apps filtered from tree traversal only |
-| `EXCLUDED_APPS` | Apps filtered from `get_apps()` enumeration |
-
-### Tree Configuration (`src/tree/config.py`)
-
-```python
-INTERACTIVE_CONTROL_TYPE_NAMES = {
-    'ButtonControl', 'ListItemControl', 'MenuItemControl', 'DocumentControl',
-    'EditControl', 'CheckBoxControl', 'RadioButtonControl', 'ComboBoxControl',
-    'HyperlinkControl', 'SplitButtonControl', 'TabItemControl',
-    'TreeItemControl', 'DataItemControl', 'HeaderItemControl', 'TextBoxControl',
-    'ImageControl', 'SpinnerControl', 'ScrollBarControl'
+    await builder.Build().RunAsync();
+    return 0;
 }
+```
 
-INFORMATIVE_CONTROL_TYPE_NAMES = {'TextControl', 'ImageControl'}
+### Registered Services
 
-DEFAULT_ACTIONS = {'Click', 'Press', 'Jump', 'Check', 'Uncheck', 'Double Click'}
+| Interface | Implementation |
+|-----------|---------------|
+| `IInputService` | `InputService` |
+| `IScreenshotService` | `ScreenshotService` |
+| `IOcrService` | `OcrService` |
+| `IClipboardService` | `ClipboardService` |
+| `IAudioService` | `AudioService` |
+| `IPowerShellService` | `PowerShellService` |
+| `IUIAutomationService` | `UIAutomationService` |
+| `IFileSystemService` | `FileSystemService` |
+| `IRegistryService` | `RegistryService` |
+| `IServiceControlService` | `ServiceControlService` |
+| `IEventLogService` | `EventLogService` |
+| `ITaskSchedulerService` | `TaskSchedulerService` |
+| `IProcessService` | `ProcessService` |
+| `IWindowService` | `WindowService` |
+| `IWmiService` | `WmiService` |
+| `IEnvService` | `EnvService` |
+| `IPowerService` | `PowerService` |
+| `INotificationService` | `NotificationService` |
+| `INetworkService` | `NetworkService` |
+| `IWebService` | `WebService` |
+
+---
+
+## Tool Classes
+
+Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except for injected service references). All tool methods are `async Task<string>` and return JSON-serialized results or plain strings.
+
+---
+
+### `InputTools` — 8 tools
+`src/WindowsMcp/Tools/InputTools.cs`
+
+**Injected:** `IInputService`, `IClipboardService`
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `Click` | `(int x, int y, string button="left", int clicks=1)` | Click at coordinates |
+| `Drag` | `(int from_x, int from_y, int to_x, int to_y, string button="left")` | Drag between two points |
+| `Hover` | `(int x, int y, int duration_ms=0)` | Hover or move cursor |
+| `Type` | `(string text)` | Type text into focused input |
+| `Key` | `(string key)` | Press a named key |
+| `Shortcut` | `(string shortcut)` | Press a key combo (e.g., `ctrl+c`) |
+| `Scroll` | `(int x, int y, string direction, int amount=3)` | Scroll mouse wheel |
+| `Clipboard` | `(string action, string? text=null)` | `get` or `set` clipboard text |
+
+---
+
+### `UIAutomationTools` — 8 tools
+`src/WindowsMcp/Tools/UIAutomationTools.cs`
+
+**Injected:** `IUIAutomationService`
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `GetState` | `()` | Full UI element tree of the foreground app |
+| `FindElement` | `(string text, string kind="any")` | Find elements by text; kind: any/interactive/text/scrollable |
+| `GetElement` | `(string element_id)` | Properties of a specific element by ID |
+| `GetText` | `(string element_id)` | Extract text content (faster than OCR) |
+| `AssertElement` | `(string element_id, string state)` | Assert element state; returns `PASS` or `FAIL: <reason>` |
+| `InteractElement` | `(string element_id, string action, string? value=null)` | click/toggle/select/focus/type on element |
+| `GetTable` | `(string element_id)` | Extract grid/table data via `GridPattern` |
+| `WaitFor` | `(string text, int timeout_ms=10000, int interval_ms=500)` | Poll until element appears |
+
+---
+
+### `WindowTools` — 5 tools
+`src/WindowsMcp/Tools/WindowTools.cs`
+
+**Injected:** `IWindowService`, `IProcessService`
+
+| Method | Description |
+|--------|-------------|
+| `SwitchToWindow` | Focus a window by title pattern |
+| `Window` | Get window position, size, and state |
+| `MultiMonitor` | Enumerate all monitors with resolution and DPI |
+| `Launch` | Launch an application by name |
+| `StartProcess` | Start a detached process |
+
+---
+
+### `FileTools` — 7 tools
+`src/WindowsMcp/Tools/FileTools.cs`
+
+**Injected:** `IFileSystemService`
+
+| Method | Description |
+|--------|-------------|
+| `FileRead` | Read file contents (text or binary) |
+| `FileWrite` | Write or append to a file |
+| `FileManage` | Copy, move, delete, or create files/directories |
+| `FileInfo` | Get file or directory metadata |
+| `FileSearch` | Search for files by glob pattern |
+| `FileDialog` | Interact with a native open/save dialog |
+| `Archive` | Create, extract, or list zip/tar archives |
+
+---
+
+### `SystemTools` — 7 tools
+`src/WindowsMcp/Tools/SystemTools.cs`
+
+**Injected:** `IServiceControlService`, `IEventLogService`, `ITaskSchedulerService`, `IWmiService`, `IEnvService`, `IPowerService`
+
+| Method | Description |
+|--------|-------------|
+| `SystemInfo` | CPU, RAM, OS version, hostname |
+| `Service` | List, start, stop, restart Windows services |
+| `ScheduledTask` | Create/read/update/delete scheduled tasks |
+| `EventLog` | Query Windows Event Log by source/level/count |
+| `WmiQuery` | Execute arbitrary WMI queries |
+| `Env` | Get or set environment variables |
+| `PowerAction` | Sleep, hibernate, lock workstation, sign out |
+
+---
+
+### `ProcessTools` — 5 tools
+`src/WindowsMcp/Tools/ProcessTools.cs`
+
+**Injected:** `IProcessService`, `INetworkService`
+
+| Method | Description |
+|--------|-------------|
+| `Process` | List processes or kill by PID/name |
+| `GetProcess` | Detailed info for a specific process |
+| `Network` | List active connections per process |
+| `SecurityAudit` | Audit process security posture |
+| `FirewallRules` | List/manage Windows Firewall rules |
+
+---
+
+### `ScreenTools` — 2 tools
+`src/WindowsMcp/Tools/ScreenTools.cs`
+
+**Injected:** `IScreenshotService`, `IOcrService`
+
+| Method | Description |
+|--------|-------------|
+| `Screenshot` | Capture full screen or a region; returns base64 PNG |
+| `Ocr` | Extract text from a screen region |
+
+---
+
+### `ShellTools` — 1 tool
+`src/WindowsMcp/Tools/ShellTools.cs`
+
+**Injected:** `IPowerShellService`
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `Powershell` | `(string command)` | Execute PowerShell; returns `{stdout, stderr, exitCode}` JSON |
+
+---
+
+### `RegistryTools` — 2 tools
+`src/WindowsMcp/Tools/RegistryTools.cs`
+
+**Injected:** `IRegistryService`
+
+| Method | Description |
+|--------|-------------|
+| `RegistryGet` | Read a registry key or named value |
+| `RegistrySet` | Write a registry value (REG_SZ, DWORD, etc.) |
+
+---
+
+### `NetworkTools` — 2 tools
+`src/WindowsMcp/Tools/NetworkTools.cs`
+
+**Injected:** `INetworkService`
+
+| Method | Description |
+|--------|-------------|
+| `Network` | Get adapter info, IP, gateway, DNS |
+| `HttpRequest` | Make an HTTP request (GET/POST/PUT/DELETE) |
+
+---
+
+### `WebTools` — 2 tools
+`src/WindowsMcp/Tools/WebTools.cs`
+
+**Injected:** `IWebService`
+
+| Method | Description |
+|--------|-------------|
+| `Scrape` | Fetch a URL and convert HTML to Markdown |
+| `Shortcut` | Create or read a Windows .lnk shell shortcut |
+
+---
+
+### `DiskTools` — 1 tool
+`src/WindowsMcp/Tools/DiskTools.cs`
+
+**Injected:** `IFileSystemService`
+
+| Method | Description |
+|--------|-------------|
+| `DiskInspect` | List drives with size, free space, file system |
+
+---
+
+## Service Interfaces (`WindowsMcp.Abstractions`)
+
+Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
+
+| Interface | Key Methods |
+|-----------|-------------|
+| `IInputService` | `ClickAsync`, `DragAsync`, `HoverAsync`, `TypeAsync`, `PressKeyAsync`, `PressShortcutAsync`, `ScrollAsync` |
+| `IScreenshotService` | `CaptureAsync(region?)`, `CaptureRegionAsync` |
+| `IOcrService` | `RecognizeAsync(region)` |
+| `IClipboardService` | `GetTextAsync`, `SetTextAsync` |
+| `IAudioService` | `GetAsync`, `SetVolumeAsync`, `SetMutedAsync` |
+| `IPowerShellService` | `RunAsync(command)` |
+| `IUIAutomationService` | `GetStateAsync`, `FindElementAsync`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync`, `InteractAsync`, `GetTableAsync`, `WaitForAsync` |
+| `IFileSystemService` | `ReadAsync`, `WriteAsync`, `ManageAsync`, `InfoAsync`, `SearchAsync`, `ArchiveAsync` |
+| `IRegistryService` | `GetAsync`, `SetAsync` |
+| `IServiceControlService` | `ListAsync`, `StartAsync`, `StopAsync`, `RestartAsync` |
+| `IEventLogService` | `QueryAsync` |
+| `ITaskSchedulerService` | `ListAsync`, `GetAsync`, `CreateAsync`, `DeleteAsync`, `RunAsync` |
+| `IProcessService` | `ListAsync`, `GetAsync`, `KillAsync`, `StartAsync` |
+| `IWindowService` | `ListAsync`, `FocusAsync`, `GetAsync`, `LaunchAsync` |
+| `IWmiService` | `QueryAsync(wql)` |
+| `IEnvService` | `GetAsync`, `SetAsync`, `ListAsync` |
+| `IPowerService` | `SleepAsync`, `HibernateAsync`, `LockAsync`, `SignOutAsync` |
+| `INotificationService` | `ShowAsync` |
+| `INetworkService` | `GetAdaptersAsync`, `GetConnectionsAsync`, `GetFirewallRulesAsync` |
+| `IWebService` | `FetchMarkdownAsync`, `RequestAsync` |
+
+---
+
+## Data Models (`WindowsMcp.Abstractions.Models`)
+
+Located in `src/WindowsMcp.Abstractions/` alongside the interfaces (one DTOs file per domain):
+
+| File | Key Types |
+|------|-----------|
+| `InputDtos.cs` | `ClickResult`, `DragResult`, `TypeResult`, `MouseButton` (enum) |
+| `ScreenDtos.cs` | `ScreenshotResult`, `OcrResult`, `Region` |
+| `UIAutomationDtos.cs` | `UiState`, `UiElement`, `FindKind` (enum), `TableData` |
+| `ProcessDtos.cs` | `ProcessInfo`, `ProcessStartResult` |
+| `WindowDtos.cs` | `WindowInfo`, `MonitorInfo` |
+| `NetworkDtos.cs` | `AdapterInfo`, `ConnectionInfo`, `FirewallRule` |
+| `FileSystemDtos.cs` | `FileEntry`, `ArchiveEntry`, `SearchResult` |
+| `SystemDtos.cs` | `ServiceInfo`, `ScheduledTaskInfo`, `EventLogEntry`, `SystemInfoResult` |
+| `PowerShellDtos.cs` | `PowerShellResult(string Stdout, string Stderr, int ExitCode)` |
+| `WebDtos.cs` | `HttpResponse`, `ShortcutInfo` |
+
+**Model pattern** — all DTOs are C# records:
+```csharp
+// Example from IAudioService.cs
+public record AudioState(int Level, bool Muted);
+
+// Example from IPowerShellService.cs
+public record PowerShellResult(string Stdout, string Stderr, int ExitCode);
 ```
 
 ---
 
-## Utility Components
+## Key Service Implementations
 
-### Geometry Utilities (`src/tree/utils.py`)
+### `UIAutomationService`
 
-#### `random_point_within_bounding_box(node, scale_factor=1.0) -> tuple[int, int]`
+Uses **FlaUI.UIA3** to walk the Windows Accessibility (UIA3) tree:
+- `GetStateAsync()` — enumerates all elements in the foreground window's UIA3 tree
+- `FindElementAsync()` — searches by name/value with optional kind filter
+- `WaitForAsync()` — polls at `interval_ms` until element appears or `timeout_ms` elapses
+- `GetTableAsync()` — reads cells via `IGridPattern`
+- `AssertElementAsync()` — checks element properties: exists / enabled / checked / value / visible / focused
 
-Generates randomized click coordinates within a scaled bounding box.
+### `InputService`
 
-```python
-def random_point_within_bounding_box(node: Control, scale_factor: float = 1.0):
-    box = node.BoundingRectangle
-    scaled_width = int(box.width() * scale_factor)
-    scaled_height = int(box.height() * scale_factor)
-    scaled_left = box.left + (box.width() - scaled_width) // 2
-    scaled_top = box.top + (box.height() - scaled_height) // 2
-    x = random.randint(scaled_left, scaled_left + scaled_width)
-    y = random.randint(scaled_top, scaled_top + scaled_height)
-    return (x, y)
-```
+Uses **H.InputSimulator** (`WindowsInput` namespace) which calls `SendInput` directly:
+- Mouse events: `MoveMouse`, `LeftButtonClick`, `RightButtonClick`, `MiddleButtonClick`
+- Keyboard events: `KeyPress`, `KeyDown`, `KeyUp`, `TextEntry`
+- Note: `MouseButton` enum disambiguation required — `H.InputSimulator` also exports `WindowsInput.MouseButton`; the abstractions define `WindowsMcp.Abstractions.Models.MouseButton` to avoid ambiguity
 
-**Purpose:** Avoids predictable click patterns by randomizing click position within element bounds.
+### `PowerShellService`
 
----
+Executes PowerShell via `System.Diagnostics.Process` with security filtering:
+- Blocks dangerous commands (format, shutdown, del, etc.) and injection-risk flags (-enc, -encodedcommand)
+- Pipes stdin as the script body (avoids command-line length limits)
+- Returns `PowerShellResult(Stdout, Stderr, ExitCode)` to callers
 
-## Entry Point Components
+### `ScreenshotService`
 
-### Package Entry (`__main__.py`)
+Uses **SkiaSharp** for capture and encoding:
+- `CaptureAsync()` — captures the full virtual screen (all monitors) via `BitBlt` + `SkiaSharp` PNG encode
+- `CaptureRegionAsync(Region)` — clips to specified bounding box before encode
+- Returns base64-encoded PNG strings
 
-```python
-from main import mcp
+### `OcrService`
 
-def main():
-    mcp.run()
+Uses the **Windows.Media.Ocr** WinRT API:
+- Calls `OcrEngine.TryCreateFromUserProfileLanguages()` for language detection
+- Returns word-level bounding boxes and recognized text
 
-if __name__ == "__main__":
-    main()
-```
+### `AudioService`
 
-### Console Script Entry (`windows_mcp_entry.py`)
-
-```python
-from main import mcp
-
-def main():
-    mcp.run()
-
-if __name__ == "__main__":
-    main()
-```
-
-**Usage:**
-- `python -m windows_mcp` → Uses `__main__.py`
-- `windows-mcp` (console script) → Uses `windows_mcp_entry.py`
+v0.2.0 limitation — uses PowerShell + `SendKeys` as a backend:
+- `GetAsync()` — reads volume via `Get-AudioDevice` PowerShell module or WMI fallback
+- `SetVolumeAsync()` — sends `VK_VOLUME_UP`/`VK_VOLUME_DOWN` key presses
+- `SetMutedAsync()` — sends `VK_VOLUME_MUTE` toggle (cannot set absolute mute state)
+- Tracked for v0.3.0 to switch to NAudio/CoreAudio COM for accurate read/write
 
 ---
 
-## External Dependencies
+## NuGet Package Reference
 
-### uiautomation
-
-Provides Windows UI Automation API access:
-- `GetRootControl()`: Get desktop root control
-- `Control`: Base class for UI elements
-- `GetFocusedControl()`: Get currently focused element
-- `WheelUp()`, `WheelDown()`: Scroll operations
-
-### humancursor
-
-Human-like cursor movement simulation:
-- `SystemCursor.move_to(loc)`: Move cursor
-- `SystemCursor.click_on(loc)`: Click at location
-- `SystemCursor.drag_and_drop(from, to)`: Drag operation
-
-### pyautogui
-
-Keyboard and mouse automation:
-- `click()`, `mouseDown()`, `mouseUp()`: Mouse operations
-- `typewrite()`, `press()`, `hotkey()`: Keyboard operations
-- `screenshot()`: Screen capture
-
-### fastmcp
-
-MCP server framework:
-- `FastMCP`: Server class
-- `@mcp.tool`: Tool registration decorator
-- `Image`: Vision response type
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `ModelContextProtocol` | latest | MCP SDK — stdio transport, `[McpServerTool]` source generator |
+| `FlaUI.UIA3` | latest | Windows UI Automation API (UIA3 COM wrapper) |
+| `H.InputSimulator` | latest | `SendInput`-based keyboard and mouse simulation |
+| `SkiaSharp` | latest | Screenshot capture, image encode/decode |
+| `CsWin32` | latest | Source-generated P/Invoke for Win32 APIs (DPI, AUMID, etc.) |
+| `Microsoft.Extensions.Hosting` | latest | Generic Host, DI container, configuration |
+| `ReverseMarkdown` | latest | HTML → Markdown conversion for `Scrape` tool |
+| `TaskScheduler` | latest | Windows Task Scheduler COM automation |
+| `TextCopy` | latest | Cross-platform clipboard read/write |
+| `System.Diagnostics.EventLog` | latest | Windows Event Log querying |
+| `System.Drawing.Common` | latest | GDI+ image support (legacy compat) |
+| `System.Management` | latest | WMI query execution (`ManagementObjectSearcher`) |

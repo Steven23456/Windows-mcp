@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Changed
+- **`tools/create-dependency-graph`**: Added C# language support (auto-detects via `.sln` at
+  project root). New functions: `detectProjectLanguage`, `getAllCsFiles`, `parseCsFile`,
+  `categorizeCsFiles`, `buildCsDependencyMatrix`, `inferCsProjectNames` (auto-discovers
+  namespace roots from `.csproj` files — no longer hardcoded). Fixed `detectUnused` to
+  return empty results for C# projects (namespace-based imports cannot be resolved to file
+  paths). Fixed `Microsoft.Extensions.*` and `Microsoft.Win32.TaskScheduler` misclassified
+  as system deps (added `CS_MICROSOFT_NUGET_PREFIXES` blocklist). Added `--lang=auto|typescript|csharp`
+  CLI flag with validation. Renamed `Statistics.totalTypeScriptFiles` → `totalSourceFiles`.
+- **`docs/architecture/OVERVIEW.md`**: Rewritten for C# architecture — 50 MCP tools, 12 tool
+  classes, .NET 9, FlaUI/H.InputSimulator/SkiaSharp dependency table; removed all Python references.
+- **`docs/architecture/ARCHITECTURE.md`**: Rewritten with 4-layer C# diagram (MCP Protocol /
+  Tool / Service Abstraction / Service Implementation); DI wiring, source-generated tool
+  discovery, `Program.cs` startup sequence.
+- **`docs/architecture/COMPONENTS.md`**: Rewritten — all 12 tool classes with tool counts and
+  injected services; all 20 service interfaces with key methods; model DTO files; NuGet
+  package reference table.
+- **`docs/architecture/DATAFLOW.md`**: Rewritten with C# sequence diagrams — `GetState` via
+  FlaUI UIA3 tree walk, `Click` via `H.InputSimulator.SendInput`, `Powershell` via
+  `System.Diagnostics.Process`, `Screenshot`/`Ocr` via SkiaSharp + `Windows.Media.Ocr`,
+  `WaitFor` polling loop, DI resolution at startup, `AssertElement` state checks.
+
 ## [0.2.0] - 2026-05-26
 
 ### Changed

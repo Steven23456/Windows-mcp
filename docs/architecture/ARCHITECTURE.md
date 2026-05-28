@@ -2,255 +2,284 @@
 
 ## Architectural Overview
 
-Windows-MCP follows a layered architecture pattern with clear separation of concerns. The system is organized into three primary layers: the MCP Interface Layer, the Desktop Management Layer, and the UI Tree Layer.
+Windows-MCP follows a four-layer architecture built on .NET 9 with dependency injection throughout. The system is organized into: MCP Protocol, Tool, Service Abstraction, and Service Implementation layers — each with clearly defined responsibilities and interfaces.
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          MCP Interface Layer                                │
-│                            (main.py)                                        │
-│  ┌────────────────────────────────────────────────────────────────────────┐ │
-│  │                         FastMCP Server                                 │ │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐ │ │
-│  │  │State-Tool│ │Click-Tool│ │Type-Tool │ │Launch-Tool│ │...41 more   │ │ │
-│  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────────┘ │ │
-│  └────────────────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        MCP Protocol Layer                                    │
+│                    (ModelContextProtocol SDK)                                │
+│  StdioServerTransport ◄──► JSON-RPC ──► WithToolsFromAssembly() discovery   │
+└──────────────────────────────────────────────────────────────────────────────┘
                                     │
-                      ┌─────────────┴──────────────┐
-                      ▼                            ▼
-┌─────────────────────────────────┐  ┌─────────────────────────────────┐
-│   Desktop Management Layer      │  │       UI Tree Layer             │
-│   (src/desktop/)                │  │       (src/tree/)               │
-│  ┌───────────────────────────┐  │  │  ┌───────────────────────────┐  │
-│  │       Desktop Class       │  │  │  │       Tree Class          │  │
-│  │                           │  │  │  │                           │  │
-│  │  • get_state()            │──┼──┼──│  • get_state()            │  │
-│  │  • get_apps()             │  │  │  │  • get_appwise_nodes()    │  │
-│  │  • launch_app()           │  │  │  │  • get_nodes()            │  │
-│  │  • switch_app()           │  │  │  │  • annotated_screenshot() │  │
-│  │  • execute_command()      │  │  │  │                           │  │
-│  │  • get_screenshot()       │  │  │  └───────────────────────────┘  │
-│  └───────────────────────────┘  │  │              │                  │
-│              │                  │  │              ▼                  │
-│  ┌───────────────────────────┐  │  │  ┌───────────────────────────┐  │
-│  │     Data Models           │  │  │  │     Data Models           │  │
-│  │  (views.py)               │  │  │  │  (views.py)               │  │
-│  │  • DesktopState           │  │  │  │  • TreeState              │  │
-│  │  • App                    │  │  │  │  • TreeElementNode        │  │
-│  │  • Size                   │  │  │  │  • TextElementNode        │  │
-│  └───────────────────────────┘  │  │  │  • ScrollElementNode      │  │
-│              │                  │  │  │  • Center, BoundingBox    │  │
-│  ┌───────────────────────────┐  │  │  └───────────────────────────┘  │
-│  │  Configuration (config.py)│  │  │  ┌───────────────────────────┐  │
-│  │  • EXCLUDED_APPS          │  │  │  │  Configuration (config.py)│  │
-│  │  • AVOIDED_APPS           │  │  │  │  • INTERACTIVE_CONTROL_*  │  │
-│  └───────────────────────────┘  │  │  │  • INFORMATIVE_CONTROL_*  │  │
-└─────────────────────────────────┘  │  │  • DEFAULT_ACTIONS         │  │
-                                     │  └───────────────────────────┘  │
-                                     │  ┌───────────────────────────┐  │
-                                     │  │  Utilities (utils.py)     │  │
-                                     │  │  • random_point_within_*  │  │
-                                     │  └───────────────────────────┘  │
-                                     └─────────────────────────────────┘
-                                                    │
-                                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Windows Platform Layer                               │
-│  ┌───────────────────┐  ┌────────────────┐  ┌────────────────────────────┐ │
-│  │  UI Automation    │  │   PowerShell   │  │      Win32 APIs            │ │
-│  │  (uiautomation)   │  │   (subprocess) │  │  (pyautogui, humancursor)  │ │
-│  └───────────────────┘  └────────────────┘  └────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────────────────┘
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                           Tool Layer                                         │
+│                 (12 [McpServerToolType] classes, 50 tools)                   │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ │
+│  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │ │
+│  │  8 tools   │ │  8 tools   │ │  7 tools   │ │  7 tools   │ │  5 tools   │ │
+│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘ │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ │
+│  │ProcessTools│ │ScreenTools │ │  WebTools  │ │RegistryTls │ │NetworkTls  │ │
+│  │  5 tools   │ │  2 tools   │ │  2 tools   │ │  2 tools   │ │  2 tools   │ │
+│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘ │
+│            ┌───────────────────┐  ┌───────────────────┐                     │
+│            │   ShellTools (1)  │  │   DiskTools  (1)  │                     │
+│            └───────────────────┘  └───────────────────┘                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    │ constructor injection
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                      Service Abstraction Layer                                │
+│                    (WindowsMcp.Abstractions assembly)                        │
+│  IInputService · IScreenshotService · IOcrService · IClipboardService       │
+│  IAudioService · IPowerShellService · IUIAutomationService · IFileSystemSvc  │
+│  IRegistryService · IServiceControlService · IEventLogService               │
+│  ITaskSchedulerService · IProcessService · IWindowService · IWmiService     │
+│  IEnvService · IPowerService · INotificationService · INetworkService       │
+│  IWebService   (20 interfaces total)                                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    │ implemented by
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    Service Implementation Layer                               │
+│                     (WindowsMcp.Services namespace)                          │
+│  InputService · ScreenshotService · OcrService · ClipboardService           │
+│  AudioService · PowerShellService · UIAutomationService · FileSystemService  │
+│  RegistryService · ServiceControlService · EventLogService                  │
+│  TaskSchedulerService · ProcessService · WindowService · WmiService         │
+│  EnvService · PowerService · NotificationService · NetworkService           │
+│  WebService   (20 singletons — all registered in Program.cs via DI)         │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        Windows Platform Layer                                │
+│  ┌──────────────┐ ┌───────────────────┐ ┌──────────────────────────────────┐ │
+│  │  FlaUI.UIA3  │ │ H.InputSimulator  │ │ CsWin32 / Win32 APIs             │ │
+│  │ (UI Automat.)│ │  (keyboard/mouse) │ │ DPI, WinRT, WMI, COM, P/Invoke   │ │
+│  └──────────────┘ └───────────────────┘ └──────────────────────────────────┘ │
+│  ┌──────────────┐ ┌───────────────────┐ ┌──────────────────────────────────┐ │
+│  │   SkiaSharp  │ │  TaskScheduler    │ │ System.Management / EventLog     │ │
+│  │  (images)    │ │     (COM)         │ │ (WMI, Windows event logs)        │ │
+│  └──────────────┘ └───────────────────┘ └──────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## Layer Descriptions
 
-### 1. MCP Interface Layer (`main.py`)
+### 1. MCP Protocol Layer
 
-The top layer serves as the protocol interface between AI agents and the Windows automation functionality. Built on FastMCP framework, it:
+The MCP SDK (`ModelContextProtocol.Server`) handles all protocol concerns:
 
-- Defines and registers 45 MCP tools with decorators (`@mcp.tool`)
-- Manages the server lifecycle with async context manager
-- Coordinates between user input and lower layer operations
-- Handles response formatting for MCP protocol compliance
+- **Transport**: `WithStdioServerTransport()` — reads JSON-RPC from stdin, writes to stdout
+- **Tool Discovery**: `WithToolsFromAssembly()` — source generator discovers all `[McpServerTool]` methods at compile time, registering them with their parameter schemas automatically
+- **Server Info**: `ServerInfo = new() { Name = "Windows-mcp", Version = "0.2.0" }`
 
-**Key Configuration:**
-```python
-pg.FAILSAFE = True   # Abort by moving mouse to corner (security)
-pg.PAUSE = 1.0       # 1-second delay between operations
+**Critical startup requirements** (both handled in `Program.cs` before host build):
+```csharp
+// Prevent JSON-RPC response buffering on Windows (cp1252 default encoding)
+Console.OutputEncoding = System.Text.Encoding.UTF8;
+Console.InputEncoding = System.Text.Encoding.UTF8;
+
+// Per-Monitor DPI Awareness V2 — physical pixel coordinates on multi-monitor
+PInvoke.SetProcessDpiAwarenessContext(new DPI_AWARENESS_CONTEXT((nint)(-4)));
 ```
 
-### 2. Desktop Management Layer (`src/desktop/`)
+---
 
-The middle layer manages application-level interactions with Windows:
+### 2. Tool Layer
 
-| Component | Responsibility |
-|-----------|---------------|
-| `Desktop` class | Primary interface for Windows operations |
-| `DesktopState` | Composite state container (apps + tree + screenshot) |
-| `App` dataclass | Individual application metadata |
-| Configuration | App filtering rules (excluded/avoided apps) |
+Tool classes are `[McpServerToolType]`-annotated sealed classes that group related MCP tools. They receive services via constructor injection — they contain no business logic themselves, only parameter validation and delegation.
 
-**Core Capabilities:**
-- Application enumeration and status detection
-- PowerShell command execution
-- Start Menu app launching with fuzzy matching
-- Window management and foreground control
-- Screenshot capture and processing
+**Pattern:**
+```csharp
+[McpServerToolType]
+public sealed class InputTools
+{
+    private readonly IInputService _input;
+    private readonly IClipboardService _clipboard;
 
-### 3. UI Tree Layer (`src/tree/`)
+    public InputTools(IInputService input, IClipboardService clipboard)
+    {
+        _input = input;
+        _clipboard = clipboard;
+    }
 
-The bottom application layer handles UI Automation accessibility tree processing:
+    [McpServerTool, Description("Click at screen coordinates.")]
+    public async Task<string> Click(int x, int y, string button = "left", int clicks = 1)
+        => JsonSerializer.Serialize(await _input.ClickAsync(x, y, ParseButton(button), clicks));
+}
+```
 
-| Component | Responsibility |
-|-----------|---------------|
-| `Tree` class | A11y tree traversal and element extraction |
-| `TreeState` | Container for categorized UI elements |
-| `TreeElementNode` | Interactive element representation |
-| `TextElementNode` | Informative text element |
-| `ScrollElementNode` | Scrollable region metadata |
+**Tool class inventory:**
 
-**Element Categorization:**
-- **Interactive**: Buttons, links, text fields, checkboxes, etc.
-- **Informative**: Static text, labels, status indicators
-- **Scrollable**: Elements with scroll patterns
+| Tool Class | Tools | Services Injected |
+|------------|-------|------------------|
+| `InputTools` | 8 | `IInputService`, `IClipboardService` |
+| `UIAutomationTools` | 8 | `IUIAutomationService` |
+| `FileTools` | 7 | `IFileSystemService` |
+| `SystemTools` | 7 | `IServiceControlService`, `IEventLogService`, `ITaskSchedulerService`, `IWmiService`, `IEnvService`, `IPowerService` |
+| `WindowTools` | 5 | `IWindowService`, `IProcessService` |
+| `ProcessTools` | 5 | `IProcessService`, `INetworkService` |
+| `ScreenTools` | 2 | `IScreenshotService`, `IOcrService` |
+| `WebTools` | 2 | `IWebService` |
+| `RegistryTools` | 2 | `IRegistryService` |
+| `NetworkTools` | 2 | `INetworkService` |
+| `ShellTools` | 1 | `IPowerShellService` |
+| `DiskTools` | 1 | `IFileSystemService` |
 
-### 4. Windows Platform Layer
+---
 
-External dependencies providing low-level Windows access:
+### 3. Service Abstraction Layer (`WindowsMcp.Abstractions`)
 
-| Library | Purpose |
-|---------|---------|
-| `uiautomation` | Windows UI Automation API wrapper |
-| `pyautogui` | Keyboard/mouse simulation |
-| `humancursor` | Natural cursor movement |
-| `subprocess` | PowerShell command execution |
+A separate assembly (`WindowsMcp.Abstractions.csproj`) containing:
+- **20 `IXxxService` interfaces** — define the contract for each domain
+- **Model DTOs** in `WindowsMcp.Abstractions.Models` — records/classes shared between tools and services
+
+The abstraction layer exists so tool classes compile against interfaces, not concrete types. This enforces the dependency inversion principle and makes services independently testable.
+
+**Example interface:**
+```csharp
+public interface IInputService
+{
+    Task<ClickResult> ClickAsync(int x, int y, MouseButton button, int clicks);
+    Task<DragResult> DragAsync(int fromX, int fromY, int toX, int toY, MouseButton button);
+    Task HoverAsync(int x, int y, int durationMs);
+    Task<TypeResult> TypeAsync(string text);
+    Task PressKeyAsync(string key);
+    Task PressShortcutAsync(string shortcut);
+    Task ScrollAsync(int x, int y, string direction, int amount);
+}
+```
+
+---
+
+### 4. Service Implementation Layer
+
+All 20 services are registered as **singletons** in `Program.cs`:
+
+```csharp
+builder.Services.AddSingleton<IInputService, InputService>();
+builder.Services.AddSingleton<IScreenshotService, ScreenshotService>();
+// ... (20 services total)
+```
+
+Services contain all business logic and directly call Windows APIs through platform packages. They are constructed once at host startup and shared across all tool invocations.
+
+---
+
+### 5. Windows Platform Layer
+
+| Package | Windows API | What It Does |
+|---------|-------------|-------------|
+| `FlaUI.UIA3` | UI Automation COM | Walk the accessibility tree, find/inspect/interact with elements |
+| `H.InputSimulator` | `SendInput` Win32 | Inject keyboard and mouse events at driver level |
+| `SkiaSharp` | GDI+/DirectX | Capture screenshots, crop regions, encode PNG |
+| `CsWin32` | P/Invoke gen | Auto-generates interop for `SetProcessDpiAwareness`, `SetCurrentProcessExplicitAppUserModelID`, etc. |
+| `TaskScheduler` | Task Scheduler COM | Create, read, update, delete scheduled tasks |
+| `System.Management` | WMI | Query hardware, driver, and configuration data |
+| `System.Diagnostics.EventLog` | Event Log API | Read Windows event log entries |
+| `TextCopy` | Clipboard API | Cross-platform clipboard read/write |
+
+---
 
 ## Design Patterns
 
-### 1. Singleton-like Instantiation
+### 1. Dependency Injection via `Microsoft.Extensions.Hosting`
 
-The `Desktop` and `SystemCursor` objects are instantiated once at module level:
+All services follow the DI pattern — no static state, no singletons instantiated outside the container:
 
-```python
-desktop = Desktop()
-cursor = SystemCursor()
-mcp = FastMCP(name='windows-mcp', ...)
+```csharp
+var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddSingleton<IInputService, InputService>();
+// ...
+builder.Services.AddMcpServer(...).WithStdioServerTransport().WithToolsFromAssembly();
+await builder.Build().RunAsync();
 ```
 
-### 2. Dataclass-Based Data Transfer Objects
+### 2. Interface Segregation
 
-All state representations use Python dataclasses for type safety and immutability:
+Each service interface covers exactly one domain. Tool classes declare only the interfaces they actually use:
 
-```python
-@dataclass
-class TreeElementNode:
-    name: str
-    control_type: str
-    bounding_box: BoundingBox
-    shortcut: str
-    center: Center
-    app_name: str
+```csharp
+// InputTools only needs input + clipboard — not screenshot, not filesystem
+public InputTools(IInputService input, IClipboardService clipboard)
 ```
 
-### 3. Parallel Processing with ThreadPoolExecutor
+### 3. Source-Generated Tool Discovery
 
-UI tree traversal leverages concurrent execution for performance:
+`WithToolsFromAssembly()` uses a Roslyn source generator that runs at compile time. It emits a registration method that lists all `[McpServerTool]` methods with their `[Description]`-derived JSON schemas. There is no runtime reflection and no decorator registration step.
 
-```python
-with ThreadPoolExecutor() as executor:
-    future_to_node = {executor.submit(self.get_nodes, app): app
-                      for app in apps.values()}
-    for future in as_completed(future_to_node):
-        result = future.result()
+### 4. Record-Based DTOs
+
+Model types in `WindowsMcp.Abstractions.Models` use C# records for immutability:
+
+```csharp
+public record AudioState(int Level, bool Muted);
+public record ClickResult(int X, int Y, string Button, int Clicks);
 ```
 
-### 4. Composite State Pattern
+### 5. Async-First API Surface
 
-`DesktopState` aggregates multiple state sources:
+Every service method is `async Task<T>` or `async Task`. No blocking calls on tool dispatch threads.
 
-```python
-@dataclass
-class DesktopState:
-    apps: list[App]
-    active_app: Optional[App]
-    screenshot: bytes | None
-    tree_state: TreeState
-```
+---
 
-### 5. Fuzzy Matching Strategy
-
-Application and window matching uses fuzzy string comparison:
-
-```python
-matched_app = process.extractOne(name, apps_map.keys())
-```
-
-## Module Dependencies
+## Project Structure
 
 ```
-main.py
-├── fastmcp (FastMCP, Image)
-├── humancursor (SystemCursor)
-├── pyautogui
-├── uiautomation
-├── pyperclip
-├── requests, markdownify
-└── src.desktop
-    ├── Desktop (src/desktop/__init__.py)
-    └── src.tree
-        ├── Tree (src/tree/__init__.py)
-        ├── config.py (control type definitions)
-        ├── views.py (data models)
-        └── utils.py (geometry helpers)
+Windows-mcp.sln
+├── src/
+│   ├── WindowsMcp/                        ← Main project
+│   │   ├── WindowsMcp.csproj              (targets net9.0-windows10.0.22621)
+│   │   ├── Program.cs                     (host + DI wiring)
+│   │   ├── Tools/                         (12 tool classes)
+│   │   │   ├── InputTools.cs
+│   │   │   ├── UIAutomationTools.cs
+│   │   │   ├── FileTools.cs
+│   │   │   ├── SystemTools.cs
+│   │   │   ├── WindowTools.cs
+│   │   │   ├── ProcessTools.cs
+│   │   │   ├── ScreenTools.cs
+│   │   │   ├── ShellTools.cs
+│   │   │   ├── RegistryTools.cs
+│   │   │   ├── NetworkTools.cs
+│   │   │   ├── WebTools.cs
+│   │   │   └── DiskTools.cs
+│   │   └── Services/                      (20 service implementations)
+│   │       ├── InputService.cs
+│   │       ├── UIAutomationService.cs
+│   │       └── ...
+│   └── WindowsMcp.Abstractions/           ← Contracts assembly
+│       ├── WindowsMcp.Abstractions.csproj
+│       ├── IInputService.cs
+│       ├── IUIAutomationService.cs
+│       ├── ... (20 interfaces)
+│       └── Models/                        (10 DTO files)
+│           ├── InputModels.cs
+│           └── ...
+└── docs/
+    └── architecture/
 ```
 
-## Entry Points
+---
 
-The server supports multiple entry points:
+## Entry Point
 
-| Entry Point | Usage |
-|-------------|-------|
-| `python main.py` | Direct execution |
-| `python -m windows_mcp` | Module execution (via `__main__.py`) |
-| `windows-mcp` | Console script (via `windows_mcp_entry.py`) |
-
-## Configuration Architecture
-
-### App Filtering Configuration
-
-```python
-# src/desktop/config.py
-AVOIDED_APPS = {'Recording toolbar'}
-EXCLUDED_APPS = {'Program Manager', 'Taskbar'}.union(AVOIDED_APPS)
+```
+dotnet run --project src/WindowsMcp
 ```
 
-### Control Type Configuration
+The `Program.cs` static `Main` returns `Task<int>`. The host runs until the MCP client closes the stdin pipe (EOF), at which point `RunAsync()` returns and the process exits with code 0.
 
-```python
-# src/tree/config.py
-INTERACTIVE_CONTROL_TYPE_NAMES = {
-    'ButtonControl', 'EditControl', 'CheckBoxControl', ...
-}
-INFORMATIVE_CONTROL_TYPE_NAMES = {
-    'TextControl', 'ImageControl'
-}
-DEFAULT_ACTIONS = {
-    'Click', 'Press', 'Jump', 'Check', 'Uncheck', 'Double Click'
-}
-```
-
-## Error Handling Strategy
-
-1. **Graceful Degradation**: Methods return tuples with status codes rather than raising exceptions
-2. **Silent Failures in Traversal**: Tree traversal catches exceptions per-element to prevent cascade failures
-3. **Process Isolation**: PowerShell commands run in subprocess with captured output
-4. **Status Code Returns**: Tool methods return descriptive strings with success/failure context
+---
 
 ## Security Considerations
 
-1. **FAILSAFE Enabled**: `pg.FAILSAFE = True` allows aborting by moving mouse to corner
-2. **Command Security**: `validate_command()` blocks dangerous commands, arguments, and operators before PowerShell execution
-3. **Input Sanitization**: `_sanitize_path()`, `_sanitize_name()`, `_validate_date()`, `_validate_extension()` sanitize user-supplied parameters; `_check_allowed_path()` enforces path restrictions
-4. **SSRF Protection**: `is_url_safe()` blocks internal/private network access for HTTP tools
-5. **UI Automation Access**: Requires appropriate Windows permissions
+1. **Stdio-only transport** — no network port is opened; only the MCP client process can communicate
+2. **PowerShell sandboxing** — `PowerShellService` filters dangerous commands and injection-risk flags before execution (blocklist in implementation)
+3. **DPI-aware coordinates** — `SetProcessDpiAwarenessContext` ensures coordinates are in physical pixels, preventing misclicks on HiDPI displays
+4. **Async-isolated services** — services are never shared across concurrent requests; the MCP SDK serializes tool calls

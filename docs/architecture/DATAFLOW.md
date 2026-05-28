@@ -4,477 +4,454 @@
 
 This document describes the data flow patterns within Windows-MCP, illustrating how information moves through the system from MCP tool invocation to Windows OS interaction and back.
 
+The key architectural shift from the Python version: there are no module-level globals. The MCP SDK's `WithToolsFromAssembly()` source generator handles dispatch, the DI container wires all dependencies, and every service call is async.
+
 ---
 
-## Primary Data Flow: State Capture
+## Primary Data Flow: MCP Request Dispatch
 
-The `State-Tool` represents the most complex data flow in the system, orchestrating multiple subsystems to capture comprehensive desktop state.
-
-### Sequence Diagram
+How a tool call travels from the AI agent to the Windows API and back:
 
 ```
-┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌────────────────┐
-│ AI Agent │   │ main.py  │   │ Desktop  │   │   Tree   │   │ Windows UI     │
-│          │   │          │   │          │   │          │   │ Automation API │
-└────┬─────┘   └────┬─────┘   └────┬─────┘   └────┬─────┘   └───────┬────────┘
-     │              │              │              │                 │
-     │ State-Tool   │              │              │                 │
-     │ (use_vision) │              │              │                 │
-     ├─────────────►│              │              │                 │
-     │              │ get_state()  │              │                 │
-     │              ├─────────────►│              │                 │
-     │              │              │ Tree(self)   │                 │
-     │              │              ├─────────────►│                 │
-     │              │              │              │ GetRootControl()│
-     │              │              │              ├────────────────►│
-     │              │              │              │◄────────────────┤
-     │              │              │              │                 │
-     │              │              │              │ get_appwise_    │
-     │              │              │              │ nodes()         │
-     │              │              │              ├─────────────────┤
-     │              │              │              │                 │
-     │              │              │              │ [Parallel]      │
-     │              │              │              │ get_nodes()     │
-     │              │              │              │ per app         │
-     │              │              │              ├─────────────────┤
-     │              │              │              │                 │
-     │              │              │ TreeState    │                 │
-     │              │              │◄─────────────┤                 │
-     │              │              │              │                 │
-     │              │              │ [if vision]  │                 │
-     │              │              │ annotated_   │                 │
-     │              │              │ screenshot() │                 │
-     │              │              ├─────────────►│                 │
-     │              │              │◄─────────────┤                 │
-     │              │              │              │                 │
-     │              │              │ get_apps()   │                 │
-     │              │              ├──────────────┼────────────────►│
-     │              │              │◄─────────────┼─────────────────┤
-     │              │              │              │                 │
-     │              │ DesktopState │              │                 │
-     │              │◄─────────────┤              │                 │
-     │              │              │              │                 │
-     │ state_text   │              │              │                 │
-     │ [+ Image]    │              │              │                 │
-     │◄─────────────┤              │              │                 │
-     │              │              │              │                 │
+┌──────────┐   ┌───────────────────┐   ┌──────────────┐   ┌────────────────┐
+│ AI Agent │   │  MCP SDK (stdio)  │   │  Tool Class  │   │    Service     │
+│          │   │  StdioTransport   │   │ [McpServTool] │   │ Implementation │
+└────┬─────┘   └────────┬──────────┘   └──────┬───────┘   └───────┬────────┘
+     │                  │                      │                   │
+     │  JSON-RPC        │                      │                   │
+     │  {method,params} │                      │                   │
+     ├─────────────────►│                      │                   │
+     │                  │  Deserialize params  │                   │
+     │                  │  Route to method     │                   │
+     │                  ├─────────────────────►│                   │
+     │                  │                      │  await ServiceAsync│
+     │                  │                      ├──────────────────►│
+     │                  │                      │                   │  Windows API
+     │                  │                      │                   ├──────────►
+     │                  │                      │                   │◄──────────
+     │                  │                      │◄──────────────────┤
+     │                  │                      │  JsonSerializer   │
+     │                  │◄─────────────────────┤  .Serialize(result)
+     │                  │  JSON-RPC response   │                   │
+     │◄─────────────────┤                      │                   │
+```
+
+All tool methods follow the same shape:
+```csharp
+[McpServerTool, Description("...")]
+public async Task<string> ToolName(/* parameters */)
+{
+    var result = await _service.DoSomethingAsync(/* mapped params */);
+    return JsonSerializer.Serialize(result);  // or plain string
+}
+```
+
+---
+
+## GetState Data Flow (UI Automation)
+
+`GetState` is the primary context-gathering tool — returns the full UI element tree of the foreground application.
+
+### Sequence
+
+```
+┌──────────┐   ┌─────────────┐   ┌──────────────────────┐   ┌───────────────┐
+│ AI Agent │   │UIAutoTools  │   │ UIAutomationService  │   │ FlaUI.UIA3    │
+│          │   │             │   │                      │   │ (Windows UIA3)│
+└────┬─────┘   └─────┬───────┘   └──────────┬───────────┘   └───────┬───────┘
+     │               │                      │                       │
+     │ GetState()    │                      │                       │
+     ├──────────────►│                      │                       │
+     │               │ GetStateAsync()      │                       │
+     │               ├─────────────────────►│                       │
+     │               │                      │ AutomationElement     │
+     │               │                      │ .RootElement          │
+     │               │                      ├──────────────────────►│
+     │               │                      │◄──────────────────────┤
+     │               │                      │                       │
+     │               │                      │ GetForegroundWindow() │
+     │               │                      ├──────────────────────►│
+     │               │                      │◄──────────────────────┤
+     │               │                      │                       │
+     │               │                      │ TreeWalker.Walk()     │
+     │               │                      ├──────────────────────►│
+     │               │                      │  [recursive DFS]      │
+     │               │                      │◄──────────────────────┤
+     │               │                      │                       │
+     │               │    UiState           │                       │
+     │               │◄─────────────────────┤                       │
+     │               │ JsonSerializer       │                       │
+     │ JSON string   │ .Serialize(state)    │                       │
+     │◄──────────────┤                      │                       │
 ```
 
 ### Data Transformations
 
 ```
 1. MCP Request
-   └─► use_vision: bool
+   └─► no parameters (returns foreground window state)
 
-2. Desktop.get_state()
-   ├─► Tree instance created
-   ├─► TreeState obtained
-   ├─► [Optional] Screenshot captured & annotated
-   └─► Apps enumerated
+2. UIAutomationService.GetStateAsync()
+   ├─► Get desktop root via AutomationElement.RootElement
+   ├─► Identify foreground window via P/Invoke GetForegroundWindow()
+   └─► Walk UIA3 tree recursively
 
-3. Tree.get_state()
-   ├─► Root control accessed
-   └─► Parallel traversal initiated
+3. Per-element classification (FlaUI ControlType checks):
+   ├─► Interactive: Button, Edit, CheckBox, RadioButton, ComboBox,
+   │               ListItem, MenuItem, Hyperlink, TabItem, TreeItem, ...
+   ├─► Text: Text, Document controls (read-only content)
+   └─► Scrollable: elements supporting IScrollPattern
 
-4. Tree.get_appwise_nodes()
-   ├─► Visible apps filtered
-   └─► ThreadPoolExecutor spawns get_nodes() per app
+4. UiState aggregate:
+   UiState {
+     Interactive: [{ Id, Name, ControlType, BoundingBox, Value, ... }]
+     Text:        [{ Id, Name, Content }]
+     Scrollable:  [{ Id, Name, BoundingBox, H: bool, V: bool }]
+   }
 
-5. Tree.get_nodes()
-   ├─► DFS traversal of app UI tree
-   ├─► Elements categorized (interactive/informative/scrollable)
-   └─► DOM corrections applied
-
-6. Data Aggregation
-   TreeState
-   ├── interactive_nodes: list[TreeElementNode]
-   ├── informative_nodes: list[TextElementNode]
-   └── scrollable_nodes: list[ScrollElementNode]
-
-   DesktopState
-   ├── apps: list[App]
-   ├── active_app: App
-   ├── screenshot: bytes (optional)
-   └── tree_state: TreeState
-
-7. MCP Response
-   ├── Formatted text string
-   └── [Optional] Image object
+5. MCP Response: JSON string of UiState
 ```
 
 ---
 
-## Click Tool Data Flow
-
-### Sequence
+## Click Data Flow
 
 ```
-┌──────────┐   ┌──────────┐   ┌───────────┐   ┌──────────┐   ┌──────────┐
-│ AI Agent │   │ main.py  │   │humancursor│   │ pyautogui│   │ Desktop  │
-└────┬─────┘   └────┬─────┘   └─────┬─────┘   └────┬─────┘   └────┬─────┘
-     │              │               │              │              │
-     │ Click-Tool   │               │              │              │
-     │ (loc,button) │               │              │              │
-     ├─────────────►│               │              │              │
-     │              │ move_to(loc)  │              │              │
-     │              ├──────────────►│              │              │
-     │              │               │ [cursor      │              │
-     │              │               │  movement]   │              │
-     │              │               ├─────────────►│              │
-     │              │               │              │              │
-     │              │ get_element_  │              │              │
-     │              │ under_cursor()│              │              │
-     │              ├──────────────────────────────┼─────────────►│
-     │              │◄─────────────────────────────┼──────────────┤
-     │              │               │              │              │
-     │              │ click(x,y,    │              │              │
-     │              │  button,clicks)              │              │
-     │              ├──────────────────────────────►              │
-     │              │               │              │              │
-     │ result str   │               │              │              │
-     │◄─────────────┤               │              │              │
+┌──────────┐   ┌────────────┐   ┌──────────────────┐   ┌────────────────────┐
+│ AI Agent │   │InputTools  │   │  InputService    │   │ H.InputSimulator   │
+│          │   │            │   │                  │   │ (SendInput Win32)  │
+└────┬─────┘   └─────┬──────┘   └────────┬─────────┘   └─────────┬──────────┘
+     │               │                   │                        │
+     │ Click(x,y,    │                   │                        │
+     │  button,      │                   │                        │
+     │  clicks)      │                   │                        │
+     ├──────────────►│                   │                        │
+     │               │ ParseButton(btn)  │                        │
+     │               ├──────────────────►│                        │
+     │               │  ClickAsync(x,y,  │                        │
+     │               │  MouseButton,     │                        │
+     │               │  clicks)          │                        │
+     │               ├──────────────────►│                        │
+     │               │                   │ MoveMouse(x, y)        │
+     │               │                   ├───────────────────────►│
+     │               │                   │                        │ SendInput(MOUSEMOVE)
+     │               │                   │                        ├──────────────►
+     │               │                   │ ButtonDown/Up × clicks │
+     │               │                   ├───────────────────────►│
+     │               │                   │                        │ SendInput(MOUSECLICK)
+     │               │                   │◄───────────────────────┤
+     │               │ ClickResult       │                        │
+     │               │◄──────────────────┤                        │
+     │ JSON string   │                   │                        │
+     │◄──────────────┤                   │                        │
 ```
 
-### Data Flow
+### Data
 
 ```
-Input:
-  loc: tuple[int, int]      # Coordinates
-  button: 'left'|'right'|'middle'
-  clicks: int               # Click count
+Input:  x=800, y=400, button="right", clicks=1
 
 Processing:
-  1. cursor.move_to(loc)    # Human-like cursor movement
-  2. desktop.get_element_under_cursor()  # Identify target
-  3. pg.click(x=x, y=y, button=button, clicks=clicks)
+  ParseButton("right") → MouseButton.Right
+  InputService.ClickAsync(800, 400, MouseButton.Right, 1):
+    ├─► IMouseSimulator.MoveTo(800, 400)    // absolute physical pixels
+    └─► IMouseSimulator.RightButtonClick()  // SendInput(MOUSE_RIGHT_DOWN + MOUSE_RIGHT_UP)
 
-Output:
-  f'{num_clicks} {button} Clicked on {control.Name} at ({x},{y})'
+Output: ClickResult { X=800, Y=400, Button="Right", Clicks=1 }
+        → JSON: {"X":800,"Y":400,"Button":"Right","Clicks":1}
 ```
 
 ---
 
-## Type Tool Data Flow
+## Powershell Data Flow
 
 ```
-Input:
-  loc: tuple[int, int]
-  text: str
-  clear: bool
+┌──────────┐   ┌──────────┐   ┌──────────────────────┐   ┌───────────────────┐
+│ AI Agent │   │ShellTools│   │  PowerShellService   │   │ System.Diagnostics│
+│          │   │          │   │                      │   │    .Process       │
+└────┬─────┘   └────┬─────┘   └──────────┬───────────┘   └─────────┬─────────┘
+     │              │                    │                          │
+     │ Powershell   │                    │                          │
+     │ (command)    │                    │                          │
+     ├─────────────►│                    │                          │
+     │              │ RunAsync(command)  │                          │
+     │              ├───────────────────►│                          │
+     │              │                    │ [security filter]        │
+     │              │                    │ ValidateCommand()        │
+     │              │                    ├────────────────────────► │
+     │              │                    │                          │
+     │              │                    │ Process.Start()          │
+     │              │                    │  "pwsh -NonInteractive"  │
+     │              │                    ├─────────────────────────►│
+     │              │                    │                          │ write stdin
+     │              │                    │◄─────────────────────────┤
+     │              │                    │  (stdout, stderr,        │
+     │              │                    │   exitCode)              │
+     │              │ PowerShellResult   │                          │
+     │              │◄───────────────────┤                          │
+     │ JSON string  │                    │                          │
+     │◄─────────────┤                    │                          │
+```
+
+### Data
+
+```
+Input:  command = "Get-Process | Select-Object Name,CPU | ConvertTo-Json"
 
 Processing:
-  1. cursor.click_on(loc)           # Focus element
-  2. desktop.get_element_under_cursor()
-  3. [if clear] pg.hotkey('ctrl','a') + pg.press('backspace')
-  4. pg.typewrite(text, interval=0.1)
+  1. ValidateCommand() — blocklist check (format, shutdown, del, -enc, ...)
+  2. Process.Start("pwsh", ["-NonInteractive", "-Command", "-"])
+  3. Write command to stdin pipe
+  4. Await exit; read stdout + stderr
 
-Output:
-  f'Typed {text} on {control.Name} at ({x},{y})'
+Output: PowerShellResult { Stdout="[{...}]", Stderr="", ExitCode=0 }
+        → JSON: {"Stdout":"[{...}]","Stderr":"","ExitCode":0}
 ```
 
 ---
 
-## Launch Tool Data Flow
-
-### Sequence
+## Screenshot + OCR Data Flow
 
 ```
-┌──────────┐   ┌──────────┐   ┌──────────┐   ┌───────────┐
-│ AI Agent │   │ main.py  │   │ Desktop  │   │ PowerShell│
-└────┬─────┘   └────┬─────┘   └────┬─────┘   └─────┬─────┘
-     │              │              │               │
-     │ Launch-Tool  │              │               │
-     │ (name)       │              │               │
-     ├─────────────►│              │               │
-     │              │ launch_app() │               │
-     │              ├─────────────►│               │
-     │              │              │ Get-StartApps │
-     │              │              ├──────────────►│
-     │              │              │◄──────────────┤
-     │              │              │               │
-     │              │              │ [fuzzy match] │
-     │              │              ├───────────────┤
-     │              │              │               │
-     │              │              │ Start-Process │
-     │              │              ├──────────────►│
-     │              │              │◄──────────────┤
-     │              │              │               │
-     │              │ (response,   │               │
-     │              │  status)     │               │
-     │              │◄─────────────┤               │
-     │              │              │               │
-     │ result str   │              │               │
-     │◄─────────────┤              │               │
-```
-
-### Data Transformations
-
-```
-1. Input: name = "chrome"
-
-2. PowerShell: Get-StartApps | ConvertTo-Csv
-   Output: CSV with Name, AppID columns
-
-3. Parse to dict: {'google chrome': 'Chrome.app', ...}
-
-4. Fuzzy match: process.extractOne("chrome", keys)
-   Result: ('google chrome', score)
-
-5. Get AppID: apps_map['google chrome']
-
-6. Execute: Start-Process "shell:AppsFolder\{AppID}"
-
-7. Return: (response, status_code)
+┌──────────┐   ┌───────────┐   ┌──────────────────┐   ┌─────────────────────┐
+│ AI Agent │   │ScreenTools│   │ScreenshotService │   │ SkiaSharp / GDI+    │
+│          │   │           │   │   OcrService     │   │ Windows.Media.Ocr   │
+└────┬─────┘   └─────┬─────┘   └────────┬─────────┘   └──────────┬──────────┘
+     │               │                  │                         │
+     │ Screenshot()  │                  │                         │
+     ├──────────────►│                  │                         │
+     │               │ CaptureAsync()   │                         │
+     │               ├─────────────────►│                         │
+     │               │                  │ BitBlt(screen)          │
+     │               │                  ├────────────────────────►│
+     │               │                  │◄────────────────────────┤
+     │               │                  │ SKBitmap.Encode(PNG)    │
+     │               │                  ├────────────────────────►│
+     │               │ base64 PNG str   │◄────────────────────────┤
+     │◄──────────────┤◄─────────────────┤                         │
+     │               │                  │                         │
+     │ Ocr(region)   │                  │                         │
+     ├──────────────►│                  │                         │
+     │               │ RecognizeAsync() │                         │
+     │               ├─────────────────►│                         │
+     │               │                  │ OcrEngine.RecognizeAsync│
+     │               │                  ├────────────────────────►│
+     │               │                  │  (Windows.Media.Ocr)    │
+     │               │ OcrResult JSON   │◄────────────────────────┤
+     │◄──────────────┤◄─────────────────┤                         │
 ```
 
 ---
 
-## UI Tree Traversal Data Flow
+## WaitFor Data Flow (Polling Loop)
 
-### Parallel Processing Flow
-
-```
-              GetRootControl()
-                    │
-                    ▼
-          ┌─────────────────┐
-          │  root.GetChildren()
-          │  (all windows)   │
-          └─────────────────┘
-                    │
-        ┌───────────┼───────────┐
-        ▼           ▼           ▼
-   ┌─────────┐ ┌─────────┐ ┌─────────┐
-   │ Visible │ │ Visible │ │ Visible │
-   │  App 1  │ │  App 2  │ │  App N  │
-   └────┬────┘ └────┬────┘ └────┬────┘
-        │           │           │
-        ▼           ▼           ▼
-   ThreadPoolExecutor.submit(get_nodes)
-        │           │           │
-        ▼           ▼           ▼
-   ┌─────────┐ ┌─────────┐ ┌─────────┐
-   │  DFS    │ │  DFS    │ │  DFS    │
-   │Traversal│ │Traversal│ │Traversal│
-   └────┬────┘ └────┬────┘ └────┬────┘
-        │           │           │
-        └───────────┼───────────┘
-                    ▼
-          ┌─────────────────┐
-          │   as_completed  │
-          │   (aggregate)   │
-          └─────────────────┘
-                    │
-                    ▼
-          ┌─────────────────┐
-          │    TreeState    │
-          │ interactive: [] │
-          │ informative: [] │
-          │ scrollable:  [] │
-          └─────────────────┘
-```
-
-### DFS Traversal Logic
+`WaitFor` is the only tool with internal retry logic — all other tools are single-pass:
 
 ```
-tree_traversal(node: Control):
-    │
-    ├─► is_element_interactive(node)?
-    │   YES ─► Create TreeElementNode
-    │          └─► dom_correction()
-    │   NO ──┐
-    │        │
-    ├────────┴► is_element_text(node)?
-    │           YES ─► Create TextElementNode
-    │           NO ──┐
-    │                │
-    ├────────────────┴► is_element_scrollable(node)?
-    │                   YES ─► Create ScrollElementNode
-    │
-    └─► for child in node.GetChildren():
-            tree_traversal(child)
+UIAutomationTools.WaitFor(text, timeout_ms, interval_ms)
+        │
+        ▼
+UIAutomationService.WaitForAsync(text, timeout_ms, interval_ms)
+        │
+        ▼
+  ┌─────────────────────────────────────────────────┐
+  │ start = DateTime.UtcNow                         │
+  │                                                 │
+  │  ┌─────────────────────────────┐                │
+  │  │ FindElementAsync(text, Any) │◄───────────┐   │
+  │  └──────────────┬──────────────┘            │   │
+  │                 │                           │   │
+  │         found? ─┤                           │   │
+  │           YES   │    NO                     │   │
+  │           ▼     │    ▼                      │   │
+  │       return    │  elapsed > timeout_ms?    │   │
+  │       element   │    YES → return null      │   │
+  │                 │    NO  → await Task.Delay │   │
+  │                 │          (interval_ms) ───┘   │
+  └─────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Screenshot Annotation Data Flow
+## DI Resolution Flow at Startup
 
 ```
-Input: nodes: list[TreeElementNode], scale: float
-
-Processing:
-  1. desktop.get_screenshot(scale)
-     └─► pyautogui.screenshot()
-     └─► thumbnail resize
-
-  2. Add padding (20px border)
-     └─► Image.new() + paste()
-
-  3. For each node (sequential — PIL ImageDraw is not thread-safe):
-     ├─► Scale bounding box
-     ├─► Generate random color
-     ├─► Draw rectangle outline
-     └─► Draw label (index number)
-
-Output: Image.Image (annotated PNG)
-```
-
-### Coordinate Scaling
-
-```
-Original coordinates:
-  box.left, box.top, box.right, box.bottom
-
-Scaled + padded:
-  left   = int(box.left * scale) + padding
-  top    = int(box.top * scale) + padding
-  right  = int(box.right * scale) + padding
-  bottom = int(box.bottom * scale) + padding
-```
-
----
-
-## Element Visibility Determination
-
-### Decision Flow
-
-```
-is_element_interactive(node)?
-         │
-         ▼
-  ┌──────────────────┐
-  │ControlTypeName   │
-  │ in INTERACTIVE_  │──NO──►[Skip]
-  │ CONTROL_TYPE_*   │
-  └────────┬─────────┘
-           │YES
-           ▼
-  ┌──────────────────┐
-  │is_element_visible│──NO──►[Skip]
-  └────────┬─────────┘
-           │YES
-           ▼
-  ┌──────────────────┐
-  │is_element_enabled│──NO──►[Skip]
-  └────────┬─────────┘
-           │YES
-           ▼
-  ┌──────────────────┐
-  │NOT is_element_   │──NO──►[Skip]
-  │    image         │
-  └────────┬─────────┘
-           │YES
-           ▼
-      [Interactive]
-
-
-is_element_visible(node)?
-         │
-         ▼
-  ┌──────────────────┐
-  │IsControlElement  │──NO──►[Invisible]
-  └────────┬─────────┘
-           │YES
-           ▼
-  ┌──────────────────┐
-  │BoundingRectangle │──YES─►[Invisible]
-  │   .isempty()     │
-  └────────┬─────────┘
-           │NO
-           ▼
-  ┌──────────────────┐
-  │ width * height   │──NO──►[Invisible]
-  │    > 0           │
-  └────────┬─────────┘
-           │YES
-           ▼
-  ┌──────────────────┐
-  │NOT IsOffscreen   │──NO──►[Invisible]
-  └────────┬─────────┘
-           │YES
-           ▼
-       [Visible]
+Host.CreateApplicationBuilder(args)
+        │
+        ▼
+builder.Services.AddSingleton<IInputService, InputService>()
+  ...  (20 services)
+        │
+        ▼
+builder.Services.AddMcpServer(...)
+    .WithStdioServerTransport()
+    .WithToolsFromAssembly()      ← compile-time source generator
+        │
+        ▼
+builder.Build()
+        │
+        ▼
+  IServiceProvider built
+  ┌─────────────────────────────────────────────────┐
+  │  On first tool call, DI resolves:               │
+  │                                                 │
+  │  InputTools ← IInputService (InputService)      │
+  │            ← IClipboardService (ClipboardSvc)  │
+  │                                                 │
+  │  UIAutomationTools ← IUIAutomationService       │
+  │                      (UIAutomationService)      │
+  │  ... etc.                                       │
+  └─────────────────────────────────────────────────┘
+        │
+        ▼
+builder.Build().RunAsync()
+  → reads stdin forever (JSON-RPC)
+  → dispatches to tool methods
+  → exits when stdin closes (EOF)
 ```
 
 ---
 
-## Response Formatting
-
-### State-Tool Output Structure
+## Element State Determination (FlaUI)
 
 ```
-Focused App:
-{active_app.to_string()}
+Is element interactive?
+        │
+        ▼
+  ┌─────────────────────────┐
+  │ ControlType in           │──NO──► Skip
+  │ INTERACTIVE_CONTROL_TYPES│
+  └──────────┬──────────────┘
+             │YES
+             ▼
+  ┌─────────────────────────┐
+  │ IsEnabled == true        │──NO──► Skip
+  └──────────┬──────────────┘
+             │YES
+             ▼
+  ┌─────────────────────────┐
+  │ IsOffscreen == false     │──NO──► Skip
+  └──────────┬──────────────┘
+             │YES
+             ▼
+  ┌─────────────────────────┐
+  │ BoundingRectangle.Area  │──NO──► Skip
+  │       > 0               │
+  └──────────┬──────────────┘
+             │YES
+             ▼
+      [Include in Interactive]
 
-Opened Apps:
-{apps[0].to_string()}
-{apps[1].to_string()}
-...
 
-List of Interactive Elements:
-Label: 0 App Name: {app} ControlType: {type} Control Name: {name} Shortcut: {key} Coordinates: ({x},{y})
-Label: 1 ...
-...
-
-List of Informative Elements:
-App Name: {app} Name: {text}
-...
-
-List of Scrollable Elements:
-Label: {N} App Name: {app} Name: {name} Coordinates: ({x},{y}) Horizontal Scrollable: {bool} Vertical Scrollable: {bool}
-...
+Interactive control types (FlaUI ControlType names):
+  Button, Edit, CheckBox, RadioButton, ComboBox, List, ListItem,
+  MenuItem, Hyperlink, SplitButton, TabItem, TreeItem, DataItem,
+  Slider, Spinner, ScrollBar, Document
 ```
 
-### Vision Mode Additional Output
+---
 
-```python
-return [state_text, Image(data=desktop_state.screenshot, format='png')]
+## AssertElement Data Flow
+
+```
+AssertElement(element_id, state)
+        │
+        ▼
+UIAutomationService.AssertElementAsync(element_id, state)
+        │
+        ▼
+  Resolve element by ID from internal cache
+        │
+        ▼
+  switch (state)
+  ├─ "exists"  → element != null
+  ├─ "enabled" → element.IsEnabled
+  ├─ "checked" → element.ToggleState == ToggleState.On
+  ├─ "value"   → element.Value != null && element.Value != ""
+  ├─ "visible" → !element.IsOffscreen
+  └─ "focused" → element == AutomationElement.FocusedElement
+        │
+        ▼
+  return true/false
+        │
+        ▼
+  Tool: "PASS" or "FAIL: {state}"
 ```
 
 ---
 
 ## Error Handling Flow
 
-### PowerShell Execution
+### PowerShell Execution Errors
 
 ```
-execute_command(command)
-         │
-         ▼
-  ┌──────────────────┐
-  │subprocess.run()  │
-  │ check=True       │
-  └────────┬─────────┘
-           │
-     ┌─────┴─────┐
-     ▼           ▼
- [Success]  [CalledProcessError]
-     │           │
-     ▼           ▼
-  (stdout,    (e.stdout,
-   0)          e.returncode)
+PowerShellService.RunAsync(command)
+        │
+        ▼
+  ValidateCommand(command)  →  ArgumentException if blocked
+        │ (passes)
+        ▼
+  Process.Start(...)
+        │
+  ┌─────┴─────┐
+  ▼           ▼
+Success     Exception
+  │           │
+  ▼           ▼
+PowerShell  Return PowerShellResult{
+Result       Stdout="", Stderr=ex.Message, ExitCode=-1}
 ```
 
-### Tree Traversal Error Isolation
+### UI Automation Errors
 
 ```
-for future in as_completed(future_to_node):
-    try:
-        result = future.result()
-        # process result
-    except Exception as e:
-        print(f"Error processing node: {e}")
-        # Continue with other apps
+UIAutomationService methods
+  catch (Exception ex)
+  └─► Return null or empty result (callers check for null)
+  
+WaitFor — timeout path:
+  elapsed > timeout_ms → return null
+  Tool returns "null" string (agent detects no match)
+```
+
+---
+
+## Response Format
+
+### Tool Response Shape
+
+All tool methods return `Task<string>` where the string is either:
+- **JSON** — from `JsonSerializer.Serialize(result)`
+- **Plain string** — for simple acknowledgements (`"pressed ctrl+c"`, `"PASS"`, `"null"`)
+
+### JSON Response Examples
+
+```jsonc
+// Click response
+{"X":800,"Y":400,"Button":"Left","Clicks":1}
+
+// PowerShell response
+{"Stdout":"ProcessName  CPU\n---\npwsh   1.23\n","Stderr":"","ExitCode":0}
+
+// GetState response (abbreviated)
+{
+  "Interactive": [
+    { "Id": "1", "Name": "OK", "ControlType": "Button",
+      "BoundingBox": {"Left":100,"Top":200,"Right":180,"Bottom":230} }
+  ],
+  "Text": [{ "Id": "2", "Name": "Save changes?", "Content": "Save changes?" }],
+  "Scrollable": []
+}
 ```
 
 ---
 
 ## Timing and Delays
 
-| Location | Delay | Purpose |
-|----------|-------|---------|
-| `Tree.get_state()` | 1.0s | Allow UI to settle before traversal |
-| `Desktop.get_apps()` | 0.75s | Wait for window enumeration stability |
-| `Tree.annotated_screenshot()` | 0.25s | Post-screenshot pause |
-| `pg.PAUSE` | 1.0s | Between pyautogui operations |
-| `pg.typewrite(..., interval=0.1)` | 0.1s | Between keystrokes |
+| Location | Behavior | Notes |
+|----------|----------|-------|
+| `WaitFor` | Polls every `interval_ms` (default 500ms) up to `timeout_ms` (default 10s) | Only tool with a loop |
+| `InputService` click | `Thread.Sleep` between multi-clicks | Prevents double-click collapse |
+| `InputService` type | Delay between keystrokes | Simulates human typing cadence |
+| `PowerShellService` | Async wait on process exit | No timeout enforced in v0.2.0 |
+| MCP SDK stdio | No artificial pauses — reads JSON-RPC frames continuously | Contrast: Python `pg.PAUSE = 1.0` |

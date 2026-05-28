@@ -2,33 +2,34 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. It bridges the gap between Large Language Models (LLMs) and Windows, allowing agents to perform desktop automation tasks including UI interaction, application control, file navigation, and system operations.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 9 and C#, it exposes 50 MCP tools covering UI automation, file operations, process management, system monitoring, and more — all via the standard MCP stdio transport.
 
 ## Purpose
 
 The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
-- **Understand Desktop Context**: Capture comprehensive state information about running applications, UI elements, and screen content
-- **Interact with UI Elements**: Click, type, scroll, and manipulate interface elements programmatically
-- **Control Applications**: Launch, switch between, and manage Windows applications
+- **Understand Desktop Context**: Capture UI element trees from running applications via the Windows Accessibility API
+- **Interact with UI Elements**: Click, type, scroll, drag, and manipulate interface elements programmatically
+- **Control Windows**: Focus, resize, minimize, and manage application windows
 - **Execute System Commands**: Run PowerShell commands for advanced system operations
-- **Support Vision-Based Interaction**: Generate annotated screenshots for visual reasoning
+- **Capture Screens**: Take screenshots and perform OCR on screen regions
+- **Manage System Resources**: Control processes, registry, services, scheduled tasks, and event logs
 
 ## Key Features
 
 | Feature | Description |
 |---------|-------------|
-| **Native Windows Integration** | Direct access to Windows UI Automation API via `uiautomation` library |
-| **LLM Agnostic** | Works with any LLM without requiring specialized vision models |
-| **Accessibility Tree Traversal** | Extracts UI element information through Windows a11y APIs |
-| **Human-like Cursor Movement** | Uses `humancursor` for natural mouse movements |
-| **Parallel Processing** | Concurrent UI tree traversal for improved performance |
-| **Annotated Screenshots** | Visual feedback with labeled bounding boxes |
+| **Native Windows Integration** | Direct access to Windows UI Automation API via `FlaUI.UIA3` |
+| **Dependency Injection** | All 20 services are singleton-scoped, wired via `Microsoft.Extensions.Hosting` |
+| **Source-Generated Tool Discovery** | `[McpServerTool]` attributes are discovered at compile time by the MCP SDK source generator |
+| **Interface-Driven Architecture** | Every service backed by an `IXxxService` interface in a separate Abstractions assembly |
+| **DPI-Aware** | Per-Monitor DPI Awareness V2 enabled at startup for correct multi-monitor coordinate handling |
+| **UTF-8 Stdio** | Output encoding forced to UTF-8 before host starts — prevents buffering bugs on Windows |
 
 ## Platform Requirements
 
-- **Operating System**: Windows 7, 8, 10, or 11
-- **Python Version**: 3.13 or higher
+- **Operating System**: Windows 10 or 11 (some features require Windows 10 1703+)
+- **.NET Runtime**: .NET 9 or higher
 - **Architecture**: x64 (64-bit)
 
 ## High-Level Architecture
@@ -38,96 +39,161 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 │                        AI Agent / LLM                           │
 └─────────────────────────────────────────────────────────────────┘
                                 │
-                         MCP Protocol
+                         MCP Protocol (stdio)
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Windows-MCP Server                          │
+│              Windows-MCP Server (Program.cs / Host)             │
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │                    FastMCP Framework                        ││
-│  │              (Tool Definitions & Protocol)                  ││
+│  │         ModelContextProtocol SDK (WithStdioServerTransport) ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │                    Desktop Layer                            ││
-│  │    (App Management, State Capture, PowerShell Execution)    ││
+│  │        MCP Tool Layer  (12 [McpServerToolType] classes)     ││
+│  │   InputTools · UIAutomationTools · FileTools · ShellTools   ││
+│  │   SystemTools · WindowTools · ProcessTools · ScreenTools    ││
+│  │   NetworkTools · RegistryTools · WebTools · DiskTools       ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │                      Tree Layer                             ││
-│  │      (UI Tree Traversal, Element Extraction, Annotation)    ││
+│  │   Service Abstraction Layer  (WindowsMcp.Abstractions)      ││
+│  │        20 IXxxService interfaces + Model DTOs               ││
+│  └─────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │   Service Implementation Layer  (WindowsMcp.Services)       ││
+│  │        20 XxxService singletons registered via DI           ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   Windows Operating System                      │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │  UI Automation│  │  PowerShell  │  │  Desktop/Applications│  │
-│  │      API      │  │    Engine    │  │                      │  │
-│  └──────────────┘  └──────────────┘  └──────────────────────┘  │
+│  ┌────────────────┐  ┌───────────────┐  ┌─────────────────────┐ │
+│  │  FlaUI.UIA3    │  │H.InputSimulator│  │  CsWin32 / WinAPI   │ │
+│  │ (UI Automation)│  │(keyboard/mouse)│  │   (DPI, WMI, etc.)  │ │
+│  └────────────────┘  └───────────────┘  └─────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Available Tools
 
-Windows-MCP exposes 45 tools through the MCP protocol. Key categories:
+Windows-MCP exposes **50 MCP tools** across 12 tool classes:
 
-### Desktop State Tools
+### Input Tools (`InputTools` — 8 tools)
 | Tool | Purpose |
 |------|---------|
-| `State-Tool` | Capture comprehensive desktop state (apps, UI elements, optional screenshot) |
-| `Screenshot-Tool` | Capture desktop screenshot |
+| `Click` | Click at screen coordinates (left/right/middle, single/double/triple) |
+| `Drag` | Drag from one point to another |
+| `Hover` | Hover cursor at coordinates with optional duration |
+| `Type` | Type a string into the focused input |
+| `Key` | Press a single key by name (Enter, Tab, F1-F12, arrows, etc.) |
+| `Shortcut` | Press a keyboard shortcut (e.g., `ctrl+c`, `alt+tab`) |
+| `Scroll` | Scroll the mouse wheel (up/down/left/right) |
+| `Clipboard` | Get or set clipboard text |
 
-### Application Control Tools
+### UI Automation Tools (`UIAutomationTools` — 8 tools)
 | Tool | Purpose |
 |------|---------|
-| `Launch-Tool` | Launch applications from Start Menu |
-| `Switch-Tool` | Switch to running application window |
+| `GetState` | Capture full UI element tree of the foreground window |
+| `FindElement` | Find a UI element by name, control type, or automation ID |
+| `GetElement` | Get properties of a specific UI element |
+| `InteractElement` | Invoke, toggle, select, or expand a UI element |
+| `GetText` | Extract text content from a UI element |
+| `GetTable` | Extract tabular data from a grid/table element |
+| `AssertElement` | Assert element state with PASS/FAIL result |
+| `WaitFor` | Wait until a condition on a UI element is met |
 
-### Mouse Interaction Tools
+### Window Tools (`WindowTools` — 5 tools)
 | Tool | Purpose |
 |------|---------|
-| `Click-Tool` | Click at coordinates (left/right/middle, single/double/triple) |
-| `Move-Tool` | Move cursor to coordinates |
-| `Drag-Tool` | Drag from source to destination |
-| `Scroll-Tool` | Scroll vertically/horizontally |
+| `SwitchToWindow` | Focus a window by title pattern |
+| `Window` | Get window info (position, size, state) |
+| `MultiMonitor` | Get all monitor layouts and resolutions |
+| `Launch` | Launch an application by name |
+| `StartProcess` | Start a detached process that survives independently |
 
-### Keyboard Interaction Tools
+### File Tools (`FileTools` — 7 tools)
 | Tool | Purpose |
 |------|---------|
-| `Type-Tool` | Type text into focused element |
-| `Key-Tool` | Press individual keys |
-| `Shortcut-Tool` | Execute keyboard shortcuts |
-| `Clipboard-Tool` | Copy/paste via system clipboard |
+| `FileRead` | Read file contents |
+| `FileWrite` | Write or append file contents |
+| `FileManage` | Copy, move, delete, or create files/directories |
+| `FileInfo` | Get file/directory metadata |
+| `FileSearch` | Search for files by pattern |
+| `FileDialog` | Interact with open/save dialogs |
+| `Archive` | Create, extract, or inspect zip/tar archives |
 
-### Utility Tools
+### System Tools (`SystemTools` — 7 tools)
 | Tool | Purpose |
 |------|---------|
-| `Wait-Tool` | Pause execution for specified duration |
-| `Powershell-Tool` | Execute PowerShell commands |
-| `Scrape-Tool` | Fetch and convert webpage to markdown |
+| `SystemInfo` | Get CPU, RAM, OS version, hostname |
+| `Service` | List, start, stop, or restart Windows services |
+| `ScheduledTask` | Manage Windows Task Scheduler tasks |
+| `EventLog` | Query Windows Event Log entries |
+| `WmiQuery` | Execute WMI queries for system data |
+| `Env` | Get or set environment variables |
+| `PowerAction` | Sleep, hibernate, lock, or sign out |
 
-## Performance Characteristics
+### Screen Tools (`ScreenTools` — 2 tools)
+| Tool | Purpose |
+|------|---------|
+| `Screenshot` | Capture a screenshot (full screen or region) |
+| `Ocr` | Extract text from a screen region via OCR |
 
-- **State Capture Latency**: 1.5 - 2.3 seconds (varies with application count)
-- **PyAutoGUI Pause**: 1.0 second between operations (configurable)
-- **Tree Traversal**: Parallel across applications via ThreadPoolExecutor
-- **Screenshot Annotation**: Sequential label drawing (PIL ImageDraw is not thread-safe)
+### Process Tools (`ProcessTools` — 5 tools)
+| Tool | Purpose |
+|------|---------|
+| `Process` | List, start, or kill processes |
+| `GetProcess` | Get details for a specific process |
+| `NetworkConnections` | List active network connections per process |
+| `SecurityAudit` | Audit running process security posture |
+| `FirewallRules` | List or manage Windows Firewall rules |
 
-## Core Dependencies
+### Shell Tool (`ShellTools` — 1 tool)
+| Tool | Purpose |
+|------|---------|
+| `Powershell` | Execute a PowerShell command; returns stdout, stderr, exit code |
 
-| Package | Purpose |
-|---------|---------|
-| `fastmcp` | MCP server framework and protocol handling |
-| `uiautomation` | Windows UI Automation API access |
-| `pyautogui` | Keyboard and mouse control |
-| `humancursor` | Human-like cursor movement simulation |
-| `pillow` | Image processing for screenshots |
-| `rapidfuzz` | Fuzzy string matching for app names (MIT-licensed) |
+### Registry Tools (`RegistryTools` — 2 tools)
+| Tool | Purpose |
+|------|---------|
+| `RegistryGet` | Read a registry key or value |
+| `RegistrySet` | Write a registry value |
+
+### Network Tools (`NetworkTools` — 2 tools)
+| Tool | Purpose |
+|------|---------|
+| `Network` | Get network adapter info and IP configuration |
+| `HttpRequest` | Make HTTP requests (GET/POST/etc.) |
+
+### Web Tool (`WebTools` — 2 tools)
+| Tool | Purpose |
+|------|---------|
+| `Scrape` | Fetch a webpage and convert to Markdown |
+| `Shortcut` | Create or read a Windows shell shortcut (.lnk) |
+
+### Disk Tool (`DiskTools` — 1 tool)
+| Tool | Purpose |
+|------|---------|
+| `DiskInspect` | List drives with capacity, free space, file system |
+
+## Core NuGet Dependencies
+
+| Package | Purpose | Replaces (Python) |
+|---------|---------|------------------|
+| `ModelContextProtocol` | MCP server SDK, stdio transport | `fastmcp` |
+| `FlaUI.UIA3` | Windows UI Automation API | `uiautomation` |
+| `H.InputSimulator` | Keyboard and mouse simulation | `pyautogui` + `humancursor` |
+| `SkiaSharp` | Image capture and processing | `Pillow` |
+| `CsWin32` | P/Invoke code generation for Win32 APIs | `ctypes` |
+| `Microsoft.Extensions.Hosting` | DI container and application host | N/A |
+| `ReverseMarkdown` | HTML → Markdown conversion | `markdownify` |
+| `TaskScheduler` | Windows Task Scheduler COM wrapper | N/A |
+| `TextCopy` | Clipboard access | `pyperclip` |
 
 ## Use Cases
 
-1. **Desktop Automation**: Automate repetitive Windows tasks
-2. **UI Testing**: Automated UI testing and QA workflows
-3. **Accessibility Analysis**: Extract UI element information for accessibility auditing
-4. **AI Agent Development**: Enable LLM agents to interact with Windows applications
+1. **Desktop Automation**: Automate repetitive Windows tasks via AI
+2. **UI Testing**: AI-driven UI verification and regression testing
+3. **Accessibility Analysis**: Extract UI element trees for accessibility auditing
+4. **AI Agent Development**: Enable LLM agents to fully control Windows applications
 5. **RPA (Robotic Process Automation)**: Business process automation through AI
+6. **System Administration**: AI-assisted process, service, and registry management
