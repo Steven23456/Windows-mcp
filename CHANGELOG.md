@@ -3,7 +3,12 @@
 ## [Unreleased]
 
 ### Added
-- **`startup_report` tool** (boot/persistence report; building incrementally):
+- **`startup_report` MCP tool** — a HiJackThis-style, read-only boot/persistence report
+  (structured JSON + a readable text rendering). Covers running processes, Run/RunOnce keys
+  with effective enabled/disabled state, Startup folders, startup-relevant scheduled tasks,
+  auto-start services, the hosts file, Winsock LSP providers, and shell extensions — every
+  file-backed entry annotated with a catalog-aware code-signing trust flag. Built from these
+  composable pieces:
   - `IRegistryService.EnumerateValuesAsync` / `EnumerateSubKeysAsync` — enumerate all
     values under a key (with data + kind, including binary blobs like `StartupApproved`)
     and immediate sub-key names; return an empty array for a missing key.
@@ -27,6 +32,8 @@
     file-missing detection, auto-start service filtering (with ImagePath signer), logon/boot
     or missing-target task filtering, hosts parsing, LSP + shell-extension (CLSID→DLL)
     enumeration, all signer-annotated. Per-section failures are isolated into an errors list.
+  - `StartupTools.startup_report` MCP tool wiring + DI registration of the new services
+    (`IAuthenticodeInspector`, `ILspEnumerator`, `IShortcutResolver`, `IStartupReportService`).
 
 ### Changed
 - **`tools/create-dependency-graph`**: Added C# language support (auto-detects via `.sln` at

@@ -76,6 +76,10 @@ internal static class Program
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<INetworkService, NetworkService>();
         builder.Services.AddSingleton<IWebService, WebService>();
+        builder.Services.AddSingleton<IAuthenticodeInspector, AuthenticodeInspector>();
+        builder.Services.AddSingleton<ILspEnumerator, LspEnumerator>();
+        builder.Services.AddSingleton<IShortcutResolver, ShortcutResolver>();
+        builder.Services.AddSingleton<IStartupReportService, StartupReportService>();
 
         builder.Services
             .AddMcpServer(o =>
