@@ -19,6 +19,32 @@ public sealed class RegistryService : IRegistryService
         return Task.FromResult(new RegistryValueDto(path, valueName ?? "(default)", data, kind));
     }
 
+    public Task<RegistryValueDto[]> EnumerateValuesAsync(string hive, string path, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var root = ResolveHive(hive);
+        using var key = root.OpenSubKey(path);
+        if (key is null)
+            return Task.FromResult(Array.Empty<RegistryValueDto>());
+
+        var values = key.GetValueNames()
+            .Select(name => new RegistryValueDto(
+                path,
+                name.Length == 0 ? "(default)" : name,
+                key.GetValue(name),
+                key.GetValueKind(name).ToString()))
+            .ToArray();
+        return Task.FromResult(values);
+    }
+
+    public Task<string[]> EnumerateSubKeysAsync(string hive, string path, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var root = ResolveHive(hive);
+        using var key = root.OpenSubKey(path);
+        return Task.FromResult(key?.GetSubKeyNames() ?? Array.Empty<string>());
+    }
+
     public Task SetAsync(string hive, string path, string valueName, object data, string kind, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();

@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- **`startup_report` tool** (boot/persistence report; building incrementally):
+  - `IRegistryService.EnumerateValuesAsync` / `EnumerateSubKeysAsync` — enumerate all
+    values under a key (with data + kind, including binary blobs like `StartupApproved`)
+    and immediate sub-key names; return an empty array for a missing key.
+
 ### Changed
 - **`tools/create-dependency-graph`**: Added C# language support (auto-detects via `.sln` at
   project root). New functions: `detectProjectLanguage`, `getAllCsFiles`, `parseCsFile`,
