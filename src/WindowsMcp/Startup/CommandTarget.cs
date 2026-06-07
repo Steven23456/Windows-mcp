@@ -35,7 +35,9 @@ public static class CommandTarget
 
     /// <summary>
     /// True when the command's executable exists. Rooted paths are checked directly; a bare
-    /// executable name is resolved against the system directory (best effort).
+    /// executable name is resolved like the shell does — System32, then each PATH directory
+    /// (this matters for tasks that store a bare program name, e.g. "powershell.exe", which
+    /// lives in System32\WindowsPowerShell\v1.0, not System32 itself).
     /// </summary>
     public static bool Exists(string? command)
     {
@@ -44,6 +46,25 @@ public static class CommandTarget
 
         if (Path.IsPathRooted(exe)) return File.Exists(exe);
 
-        return File.Exists(Path.Combine(Environment.SystemDirectory, exe));
+        string withExe = exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? exe : exe + ".exe";
+        foreach (var dir in SearchDirectories())
+        {
+            try
+            {
+                if (File.Exists(Path.Combine(dir, exe)) || File.Exists(Path.Combine(dir, withExe)))
+                    return true;
+            }
+            catch { /* malformed PATH entry */ }
+        }
+        return false;
+    }
+
+    private static IEnumerable<string> SearchDirectories()
+    {
+        yield return Environment.SystemDirectory;
+        var path = Environment.GetEnvironmentVariable("PATH");
+        if (path is null) yield break;
+        foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            yield return dir;
     }
 }

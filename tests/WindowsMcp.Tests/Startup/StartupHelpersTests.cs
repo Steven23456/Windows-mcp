@@ -62,6 +62,15 @@ public class CommandTargetTests
         CommandTarget.Exists($"\"{Path.Combine(Environment.SystemDirectory, "kernel32.dll")}\"").Should().BeTrue();
         CommandTarget.Exists("C:\\nope\\definitely_missing_wmcp.exe --x").Should().BeFalse();
     }
+
+    [Fact]
+    public void Exists_resolves_bare_exe_via_PATH_not_just_system32()
+    {
+        // powershell.exe is on PATH (System32\WindowsPowerShell\v1.0) but NOT directly in
+        // System32 — the case that made ResumeClaudeCode report a missing target.
+        CommandTarget.Exists("powershell.exe").Should().BeTrue();
+        CommandTarget.Exists("definitely_missing_wmcp_bare.exe").Should().BeFalse();
+    }
 }
 
 [Trait("Category", "Unit")]

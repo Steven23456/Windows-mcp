@@ -70,6 +70,10 @@
   was left null, so WinVerifyTrust assumed SHA-1 and failed to match SHA-256 catalog members.
   Now passes the catalog-admin handle. Added a catalog-only test (`cscui.dll`) that exercises
   the path embedded-signed files like `kernel32.dll` never reach.
+- **`CommandTarget.Exists` PATH resolution** (found via `startup_report` e2e): a bare program
+  name in a task action (e.g. `powershell.exe`, which lives in `System32\WindowsPowerShell\v1.0`,
+  not `System32`) was reported as a missing target. `Exists` now resolves bare names against
+  the `PATH` directories, not just `System32`.
 - **`UIAutomationService.GetStateAsync`** now roots the element tree at the **foreground
   top-level window** (falling back to the focused element, then the desktop) instead of the
   focused element directly. A focused leaf control (a text box, a button) has no children, so
