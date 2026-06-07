@@ -13,6 +13,9 @@
   - `IAuthenticodeInspector` + `AuthenticodeInfo` — catalog-aware code-signing check via
     WinVerifyTrust (correctly trusts catalog-signed Windows/driver components, not just
     embedded signatures) plus the embedded signer subject when present.
+  - `ILspEnumerator` + `LspProviderDto` — enumerate the Winsock 2 service-provider catalog
+    (base providers + layered service providers / LSPs) via `WSCEnumProtocols` /
+    `WSCGetProviderPath`, with provider DLL paths resolved.
 
 ### Changed
 - **`tools/create-dependency-graph`**: Added C# language support (auto-detects via `.sln` at

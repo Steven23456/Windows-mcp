@@ -8,3 +8,9 @@ namespace WindowsMcp.Abstractions.Models;
 /// for catalog-signed files (which carry no embedded certificate) even when trusted.</para>
 /// </summary>
 public record AuthenticodeInfo(bool Trusted, string? Signer);
+
+/// <summary>
+/// A Winsock catalog (LSP/base service provider) entry: its catalog id, protocol name,
+/// and the backing provider DLL path (environment variables expanded), if resolvable.
+/// </summary>
+public record LspProviderDto(int CatalogEntryId, string ProtocolName, string? ProviderPath);
