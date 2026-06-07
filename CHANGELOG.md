@@ -71,6 +71,13 @@
   happened to land on a container). The `NotepadFixture` now also foregrounds Notepad. The full
   test suite is green with no category exclusions (79/79).
 
+### Security
+- **`tools/` dev dependencies**: `npm audit fix` in `chunking-for-files` and
+  `create-dependency-graph` resolved 3 high-severity transitive advisories (`tar`,
+  `picomatch` via `tinyglobby`). Both packages now report 0 vulnerabilities; the
+  dependency-graph tool still builds (`tsc`) and runs. Lockfiles only — no `package.json`
+  changes.
+
 ## [0.2.0] - 2026-05-26
 
 ### Changed
