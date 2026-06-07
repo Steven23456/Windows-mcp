@@ -16,6 +16,10 @@
   - `ILspEnumerator` + `LspProviderDto` — enumerate the Winsock 2 service-provider catalog
     (base providers + layered service providers / LSPs) via `WSCEnumProtocols` /
     `WSCGetProviderPath`, with provider DLL paths resolved.
+  - Report DTOs (`StartupReportDto` + section records) and pure helpers: `StartupApproval`
+    (decodes the StartupApproved enabled/disabled flag), `CommandTarget` (resolves an exe
+    from a command line incl. unquoted paths with spaces, and tests existence), and
+    `StartupReportRenderer` (section-grouped text rendering).
 
 ### Changed
 - **`tools/create-dependency-graph`**: Added C# language support (auto-detects via `.sln` at
