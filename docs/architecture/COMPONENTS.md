@@ -9,7 +9,7 @@ This document provides detailed documentation for each component in the Windows-
 ## Program.cs — Host and DI Entry Point
 
 ### Purpose
-Configures the .NET Generic Host, registers all 20 services as singletons, and starts the MCP server with stdio transport.
+Configures the .NET Generic Host, registers all 24 services as singletons, and starts the MCP server with stdio transport.
 
 ### Location
 `src/WindowsMcp/Program.cs`
@@ -34,7 +34,7 @@ public static async Task<int> Main(string[] args)
     builder.Logging.ClearProviders();
     builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
     builder.Services.AddSingleton<IInputService, InputService>();
-    // ... (20 services)
+    // ... (24 services)
 
     // 5. Configure MCP server
     builder.Services
@@ -71,6 +71,10 @@ public static async Task<int> Main(string[] args)
 | `INotificationService` | `NotificationService` |
 | `INetworkService` | `NetworkService` |
 | `IWebService` | `WebService` |
+| `IAuthenticodeInspector` | `AuthenticodeInspector` |
+| `ILspEnumerator` | `LspEnumerator` |
+| `IShortcutResolver` | `ShortcutResolver` |
+| `IStartupReportService` | `StartupReportService` |
 
 ---
 
@@ -250,6 +254,17 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 ---
 
+### `StartupTools` — 1 tool
+`src/WindowsMcp/Tools/StartupTools.cs`
+
+**Injected:** `IStartupReportService`
+
+| Method | Description |
+|--------|-------------|
+| `StartupReport` | HiJackThis-style boot/persistence report (JSON + text rendering): processes, Run/RunOnce keys with effective enabled state, Startup folders, startup-relevant scheduled tasks, auto-start services, hosts file, Winsock LSP, shell extensions; every file-backed entry carries a catalog-aware code-signing trust flag |
+
+---
+
 ## Service Interfaces (`WindowsMcp.Abstractions`)
 
 Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
@@ -264,10 +279,10 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IPowerShellService` | `RunAsync(command)` |
 | `IUIAutomationService` | `GetStateAsync`, `FindElementAsync`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync`, `InteractAsync`, `GetTableAsync`, `WaitForAsync` |
 | `IFileSystemService` | `ReadAsync`, `WriteAsync`, `ManageAsync`, `InfoAsync`, `SearchAsync`, `ArchiveAsync` |
-| `IRegistryService` | `GetAsync`, `SetAsync` |
+| `IRegistryService` | `GetAsync`, `SetAsync`, `EnumerateValuesAsync`, `EnumerateSubKeysAsync` |
 | `IServiceControlService` | `ListAsync`, `StartAsync`, `StopAsync`, `RestartAsync` |
 | `IEventLogService` | `QueryAsync` |
-| `ITaskSchedulerService` | `ListAsync`, `GetAsync`, `CreateAsync`, `DeleteAsync`, `RunAsync` |
+| `ITaskSchedulerService` | `ListAsync`, `ListDetailedAsync`, `GetAsync`, `CreateAsync`, `DeleteAsync`, `RunAsync` |
 | `IProcessService` | `ListAsync`, `GetAsync`, `KillAsync`, `StartAsync` |
 | `IWindowService` | `ListAsync`, `FocusAsync`, `GetAsync`, `LaunchAsync` |
 | `IWmiService` | `QueryAsync(wql)` |
@@ -276,6 +291,10 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `INotificationService` | `ShowAsync` |
 | `INetworkService` | `GetAdaptersAsync`, `GetConnectionsAsync`, `GetFirewallRulesAsync` |
 | `IWebService` | `FetchMarkdownAsync`, `RequestAsync` |
+| `IAuthenticodeInspector` | `Inspect(path)` → catalog-aware trust + signer |
+| `ILspEnumerator` | `Enumerate()` → Winsock catalog providers |
+| `IShortcutResolver` | `ResolveTarget(lnk)` → `.lnk` target via IShellLink |
+| `IStartupReportService` | `BuildAsync()` → aggregated `StartupReportDto` |
 
 ---
 
@@ -295,6 +314,8 @@ Located in `src/WindowsMcp.Abstractions/` alongside the interfaces (one DTOs fil
 | `SystemDtos.cs` | `ServiceInfo`, `ScheduledTaskInfo`, `EventLogEntry`, `SystemInfoResult` |
 | `PowerShellDtos.cs` | `PowerShellResult(string Stdout, string Stderr, int ExitCode)` |
 | `WebDtos.cs` | `HttpResponse`, `ShortcutInfo` |
+| `SecurityDtos.cs` | `AuthenticodeInfo`, `LspProviderDto` |
+| `StartupReportDtos.cs` | `StartupReportDto` + section records (`RunEntry`, `StartupTaskEntry`, `StartupServiceEntry`, `LspProviderEntry`, `ShellExtensionEntry`, …) |
 
 **Model pattern** — all DTOs are C# records:
 ```csharp

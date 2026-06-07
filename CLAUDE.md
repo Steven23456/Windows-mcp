@@ -1,184 +1,93 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
 
 ## Overview
 
-Windows-MCP is an MCP server that enables AI agents to interact with Windows OS through UI automation and a11y (accessibility) tree traversal.
+Windows-mcp is a **C# / .NET 9** Model Context Protocol (MCP) server for Windows desktop
+automation and system inspection. It exposes 51 tools over the MCP **stdio** transport
+(UI automation, input, screen/OCR, windows, files, disk, processes/shell, services,
+scheduled tasks, registry, network, web, system, and a HiJackThis-style startup report).
 
-**Version**: 0.8.3 | **Platform**: Windows 7-11 | **Python**: 3.13+ | **Entry Point**: `main.py`
+> History: v0.x–0.8.5 were Python; **v0.2.0 (2026-05-26) is a full C# rewrite**. The Python
+> tree is archived in `legacy/`. Do not edit `legacy/`. See `CHANGELOG.md` for versions.
 
-## Architecture
+## Architecture (4 layers)
 
-### Two-Layer Design
-
-**Desktop Layer (`src/desktop/__init__.py`)** - Windows OS interface
-- `Desktop` class manages app state, screenshots, PowerShell execution
-- Uses `uiautomation` library for Windows UI Automation API
-- `Tree` is lazily imported inside `get_state()` to avoid circular dependency
-- `get_state()` → `Tree.get_state()` → `get_appwise_nodes()` → `get_nodes()` → `tree_traversal()`
-
-**Tree Layer (`src/tree/__init__.py`)** - UI element extraction
-- Parallel traversal with `ThreadPoolExecutor`
-- **Important**: `get_appwise_nodes()` only traverses the foreground app + Taskbar + Desktop (Program Manager), not all visible apps
-- Three element categories:
-  - **Interactive**: Buttons, links, text fields (see `INTERACTIVE_CONTROL_TYPE_NAMES` in `src/tree/config.py`)
-  - **Informative**: Static text, labels (see `INFORMATIVE_CONTROL_TYPE_NAMES`)
-  - **Scrollable**: Elements with scroll patterns
-- DOM correction logic handles a11y tree quirks (list items with child links, unnamed groups)
-
-**Tool Definitions (`main.py`)** - 45 MCP tools + 2 MCP resources via FastMCP
-- Mouse: `humancursor` library (human-like movement)
-- Keyboard: `pyautogui` library
-- `State-Tool` is primary context-gathering tool
-
-## Build & Development Commands
-
-```bash
-# Run server (development)
-python main.py
-
-# Run with uv
-uv --directory C:\mcp-servers\Windows-MCP run main.py
-
-# Test with MCP inspector
-npx @modelcontextprotocol/inspector python main.py
-
-# Build package
-python -m build
-
-# Build DXT extension for Claude Desktop
-npx @anthropic-ai/dxt pack
-
-# Install for development
-pip install -e .
+```
+MCP protocol  →  Tool classes  →  Service abstractions  →  Service implementations
+(stdio SDK)      Tools/*.cs        WindowsMcp.Abstractions   Services/*.cs
 ```
 
-## MCP Tools
+- **`src/WindowsMcp/`** — the server exe. `Program.cs` configures the Generic Host, registers
+  every service as a singleton, and starts the MCP server. `Tools/*.cs` are the tool surface;
+  `Services/*.cs` are the implementations.
+- **`src/WindowsMcp.Abstractions/`** — `IXxxService` interfaces (one per file) and DTO records
+  under `Models/`. Tools and services depend on these interfaces (testability).
+- **`tests/WindowsMcp.Tests/`** — xUnit + Moq + FluentAssertions.
+- Tools are **source-generated/discovered** via `.WithToolsFromAssembly()` — you do **not**
+  register tool classes manually, only the services they inject.
+- Detailed, current design docs live in `docs/architecture/` (ARCHITECTURE / OVERVIEW /
+  COMPONENTS / DATAFLOW). Feature specs live in `docs/superpowers/specs/`.
 
-45 tools and 2 resources defined in `main.py` via `@mcp.tool()` and `@mcp.resource()`. Key tool: `State-Tool` is the primary context-gathering tool — returns desktop state + UI elements, optionally with annotated screenshot (`use_vision=True`). Resources: `windows-mcp://current-directory` (server cwd) and `windows-mcp://security-config` (active security rules).
+## Build / run / test
 
-### Testing & Inspection Tools (v0.5.0)
-- `Get-Element-Property-Tool`: Read element properties (value, checked state, enabled, bounding box, automation patterns)
-- `Get-Text-Tool`: Extract text content from a UI element (faster than OCR)
-- `Assert-Element-Tool`: Verify element state with PASS/FAIL results (exists, enabled, checked, value, visible, focused)
-- `Checkbox-Toggle-Tool`: Toggle checkboxes via TogglePattern
-- `Select-Option-Tool`: Select dropdown/combobox items via ExpandCollapsePattern + SelectionItemPattern
-- `Focus-Tool`: Set keyboard focus without clicking
-- `Hover-Tool`: Hover cursor with duration for tooltips/hover states
-- `Compare-Screenshot-Tool`: Visual regression testing with pixel diff percentage
-- `Get-Table-Tool`: Extract tabular data via GridPattern (returns markdown)
-- `Record-Replay-Tool`: Save/replay UI action sequences as JSON
-- `Start-Process-Tool`: Launch detached processes that survive independently (GUI apps, scripts, long-running tasks)
+```powershell
+dotnet build                      # debug build (first build ~3 min cold; incremental ~30s)
+dotnet test                       # full suite
+dotnet test --filter "Category!=UIAutomation"   # headless-safe subset
 
-## Key Technical Details
-
-### COM Interface Patterns
-- Use C# `_VtblGap1_N()` to skip N vtable slots in COM interfaces — never use stub methods with guessed signatures (causes silent stack corruption)
-- `IMMDeviceEnumerator` needs `_VtblGap1_1()` before `GetDefaultAudioEndpoint` (skips `EnumAudioEndpoints`)
-- `IAudioEndpointVolume` needs `_VtblGap1_4()` before `SetMasterVolumeLevelScalar` (skips Register/Unregister/GetChannelCount/SetMasterVolumeLevel)
-
-### WinRT Async in PowerShell
-- Never call `GetResults()` directly on WinRT async operations — it doesn't block
-- Use an `Await($WinRtTask, $ResultType)` helper that resolves via `AsTask().Wait(-1)`
-- The `AsTask` method must be found by reflection filtering on `` IAsyncOperation`1 `` parameter type
-
-### Input Validation (v0.1.4+)
-- `MAX_SCREEN_COORD = 10000` - reasonable max for multi-monitor
-- `MAX_TEXT_LENGTH = 10000` - limit text input
-- `MAX_WAIT_DURATION = 300` - 5 minutes max wait
-- `MAX_WHEEL_TIMES = 100` - scroll limit
-- `MAX_CLICKS = 3` - triple-click max
-
-### Command Security (v0.2.0+)
-- `BLOCKED_COMMANDS` in `src/desktop/config.py`: 11 dangerous commands (format, shutdown, rm, del, etc.)
-- `BLOCKED_ARGUMENTS`: 9 injection-risk flags (-enc, -encodedcommand, --exec, etc.)
-- `BLOCKED_OPERATORS`: `;` and `` ` `` blocked; `&` and `|` allowed (essential PS operators)
-- `MAX_COMMAND_LENGTH = 10000` - command length limit (raised from 2000 to support internal multi-block scripts)
-- `ALLOWED_PATHS`: workingDir restricted to user home + server cwd
-- Validation runs in `validate_command()` in `main.py` before any shell execution
-
-### PyAutoGUI Configuration
-```python
-pg.FAILSAFE = True   # Abort by moving mouse to corner (security)
-pg.PAUSE = 1.0       # 1-second delay between operations
+# Publish the single-file exe (end users need no .NET runtime):
+dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained `
+    -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
+# → dist/WindowsMcp.exe
 ```
 
-### Element Visibility Criteria
-- `IsControlElement == True`
-- `IsOffscreen == False`
-- `IsEnabled == True`
-- Bounding box area > 0
-- Not an unlabeled image control
+- **`[Trait("Category","UIAutomation")]` tests need an interactive desktop** with the target
+  app (Notepad fixture) in the **foreground**; they fail under headless/background runs and on
+  Win11's modern Notepad (documented in `NotepadFixture.cs`). Exclude them when running headless.
+- Other tests are unit (`Category=Unit`, mocked) or read-only integration (`Category=Integration`).
 
-### App Filtering
-- `EXCLUDED_APPS` in `src/desktop/config.py`: Filtered from `get_apps()`
-- `AVOIDED_APPS`: Filtered from tree traversal
+## Conventions (enforced)
 
-### Performance
-- **State-Tool latency**: 1.5-2.3 seconds (varies with app count)
-- **Sleep delays**: 0.75s (app enumeration), 1.0s (tree traversal), 0.25s (post-screenshot)
+`Directory.Build.props` sets `Nullable=enable`, `ImplicitUsings=enable`,
+**`TreatWarningsAsErrors=true`**, `LangVersion=latest`, and `NoWarn=CA1416`. So:
+- Warnings fail the build. Suppress an unavoidable obsolete/analyzer warning **narrowly** with
+  `#pragma warning disable <ID>` + a comment naming the reason (see `AuthenticodeInspector.cs`
+  for the `SYSLIB0057` precedent), or add to `NoWarn` only for a genuinely global case.
+- DTOs are `record`s; services are `sealed`; tool methods are `async Task<string>` returning
+  JSON (and/or text) and carry a `[McpServerTool, Description(...)]` attribute.
 
-## Development Notes
+## Adding a tool
 
-### Adding New Tools
-1. Add function in `main.py` with `@mcp.tool()` decorator
-2. Add type hints for all parameters
-3. Return `str` or `list[str | Image]` for vision support
-4. Update `manifest.json` tools array for DXT metadata
-5. Rebuild: `python -m build`
+1. Add a `sealed [McpServerToolType]` class in `Tools/`, constructor-inject the service
+   interfaces, add `[McpServerTool, Description("…")]` methods.
+2. Put real logic behind an `IXxxService` in `Abstractions` + impl in `Services/` (keeps the
+   tool thin and the logic unit-testable with Moq).
+3. Register any **new** service singleton in `Program.cs` (tools auto-register).
+4. Update `docs/architecture/*` counts and `CHANGELOG.md` under `## [Unreleased]`.
 
-### Modifying UI Element Detection
-1. Edit `src/tree/config.py`:
-   - `INTERACTIVE_CONTROL_TYPE_NAMES`: Clickable elements
-   - `INFORMATIVE_CONTROL_TYPE_NAMES`: Text-only elements
-2. Modify `Tree.get_nodes()` filtering logic
-3. DOM correction in `dom_correction()` handles a11y quirks
+## Key technical notes (still true in C#)
 
-### Known Issues
-- `get_element_under_cursor()` returns focused control, not element at cursor coordinates
+- **MCP stdio:** stdout is JSON-RPC, logs go to **stderr only**. `Program.cs` forces
+  `Console.OutputEncoding/InputEncoding = UTF8` **before** host startup — without it, Windows'
+  cp1252 default buffers responses and they never flush. Do not remove that.
+- **COM vtable gaps:** when declaring COM interfaces, use `_VtblGap1_N()` to skip unused slots,
+  or declare only the leading methods you call (an `InterfaceIsIUnknown` interface binds declared
+  methods from vtable slot 3). Never stub later methods with guessed signatures — silent stack
+  corruption. See `ShortcutResolver.cs` (IShellLink/IPersistFile) and the audio service.
+- **Native interop** for the startup report: `AuthenticodeInspector` (WinVerifyTrust, catalog-
+  aware), `LspEnumerator` (`WSCEnumProtocols`), `ShortcutResolver` (IShellLink). Catalog-aware
+  trust matters — most Windows components are catalog-signed, not embedded-signed.
+- **WinRT async in PowerShell** (PowerShellService): never call `GetResults()` directly; resolve
+  via `AsTask().Wait(-1)`.
 
-## Testing
+## Windows Defender / cold-start
 
-pytest is in dev dependencies but no automated test suite exists yet. Manual testing:
-```bash
-# MCP inspector (interactive tool testing)
-npx @modelcontextprotocol/inspector python main.py
+If `/mcp` times out at 30s on a fresh machine, add a Defender exclusion for the repo / exe path
+(heavy first-touch scanning of the self-contained exe). Re-apply after an AV reset.
 
-# Launch test app with various UI controls (tkinter)
-python tests/test_app.py
-```
+## Tooling under `tools/`
 
-## Code Style
-- **Formatter**: Ruff (default config, no ruff.toml or pyproject.toml overrides)
-- **Line length**: ~100 characters (convention, not enforced by config)
-- **Quotes**: Double quotes
-- **Type hints**: Required on function signatures
-- **Docstrings**: Google-style
-
-## Cleanup Before Committing
-
-Remove temporary files before committing:
-```bash
-rm test-*.py debug-*.py temp-*.py .error.txt
-git status  # verify clean
-```
-
-## Entry Points
-
-Run via `python main.py`, `python -m windows_mcp`, or `windows-mcp` (after pip install). Console script uses `windows_mcp_entry.py` (not `__main__.py`) due to ImportError with pip's entry point generation.
-
-## PyPI Publication
-
-**Package**: `windows-mcp-server` | **Command**: `windows-mcp`
-
-```bash
-python -m build
-python -m twine upload --username __token__ --password "$TWINE_PASSWORD" dist/windows_mcp_server-<version>*
-```
-
-## Known Limitations
-
-1. Cannot select specific text within paragraphs (a11y tree limitation)
-2. `Type-Tool` types entire text at once (not suitable for incremental IDE typing)
-3. Windows-only (requires Windows UI Automation API)
+Node-based dev utilities (`create-dependency-graph` supports C# via `--lang=csharp`,
+`chunking-for-files`, `compress-for-context`). Dependabot tracks their JS deps.

@@ -36,6 +36,11 @@
     (`IAuthenticodeInspector`, `ILspEnumerator`, `IShortcutResolver`, `IStartupReportService`).
 
 ### Changed
+- **Docs**: refreshed for `startup_report` — tool/class/service counts (50→51 tools, 12→13
+  tool classes, 20→24 services) across `docs/architecture/*` and `README.md`; added the new
+  tool, services, interfaces, and DTOs; updated the `IRegistryService` / `ITaskSchedulerService`
+  method lists. Rewrote the root `CLAUDE.md`, which still described the retired Python
+  architecture, to reflect the current C#/.NET 9 design, build/test commands, and conventions.
 - **`tools/create-dependency-graph`**: Added C# language support (auto-detects via `.sln` at
   project root). New functions: `detectProjectLanguage`, `getAllCsFiles`, `parseCsFile`,
   `categorizeCsFiles`, `buildCsDependencyMatrix`, `inferCsProjectNames` (auto-discovers

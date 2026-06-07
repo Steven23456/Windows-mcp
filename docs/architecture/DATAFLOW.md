@@ -280,7 +280,7 @@ Host.CreateApplicationBuilder(args)
         │
         ▼
 builder.Services.AddSingleton<IInputService, InputService>()
-  ...  (20 services)
+  ...  (24 services)
         │
         ▼
 builder.Services.AddMcpServer(...)

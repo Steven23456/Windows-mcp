@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 9 and C#, it exposes 50 MCP tools covering UI automation, file operations, process management, system monitoring, and more — all via the standard MCP stdio transport.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 9 and C#, it exposes 51 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — all via the standard MCP stdio transport.
 
 ## Purpose
 
@@ -20,7 +20,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 | Feature | Description |
 |---------|-------------|
 | **Native Windows Integration** | Direct access to Windows UI Automation API via `FlaUI.UIA3` |
-| **Dependency Injection** | All 20 services are singleton-scoped, wired via `Microsoft.Extensions.Hosting` |
+| **Dependency Injection** | All 24 services are singleton-scoped, wired via `Microsoft.Extensions.Hosting` |
 | **Source-Generated Tool Discovery** | `[McpServerTool]` attributes are discovered at compile time by the MCP SDK source generator |
 | **Interface-Driven Architecture** | Every service backed by an `IXxxService` interface in a separate Abstractions assembly |
 | **DPI-Aware** | Per-Monitor DPI Awareness V2 enabled at startup for correct multi-monitor coordinate handling |
@@ -75,7 +75,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 ## Available Tools
 
-Windows-MCP exposes **50 MCP tools** across 12 tool classes:
+Windows-MCP exposes **51 MCP tools** across 13 tool classes:
 
 ### Input Tools (`InputTools` — 8 tools)
 | Tool | Purpose |
@@ -174,6 +174,11 @@ Windows-MCP exposes **50 MCP tools** across 12 tool classes:
 | Tool | Purpose |
 |------|---------|
 | `DiskInspect` | List drives with capacity, free space, file system |
+
+### Startup Tools (`StartupTools` — 1 tool)
+| Tool | Purpose |
+|------|---------|
+| `StartupReport` | HiJackThis-style boot/persistence report (processes, Run keys with enabled state, Startup folders, startup-relevant scheduled tasks, auto-start services, hosts file, Winsock LSP, shell extensions), every file-backed entry annotated with a catalog-aware code-signing trust flag; JSON + text |
 
 ## Core NuGet Dependencies
 

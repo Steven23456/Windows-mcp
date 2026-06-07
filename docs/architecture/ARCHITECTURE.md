@@ -14,7 +14,7 @@ Windows-MCP follows a four-layer architecture built on .NET 9 with dependency in
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Tool Layer                                         │
-│                 (12 [McpServerToolType] classes, 50 tools)                   │
+│                 (13 [McpServerToolType] classes, 51 tools)                   │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ │
 │  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │ │
 │  │  8 tools   │ │  8 tools   │ │  7 tools   │ │  7 tools   │ │  5 tools   │ │
@@ -159,12 +159,12 @@ public interface IInputService
 
 ### 4. Service Implementation Layer
 
-All 20 services are registered as **singletons** in `Program.cs`:
+All 24 services are registered as **singletons** in `Program.cs`:
 
 ```csharp
 builder.Services.AddSingleton<IInputService, InputService>();
 builder.Services.AddSingleton<IScreenshotService, ScreenshotService>();
-// ... (20 services total)
+// ... (24 services total)
 ```
 
 Services contain all business logic and directly call Windows APIs through platform packages. They are constructed once at host startup and shared across all tool invocations.
@@ -236,7 +236,7 @@ Windows-mcp.sln
 │   ├── WindowsMcp/                        ← Main project
 │   │   ├── WindowsMcp.csproj              (targets net9.0-windows10.0.22621)
 │   │   ├── Program.cs                     (host + DI wiring)
-│   │   ├── Tools/                         (12 tool classes)
+│   │   ├── Tools/                         (13 tool classes)
 │   │   │   ├── InputTools.cs
 │   │   │   ├── UIAutomationTools.cs
 │   │   │   ├── FileTools.cs
@@ -248,8 +248,9 @@ Windows-mcp.sln
 │   │   │   ├── RegistryTools.cs
 │   │   │   ├── NetworkTools.cs
 │   │   │   ├── WebTools.cs
-│   │   │   └── DiskTools.cs
-│   │   └── Services/                      (20 service implementations)
+│   │   │   ├── DiskTools.cs
+│   │   │   └── StartupTools.cs
+│   │   └── Services/                      (24 service implementations)
 │   │       ├── InputService.cs
 │   │       ├── UIAutomationService.cs
 │   │       └── ...
