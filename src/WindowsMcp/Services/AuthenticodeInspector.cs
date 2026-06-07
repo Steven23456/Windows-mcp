@@ -122,7 +122,7 @@ public sealed class AuthenticodeInspector : IAuthenticodeInspector
                 var ci = new CATALOG_INFO { cbStruct = (uint)Marshal.SizeOf<CATALOG_INFO>() };
                 if (!CryptCATCatalogInfoFromContext(hCatInfo, ref ci, 0)) return false;
 
-                return VerifyCatalogMember(ci.wszCatalogFile, path, Convert.ToHexString(hash), hash) == 0;
+                return VerifyCatalogMember(ci.wszCatalogFile, path, Convert.ToHexString(hash), hash, hCatAdmin) == 0;
             }
             finally
             {
@@ -133,7 +133,7 @@ public sealed class AuthenticodeInspector : IAuthenticodeInspector
             }
         }
 
-        private static int VerifyCatalogMember(string catalogFile, string memberFile, string memberTag, byte[] hash)
+        private static int VerifyCatalogMember(string catalogFile, string memberFile, string memberTag, byte[] hash, IntPtr hCatAdmin)
         {
             IntPtr pHash = Marshal.AllocHGlobal(hash.Length);
             var catInfo = new WINTRUST_CATALOG_INFO
@@ -145,6 +145,9 @@ public sealed class AuthenticodeInspector : IAuthenticodeInspector
                 hMemberFile = IntPtr.Zero,
                 pbCalculatedFileHash = pHash,
                 cbCalculatedFileHash = (uint)hash.Length,
+                // Required for SHA-256 catalogs: without the admin handle, WinVerifyTrust
+                // assumes SHA-1 and fails to match modern catalog members (TRUST_E_NOSIGNATURE).
+                hCatAdmin = hCatAdmin,
             };
             IntPtr pCat = Marshal.AllocHGlobal(Marshal.SizeOf<WINTRUST_CATALOG_INFO>());
             try

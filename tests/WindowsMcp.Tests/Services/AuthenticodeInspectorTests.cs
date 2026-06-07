@@ -19,6 +19,19 @@ public class AuthenticodeInspectorTests
     }
 
     [Fact]
+    public void Inspect_trusts_a_catalog_only_signed_system_dll()
+    {
+        // cscui.dll carries NO embedded Authenticode signature — it is signed via a security
+        // catalog. This exercises the catalog-verification path (which kernel32, being
+        // embedded-signed, does not) and guards against the SHA-256 hCatAdmin regression.
+        var path = Path.Combine(Environment.SystemDirectory, "cscui.dll");
+        if (!File.Exists(path)) return; // not present on this SKU
+
+        new AuthenticodeInspector().Inspect(path).Trusted.Should().BeTrue(
+            "a catalog-signed Microsoft component must verify via the catalog path");
+    }
+
+    [Fact]
     public void Inspect_returns_untrusted_for_unsigned_file()
     {
         var tmp = Path.Combine(Path.GetTempPath(), $"wmcp_unsigned_{Guid.NewGuid():N}.exe");

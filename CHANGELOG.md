@@ -63,6 +63,13 @@
   `WaitFor` polling loop, DI resolution at startup, `AssertElement` state checks.
 
 ### Fixed
+- **`AuthenticodeInspector` catalog verification** (found via `startup_report` end-to-end
+  validation): catalog-signed Microsoft components (e.g. `cscui.dll`, `ntshrui.dll`, most
+  shell-extension DLLs and many services) were reported `Trusted=false` — the exact
+  false-positive the catalog-aware check exists to prevent. Root cause: `WINTRUST_CATALOG_INFO.hCatAdmin`
+  was left null, so WinVerifyTrust assumed SHA-1 and failed to match SHA-256 catalog members.
+  Now passes the catalog-admin handle. Added a catalog-only test (`cscui.dll`) that exercises
+  the path embedded-signed files like `kernel32.dll` never reach.
 - **`UIAutomationService.GetStateAsync`** now roots the element tree at the **foreground
   top-level window** (falling back to the focused element, then the desktop) instead of the
   focused element directly. A focused leaf control (a text box, a button) has no children, so
