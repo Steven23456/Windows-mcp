@@ -20,6 +20,8 @@
     (decodes the StartupApproved enabled/disabled flag), `CommandTarget` (resolves an exe
     from a command line incl. unquoted paths with spaces, and tests existence), and
     `StartupReportRenderer` (section-grouped text rendering).
+  - `IShortcutResolver` + `ShortcutResolver` — resolve `.lnk` targets via `IShellLink` COM
+    (for the Startup-folder section).
 
 ### Changed
 - **`tools/create-dependency-graph`**: Added C# language support (auto-detects via `.sln` at
