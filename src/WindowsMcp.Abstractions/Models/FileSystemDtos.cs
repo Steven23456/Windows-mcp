@@ -18,3 +18,15 @@ public record ServiceDto(string Name, string DisplayName, string Status, string 
 public record EventLogEntryDto(int Id, string Source, string Message, string Level, DateTime Time);
 
 public record ScheduledTaskDto(string Name, string Path, string State, DateTime? LastRun, DateTime? NextRun);
+
+/// <summary>
+/// Richer scheduled-task projection used by persistence reporting: includes the primary
+/// exec action (path + arguments) and the distinct trigger types, across all task folders.
+/// </summary>
+public record ScheduledTaskDetailDto(
+    string Name,
+    string Path,
+    string State,
+    string? ActionPath,
+    string? ActionArguments,
+    string[] Triggers);

@@ -22,6 +22,37 @@ public sealed class TaskSchedulerService : ITaskSchedulerService
         return System.Threading.Tasks.Task.FromResult(tasks);
     }
 
+    public System.Threading.Tasks.Task<ScheduledTaskDetailDto[]> ListDetailedAsync(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        using var ts = new TaskService();
+        var list = new List<ScheduledTaskDetailDto>();
+        foreach (var t in ts.AllTasks)
+        {
+            ct.ThrowIfCancellationRequested();
+            string? actionPath = null;
+            string? actionArgs = null;
+            string[] triggers = Array.Empty<string>();
+            try
+            {
+                var def = t.Definition;
+                var exec = def.Actions.OfType<ExecAction>().FirstOrDefault();
+                if (exec is not null)
+                {
+                    actionPath = exec.Path;
+                    actionArgs = string.IsNullOrEmpty(exec.Arguments) ? null : exec.Arguments;
+                }
+                triggers = def.Triggers.Select(tr => tr.TriggerType.ToString()).Distinct().ToArray();
+            }
+            catch
+            {
+                // Protected/corrupt task definition: emit name/path/state only.
+            }
+            list.Add(new ScheduledTaskDetailDto(t.Name, t.Path, t.State.ToString(), actionPath, actionArgs, triggers));
+        }
+        return System.Threading.Tasks.Task.FromResult(list.ToArray());
+    }
+
     public System.Threading.Tasks.Task<ScheduledTaskDto> GetAsync(string name, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();

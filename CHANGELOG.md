@@ -7,6 +7,9 @@
   - `IRegistryService.EnumerateValuesAsync` / `EnumerateSubKeysAsync` — enumerate all
     values under a key (with data + kind, including binary blobs like `StartupApproved`)
     and immediate sub-key names; return an empty array for a missing key.
+  - `ITaskSchedulerService.ListDetailedAsync` + `ScheduledTaskDetailDto` — list tasks
+    across all folders with exec-action path/arguments and trigger types; tolerant of
+    protected/corrupt task definitions.
 
 ### Changed
 - **`tools/create-dependency-graph`**: Added C# language support (auto-detects via `.sln` at
