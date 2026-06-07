@@ -62,6 +62,15 @@
   `System.Diagnostics.Process`, `Screenshot`/`Ocr` via SkiaSharp + `Windows.Media.Ocr`,
   `WaitFor` polling loop, DI resolution at startup, `AssertElement` state checks.
 
+### Fixed
+- **`UIAutomationService.GetStateAsync`** now roots the element tree at the **foreground
+  top-level window** (falling back to the focused element, then the desktop) instead of the
+  focused element directly. A focused leaf control (a text box, a button) has no children, so
+  the previous behavior returned an empty, near-useless tree — and made
+  `GetStateAsync_returns_tree_with_notepad_root` non-deterministic (it only passed when focus
+  happened to land on a container). The `NotepadFixture` now also foregrounds Notepad. The full
+  test suite is green with no category exclusions (79/79).
+
 ## [0.2.0] - 2026-05-26
 
 ### Changed

@@ -4,6 +4,7 @@
 // if memory pressure is a concern.
 
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.UIA3;
@@ -73,12 +74,33 @@ public sealed class UIAutomationService : IUIAutomationService
     public Task<ElementTree> GetStateAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        return OnStaAsync(() =>
-        {
-            var foreground = _automation.FocusedElement() ?? _automation.GetDesktop();
-            return BuildTree(foreground, depth: 3);
-        }, ct);
+        return OnStaAsync(() => BuildTree(GetForegroundRoot(), depth: 3), ct);
     }
+
+    /// <summary>
+    /// The element whose subtree represents "current state": the foreground top-level window
+    /// (what an agent actually acts on). Falls back to the focused element, then the desktop.
+    /// Rooting at the focused element directly is wrong — a focused leaf control (a text box,
+    /// a button) has no children, yielding an empty, useless tree.
+    /// </summary>
+    private AutomationElement GetForegroundRoot()
+    {
+        try
+        {
+            var hwnd = GetForegroundWindow();
+            if (hwnd != IntPtr.Zero)
+            {
+                var window = _automation.FromHandle(hwnd);
+                if (window is not null) return window;
+            }
+        }
+        catch { /* fall through to focused element / desktop */ }
+
+        return _automation.FocusedElement() ?? _automation.GetDesktop();
+    }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     private ElementTree BuildTree(AutomationElement el, int depth)
     {
