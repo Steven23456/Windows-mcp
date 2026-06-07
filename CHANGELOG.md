@@ -22,6 +22,11 @@
     `StartupReportRenderer` (section-grouped text rendering).
   - `IShortcutResolver` + `ShortcutResolver` — resolve `.lnk` targets via `IShellLink` COM
     (for the Startup-folder section).
+  - `IStartupReportService` + `StartupReportService` — orchestrates all sections into a
+    `StartupReportDto`: Run-key/Startup-folder enabled-state joins (StartupApproved),
+    file-missing detection, auto-start service filtering (with ImagePath signer), logon/boot
+    or missing-target task filtering, hosts parsing, LSP + shell-extension (CLSID→DLL)
+    enumeration, all signer-annotated. Per-section failures are isolated into an errors list.
 
 ### Changed
 - **`tools/create-dependency-graph`**: Added C# language support (auto-detects via `.sln` at
