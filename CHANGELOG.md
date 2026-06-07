@@ -10,6 +10,9 @@
   - `ITaskSchedulerService.ListDetailedAsync` + `ScheduledTaskDetailDto` — list tasks
     across all folders with exec-action path/arguments and trigger types; tolerant of
     protected/corrupt task definitions.
+  - `IAuthenticodeInspector` + `AuthenticodeInfo` — catalog-aware code-signing check via
+    WinVerifyTrust (correctly trusts catalog-signed Windows/driver components, not just
+    embedded signatures) plus the embedded signer subject when present.
 
 ### Changed
 - **`tools/create-dependency-graph`**: Added C# language support (auto-detects via `.sln` at
