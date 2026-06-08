@@ -121,6 +121,19 @@ public class StartupReportServiceTests
     }
 
     [Fact]
+    public async Task Proxy_parses_proxyenable_stored_as_a_string_dword()
+    {
+        const string internetSettings = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+        var f = new Fakes();
+        f.Registry.Setup(x => x.GetAsync("HKCU", internetSettings, "ProxyEnable", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RegistryValueDto(internetSettings, "ProxyEnable", "1", "String"));   // string, not int
+
+        var report = await f.Build().BuildAsync();
+
+        report.BrowserProxy.Should().Contain(p => p.Hive == "HKCU" && p.ProxyEnable);
+    }
+
+    [Fact]
     public async Task Section_failure_is_isolated_and_other_sections_still_populate()
     {
         var f = new Fakes();
@@ -128,7 +141,7 @@ public class StartupReportServiceTests
             .ThrowsAsync(new InvalidOperationException("boom"));
         f.Lsp.Setup(x => x.Enumerate()).Returns(new[] { new LspProviderDto(1, "MSAFD", @"C:\x.dll") });
 
-        var report = await f.Build().BuildAsync();
+        var report = await f.Build().BuildAsync(includeProcesses: true);
 
         report.Processes.Should().BeEmpty();
         report.Errors.Should().Contain(e => e.StartsWith("processes:"));

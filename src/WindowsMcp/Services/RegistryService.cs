@@ -23,10 +23,19 @@ public sealed class RegistryService : IRegistryService
     {
         ct.ThrowIfCancellationRequested();
         var root = ResolveHive(hive);
-        using var key = root.OpenSubKey(path);
+        // An empty path means the hive root itself; never wrap the predefined base key in `using`.
+        RegistryKey? key = path.Length == 0 ? root : root.OpenSubKey(path);
         if (key is null)
             return Task.FromResult(Array.Empty<RegistryValueDto>());
+        try
+        {
+            return Task.FromResult(EnumerateValues(key, path));
+        }
+        finally { if (path.Length != 0) key.Dispose(); }
+    }
 
+    private static RegistryValueDto[] EnumerateValues(RegistryKey key, string path)
+    {
         var values = key.GetValueNames()
             .Select(name => new RegistryValueDto(
                 path,
@@ -34,13 +43,15 @@ public sealed class RegistryService : IRegistryService
                 key.GetValue(name),
                 key.GetValueKind(name).ToString()))
             .ToArray();
-        return Task.FromResult(values);
+        return values;
     }
 
     public Task<string[]> EnumerateSubKeysAsync(string hive, string path, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         var root = ResolveHive(hive);
+        if (path.Length == 0)
+            return Task.FromResult(root.GetSubKeyNames());   // hive root; do not dispose the base key
         using var key = root.OpenSubKey(path);
         return Task.FromResult(key?.GetSubKeyNames() ?? Array.Empty<string>());
     }

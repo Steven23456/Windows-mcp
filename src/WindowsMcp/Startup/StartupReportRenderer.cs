@@ -14,7 +14,8 @@ public static class StartupReportRenderer
         var sb = new StringBuilder();
         var h = r.Header;
         sb.AppendLine("Windows-mcp Startup Report");
-        sb.AppendLine($"Machine: {h.Machine}   OS: {h.OsVersion}   Elevated: {h.Elevated}   (UTC {h.TimestampUtc:yyyy-MM-dd HH:mm:ss})");
+        sb.AppendLine($"Machine: {h.Machine}   OS: {h.OsVersion}   Elevated: {h.Elevated}   Boot: {h.BootMode}");
+        sb.AppendLine($"User: {h.User}   DefaultBrowser: {h.DefaultBrowser ?? "(unknown)"}   (UTC {h.TimestampUtc:yyyy-MM-dd HH:mm:ss})");
 
         Section(sb, "Processes", r.Processes.Length);
         foreach (var p in r.Processes)
@@ -37,8 +38,10 @@ public static class StartupReportRenderer
             sb.AppendLine($"  {s.Name} ({s.DisplayName}) [{s.Status}/{s.StartType}] -> {s.BinaryPath ?? "(path n/a)"}  {Sig(s.Trusted, s.Signer)}");
 
         Section(sb, "Hosts file", r.Hosts.Length);
-        foreach (var e in r.Hosts)
-            sb.AppendLine($"  {e.Ip}  {e.Host}");
+        foreach (var e in r.Hosts) sb.AppendLine($"  {e.Ip}  {e.Host}");
+
+        Section(sb, "DNS servers", r.Dns.Length);
+        foreach (var e in r.Dns) sb.AppendLine($"  [{e.Adapter}] {e.Server}");
 
         Section(sb, "Winsock LSP", r.Lsp.Length);
         foreach (var e in r.Lsp)
@@ -47,6 +50,38 @@ public static class StartupReportRenderer
         Section(sb, "Shell extensions", r.ShellExtensions.Length);
         foreach (var e in r.ShellExtensions)
             sb.AppendLine($"  [{e.Category}] {e.Clsid} -> {e.Dll ?? "(dll n/a)"}  {Sig(e.Trusted, e.Signer)}");
+
+        Section(sb, "Control Panel applets", r.ControlPanelApplets.Length);
+        foreach (var e in r.ControlPanelApplets)
+            sb.AppendLine($"  [{e.Hive}] {e.Name} -> {e.Path}  {Flag("target", e.TargetExists)} {Sig(e.Trusted, e.Signer)}");
+
+        Section(sb, "Accessibility tools", r.AccessibilityTools.Length);
+        foreach (var e in r.AccessibilityTools)
+            sb.AppendLine($"  {e.Name} -> {e.StartExe ?? "(none)"}  {Flag("target", e.TargetExists)} {Sig(e.Trusted, e.Signer)}");
+
+        Section(sb, "Image File Execution Options", r.ImageFileExecutionOptions.Length);
+        foreach (var e in r.ImageFileExecutionOptions)
+            sb.AppendLine($"  {e.Image} [{e.Kind}] = {e.Value}  {Flag("target", e.TargetExists)} {Sig(e.Trusted, e.Signer)}");
+
+        Section(sb, "Winlogon hooks", r.WinlogonHooks.Length);
+        foreach (var e in r.WinlogonHooks)
+            sb.AppendLine($"  {e.Name} = {e.Value}  {Flag("target", e.TargetExists)} {Sig(e.Trusted, e.Signer)}");
+
+        Section(sb, "AppInit_DLLs", r.AppInitDlls.Length);
+        foreach (var e in r.AppInitDlls)
+            sb.AppendLine($"  [{e.Scope}] {e.Dll}  {Flag("loadEnabled", e.Enabled)} {Flag("target", e.TargetExists)} {Sig(e.Trusted, e.Signer)}");
+
+        Section(sb, "Active Setup", r.ActiveSetup.Length);
+        foreach (var e in r.ActiveSetup)
+            sb.AppendLine($"  [{e.Hive}] {e.Component} -> {e.StubPath}  {Flag("target", e.TargetExists)} {Sig(e.Trusted, e.Signer)}");
+
+        Section(sb, "Browser proxy", r.BrowserProxy.Length);
+        foreach (var e in r.BrowserProxy)
+            sb.AppendLine($"  [{e.Hive}] {Flag("enabled", e.ProxyEnable)} server={e.ProxyServer ?? "(none)"} pac={e.AutoConfigUrl ?? "(none)"}");
+
+        Section(sb, "Trusted/zoned sites", r.TrustedZone.Length);
+        foreach (var e in r.TrustedZone)
+            sb.AppendLine($"  [{e.Hive}] {e.Domain}  zone={e.Zone}");
 
         if (r.Errors.Length > 0)
         {

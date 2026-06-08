@@ -8,5 +8,9 @@ namespace WindowsMcp.Abstractions;
 /// </summary>
 public interface IStartupReportService
 {
-    Task<StartupReportDto> BuildAsync(CancellationToken ct = default);
+    /// <param name="includeProcesses">
+    /// Include the full running-process inventory. Off by default: it is the largest and least
+    /// persistence-relevant section (transient state), and dominates the report size.
+    /// </param>
+    Task<StartupReportDto> BuildAsync(bool includeProcesses = false, CancellationToken ct = default);
 }

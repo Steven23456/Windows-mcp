@@ -1,3 +1,6 @@
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
@@ -7,18 +10,16 @@ namespace WindowsMcp.Services;
 
 /// <summary>
 /// Aggregates persistence/startup data from the registry, task scheduler, services, file
-/// system, Winsock catalog and process list into a single <see cref="StartupReportDto"/>.
-/// Each section is gathered independently; a section that fails records an error and yields
-/// empty rather than failing the whole report.
+/// system, network stack, Winsock catalog and process list into a single
+/// <see cref="StartupReportDto"/>. Each section is gathered independently; a section that
+/// fails records an error and yields empty rather than failing the whole report.
 /// </summary>
 public sealed class StartupReportService : IStartupReportService
 {
     private const string ApprovedRun = "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
     private const string ApprovedFolder = "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\StartupFolder";
+    private const string InternetSettings = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
 
-    // hive, run-key path, matching StartupApproved path (null = no approval gate, e.g. RunOnce).
-    // Explorer records approvals (incl. for 32-bit WOW6432Node Run values) in the single
-    // non-WOW StartupApproved\Run key, so WOW6432Node Run maps to ApprovedRun too.
     private static readonly (string Hive, string KeyPath, string? Approved)[] RunKeys =
     {
         ("HKCU", "Software\\Microsoft\\Windows\\CurrentVersion\\Run", ApprovedRun),
@@ -57,29 +58,54 @@ public sealed class StartupReportService : IStartupReportService
         _shortcuts = shortcuts;
     }
 
-    public async Task<StartupReportDto> BuildAsync(CancellationToken ct = default)
+    public async Task<StartupReportDto> BuildAsync(bool includeProcesses = false, CancellationToken ct = default)
     {
         var errors = new List<string>();
-        var processes = await Safe(() => BuildProcessesAsync(ct), "processes", errors, Array.Empty<ProcessEntry>());
+        var processes = includeProcesses
+            ? await Safe(() => BuildProcessesAsync(ct), "processes", errors, Array.Empty<ProcessEntry>())
+            : Array.Empty<ProcessEntry>();
         var run = await Safe(() => BuildRunEntriesAsync(ct), "run", errors, Array.Empty<RunEntry>());
         var folders = await Safe(() => BuildStartupFoldersAsync(ct), "startup_folders", errors, Array.Empty<StartupFolderEntry>());
         var tasks = await Safe(() => BuildTasksAsync(ct), "scheduled_tasks", errors, Array.Empty<StartupTaskEntry>());
         var services = await Safe(() => BuildServicesAsync(ct), "services", errors, Array.Empty<StartupServiceEntry>());
         var hosts = await Safe(() => BuildHostsAsync(ct), "hosts", errors, Array.Empty<HostsEntry>());
+        var dns = await Safe(() => Task.FromResult(BuildDns()), "dns", errors, Array.Empty<DnsEntry>());
         var lsp = await Safe(() => Task.FromResult(BuildLsp()), "lsp", errors, Array.Empty<LspProviderEntry>());
         var shell = await Safe(() => BuildShellExtensionsAsync(ct), "shell_extensions", errors, Array.Empty<ShellExtensionEntry>());
+        var cpl = await Safe(() => BuildControlPanelAppletsAsync(ct), "control_panel_applets", errors, Array.Empty<ControlPanelAppletEntry>());
+        var ats = await Safe(() => BuildAccessibilityAsync(ct), "accessibility_tools", errors, Array.Empty<AccessibilityToolEntry>());
+        var ifeo = await Safe(() => BuildIfeoAsync(ct), "image_file_execution_options", errors, Array.Empty<IfeoEntry>());
+        var winlogon = await Safe(() => BuildWinlogonAsync(ct), "winlogon_hooks", errors, Array.Empty<WinlogonHookEntry>());
+        var appinit = await Safe(() => BuildAppInitAsync(ct), "appinit_dlls", errors, Array.Empty<AppInitDllEntry>());
+        var activeSetup = await Safe(() => BuildActiveSetupAsync(ct), "active_setup", errors, Array.Empty<ActiveSetupEntry>());
+        var proxy = await Safe(() => BuildProxyAsync(ct), "browser_proxy", errors, Array.Empty<BrowserProxyEntry>());
+        var zone = await Safe(() => BuildTrustedZoneAsync(ct), "trusted_zone", errors, Array.Empty<TrustedZoneEntry>());
 
-        return new StartupReportDto(BuildHeader(), processes, run, folders, tasks, services, hosts, lsp, shell, errors.ToArray());
+        return new StartupReportDto(
+            await BuildHeaderAsync(ct), processes, run, folders, tasks, services, hosts, dns, lsp, shell,
+            cpl, ats, ifeo, winlogon, appinit, activeSetup, proxy, zone, errors.ToArray());
     }
 
-    private static StartupHeader BuildHeader() =>
-        new(Environment.MachineName, Environment.OSVersion.VersionString, IsElevated(), DateTime.UtcNow);
+    // ---- header -------------------------------------------------------------------------
 
-    private (bool Trusted, string? Signer) Sig(string? path)
+    private async Task<StartupHeader> BuildHeaderAsync(CancellationToken ct)
     {
-        var info = _auth.Inspect(path);
-        return (info.Trusted, info.Signer);
+        string bootMode = GetSystemMetrics(SM_CLEANBOOT) switch { 1 => "FailSafe", 2 => "FailSafeWithNetwork", _ => "Normal" };
+        string user = $"{Environment.UserDomainName}\\{Environment.UserName}";
+        string? defaultBrowser = null;
+        try
+        {
+            var v = await _registry.GetAsync("HKCU",
+                "Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\http\\UserChoice", "ProgId", ct);
+            defaultBrowser = v.Data?.ToString();
+        }
+        catch { /* no UserChoice */ }
+
+        return new StartupHeader(Environment.MachineName, Environment.OSVersion.VersionString,
+            IsElevated(), DateTime.UtcNow, bootMode, user, defaultBrowser);
     }
+
+    // ---- processes ----------------------------------------------------------------------
 
     private async Task<ProcessEntry[]> BuildProcessesAsync(CancellationToken ct)
     {
@@ -91,25 +117,48 @@ public sealed class StartupReportService : IStartupReportService
         }).ToArray();
     }
 
+    // ---- run keys (HKCU/HKLM/WOW + per-SID HKU) -----------------------------------------
+
     private async Task<RunEntry[]> BuildRunEntriesAsync(CancellationToken ct)
     {
         var list = new List<RunEntry>();
         foreach (var (hive, keyPath, approvedPath) in RunKeys)
-        {
-            var approved = approvedPath is null
-                ? new Dictionary<string, byte[]?>()
-                : ToFlagMap(await _registry.EnumerateValuesAsync(hive, approvedPath, ct));
+            await AddRunKeyAsync(hive, hive, keyPath, approvedPath, list, ct);
 
-            foreach (var v in await _registry.EnumerateValuesAsync(hive, keyPath, ct))
-            {
-                string command = v.Data?.ToString() ?? string.Empty;
-                bool enabled = !approved.TryGetValue(v.Name, out var flag) || StartupApproval.IsEnabled(flag);
-                var (t, s) = Sig(CommandTarget.ResolveExe(command));
-                list.Add(new RunEntry(hive, keyPath, v.Name, command, enabled, CommandTarget.Exists(command), t, s));
-            }
+        // Per-user hives for other / service accounts (skip the current user — already covered by HKCU).
+        string? currentSid = TryGetCurrentUserSid();
+        foreach (var sid in await _registry.EnumerateSubKeysAsync("HKU", "", ct))
+        {
+            if (sid.EndsWith("_Classes", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!sid.StartsWith("S-1-5-", StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.Equals(sid, currentSid, StringComparison.OrdinalIgnoreCase)) continue;
+
+            await AddRunKeyAsync($"HKU\\{sid}", "HKU",
+                $"{sid}\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                $"{sid}\\{ApprovedRun}", list, ct);
+            await AddRunKeyAsync($"HKU\\{sid}", "HKU",
+                $"{sid}\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce", null, list, ct);
         }
         return list.ToArray();
     }
+
+    private async Task AddRunKeyAsync(string displayHive, string hive, string keyPath, string? approvedPath,
+        List<RunEntry> list, CancellationToken ct)
+    {
+        var approved = approvedPath is null
+            ? new Dictionary<string, byte[]?>()
+            : ToFlagMap(await _registry.EnumerateValuesAsync(hive, approvedPath, ct));
+
+        foreach (var v in await _registry.EnumerateValuesAsync(hive, keyPath, ct))
+        {
+            string command = v.Data?.ToString() ?? string.Empty;
+            bool enabled = !approved.TryGetValue(v.Name, out var flag) || StartupApproval.IsEnabled(flag);
+            var (t, s) = Sig(CommandTarget.ResolveExe(command));
+            list.Add(new RunEntry(displayHive, keyPath, v.Name, command, enabled, CommandTarget.Exists(command), t, s));
+        }
+    }
+
+    // ---- startup folders ----------------------------------------------------------------
 
     private async Task<StartupFolderEntry[]> BuildStartupFoldersAsync(CancellationToken ct)
     {
@@ -126,7 +175,6 @@ public sealed class StartupReportService : IStartupReportService
         List<StartupFolderEntry> list, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(folder)) return;
-
         string[] files;
         try { files = await _fs.ListAsync(folder, ct); }
         catch { return; }
@@ -140,10 +188,11 @@ public sealed class StartupReportService : IStartupReportService
             bool enabled = !approved.TryGetValue(name, out var flag) || StartupApproval.IsEnabled(flag);
             string? target = _shortcuts.ResolveTarget(full);
             var (t, s) = Sig(target);
-            bool targetExists = target is not null && File.Exists(target);
-            list.Add(new StartupFolderEntry(scope, name, target ?? full, enabled, targetExists, t, s));
+            list.Add(new StartupFolderEntry(scope, name, target ?? full, enabled, target is not null && File.Exists(target), t, s));
         }
     }
+
+    // ---- scheduled tasks ----------------------------------------------------------------
 
     private async Task<StartupTaskEntry[]> BuildTasksAsync(CancellationToken ct)
     {
@@ -156,14 +205,15 @@ public sealed class StartupReportService : IStartupReportService
                 x.Equals("Boot", StringComparison.OrdinalIgnoreCase));
             bool targetExists = t.ActionPath is not null && CommandTarget.Exists(t.ActionPath);
             bool missingTarget = t.ActionPath is not null && !targetExists;
-
-            if (!startupTriggered && !missingTarget) continue;   // not startup-relevant
+            if (!startupTriggered && !missingTarget) continue;
 
             var (tr, s) = Sig(t.ActionPath);
             list.Add(new StartupTaskEntry(t.Path, t.State, t.ActionPath, t.ActionArguments, t.Triggers, targetExists, tr, s));
         }
         return list.ToArray();
     }
+
+    // ---- services -----------------------------------------------------------------------
 
     private async Task<StartupServiceEntry[]> BuildServicesAsync(CancellationToken ct)
     {
@@ -177,13 +227,15 @@ public sealed class StartupReportService : IStartupReportService
                 var v = await _registry.GetAsync("HKLM", $"SYSTEM\\CurrentControlSet\\Services\\{s.Name}", "ImagePath", ct);
                 bin = v.Data?.ToString();
             }
-            catch { /* missing ImagePath value/key */ }
+            catch { /* missing ImagePath */ }
 
             var (t, sig) = Sig(CommandTarget.ResolveExe(NormalizeImagePath(bin)));
             list.Add(new StartupServiceEntry(s.Name, s.DisplayName, s.Status, s.StartType, bin, t, sig));
         }
         return list.ToArray();
     }
+
+    // ---- hosts / dns --------------------------------------------------------------------
 
     private async Task<HostsEntry[]> BuildHostsAsync(CancellationToken ct)
     {
@@ -194,7 +246,6 @@ public sealed class StartupReportService : IStartupReportService
         {
             string line = raw.Trim();
             if (line.Length == 0 || line.StartsWith('#')) continue;
-
             var parts = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length < 2) continue;
             for (int i = 1; i < parts.Length; i++)
@@ -206,12 +257,24 @@ public sealed class StartupReportService : IStartupReportService
         return list.ToArray();
     }
 
+    private static DnsEntry[] BuildDns() =>
+        NetworkInterface.GetAllNetworkInterfaces()
+            .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+            .SelectMany(n => n.GetIPProperties().DnsAddresses
+                .Where(a => a.AddressFamily is AddressFamily.InterNetwork or AddressFamily.InterNetworkV6)
+                .Select(a => new DnsEntry(n.Name, a.ToString())))
+            .ToArray();
+
+    // ---- winsock lsp --------------------------------------------------------------------
+
     private LspProviderEntry[] BuildLsp() =>
         _lsp.Enumerate().Select(p =>
         {
             var (t, s) = Sig(p.ProviderPath);
             return new LspProviderEntry(p.CatalogEntryId, p.ProtocolName, p.ProviderPath, t, s);
         }).ToArray();
+
+    // ---- shell extensions ---------------------------------------------------------------
 
     private async Task<ShellExtensionEntry[]> BuildShellExtensionsAsync(CancellationToken ct)
     {
@@ -247,6 +310,195 @@ public sealed class StartupReportService : IStartupReportService
         return new ShellExtensionEntry(category, clsid ?? subKeyName, dll, t, s);
     }
 
+    // ---- control panel applets ----------------------------------------------------------
+
+    private async Task<ControlPanelAppletEntry[]> BuildControlPanelAppletsAsync(CancellationToken ct)
+    {
+        const string key = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Control Panel\\Cpls";
+        var list = new List<ControlPanelAppletEntry>();
+        foreach (var hive in new[] { "HKLM", "HKCU" })
+        {
+            foreach (var v in await _registry.EnumerateValuesAsync(hive, key, ct))
+            {
+                string path = Environment.ExpandEnvironmentVariables((v.Data?.ToString() ?? "").Trim('"'));
+                var (t, s) = Sig(path);
+                list.Add(new ControlPanelAppletEntry(hive, v.Name, path, File.Exists(path), t, s));
+            }
+        }
+        return list.ToArray();
+    }
+
+    // ---- accessibility ATs --------------------------------------------------------------
+
+    private async Task<AccessibilityToolEntry[]> BuildAccessibilityAsync(CancellationToken ct)
+    {
+        const string key = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Accessibility\\ATs";
+        var list = new List<AccessibilityToolEntry>();
+        foreach (var name in await _registry.EnumerateSubKeysAsync("HKLM", key, ct))
+        {
+            string? startExe = null;
+            try { startExe = (await _registry.GetAsync("HKLM", $"{key}\\{name}", "StartExe", ct)).Data?.ToString(); }
+            catch { /* no StartExe */ }
+            string? exe = startExe is null ? null : Environment.ExpandEnvironmentVariables(startExe);
+            var (t, s) = Sig(CommandTarget.ResolveExe(exe));
+            list.Add(new AccessibilityToolEntry(name, exe, exe is not null && CommandTarget.Exists(exe), t, s));
+        }
+        return list.ToArray();
+    }
+
+    // ---- image file execution options ---------------------------------------------------
+
+    private async Task<IfeoEntry[]> BuildIfeoAsync(CancellationToken ct)
+    {
+        var list = new List<IfeoEntry>();
+        foreach (var basePath in new[]
+        {
+            "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options",
+            "SOFTWARE\\WOW6432Node\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options",
+        })
+        {
+            foreach (var image in await _registry.EnumerateSubKeysAsync("HKLM", basePath, ct))
+            {
+                foreach (var kind in new[] { "Debugger", "VerifierDlls" })   // the hijack-relevant values
+                {
+                    string? val = null;
+                    try { val = (await _registry.GetAsync("HKLM", $"{basePath}\\{image}", kind, ct)).Data?.ToString(); }
+                    catch { /* value absent */ }
+                    if (string.IsNullOrEmpty(val)) continue;
+                    var exe = CommandTarget.ResolveExe(val);
+                    var (t, s) = Sig(exe);
+                    list.Add(new IfeoEntry(image, kind, val, CommandTarget.Exists(val), t, s));
+                }
+            }
+        }
+        return list.ToArray();
+    }
+
+    // ---- winlogon hooks -----------------------------------------------------------------
+
+    private async Task<WinlogonHookEntry[]> BuildWinlogonAsync(CancellationToken ct)
+    {
+        const string key = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon";
+        var list = new List<WinlogonHookEntry>();
+        foreach (var name in new[] { "Shell", "Userinit", "Taskman", "VmApplet" })
+        {
+            string? val = null;
+            try { val = (await _registry.GetAsync("HKLM", key, name, ct)).Data?.ToString(); }
+            catch { /* value absent */ }
+            if (string.IsNullOrEmpty(val)) continue;
+            var (t, s) = Sig(CommandTarget.ResolveExe(val));
+            list.Add(new WinlogonHookEntry(name, val, CommandTarget.Exists(val), t, s));
+        }
+        return list.ToArray();
+    }
+
+    // ---- AppInit_DLLs -------------------------------------------------------------------
+
+    private async Task<AppInitDllEntry[]> BuildAppInitAsync(CancellationToken ct)
+    {
+        var list = new List<AppInitDllEntry>();
+        foreach (var (scope, key) in new[]
+        {
+            ("64-bit", "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Windows"),
+            ("WOW6432", "SOFTWARE\\WOW6432Node\\Microsoft\\Windows NT\\CurrentVersion\\Windows"),
+        })
+        {
+            string? dlls = null;
+            int load = 0;
+            try { dlls = (await _registry.GetAsync("HKLM", key, "AppInit_DLLs", ct)).Data?.ToString(); } catch { }
+            try { load = AsInt((await _registry.GetAsync("HKLM", key, "LoadAppInit_DLLs", ct)).Data); } catch { }
+            if (string.IsNullOrWhiteSpace(dlls)) continue;
+
+            foreach (var dll in dlls.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                string resolved = Environment.ExpandEnvironmentVariables(dll);
+                var (t, s) = Sig(resolved);
+                list.Add(new AppInitDllEntry(scope, resolved, load != 0, File.Exists(resolved), t, s));
+            }
+        }
+        return list.ToArray();
+    }
+
+    // ---- active setup -------------------------------------------------------------------
+
+    private async Task<ActiveSetupEntry[]> BuildActiveSetupAsync(CancellationToken ct)
+    {
+        var list = new List<ActiveSetupEntry>();
+        // HKLM is the usual location, but per-user HKCU entries are also an attacker vector.
+        foreach (var (hive, basePath) in new[]
+        {
+            ("HKLM", "SOFTWARE\\Microsoft\\Active Setup\\Installed Components"),
+            ("HKLM", "SOFTWARE\\WOW6432Node\\Microsoft\\Active Setup\\Installed Components"),
+            ("HKCU", "SOFTWARE\\Microsoft\\Active Setup\\Installed Components"),
+            ("HKCU", "SOFTWARE\\WOW6432Node\\Microsoft\\Active Setup\\Installed Components"),
+        })
+        {
+            foreach (var comp in await _registry.EnumerateSubKeysAsync(hive, basePath, ct))
+            {
+                string? stub = await DefaultValueOrAsync(hive, $"{basePath}\\{comp}", "StubPath", ct);
+                if (string.IsNullOrWhiteSpace(stub)) continue;
+                string expanded = Environment.ExpandEnvironmentVariables(stub);
+                var (t, s) = Sig(CommandTarget.ResolveExe(expanded));
+                list.Add(new ActiveSetupEntry(hive, comp, expanded, CommandTarget.Exists(expanded), t, s));
+            }
+        }
+        return list.ToArray();
+    }
+
+    // ---- browser proxy ------------------------------------------------------------------
+
+    private async Task<BrowserProxyEntry[]> BuildProxyAsync(CancellationToken ct)
+    {
+        var list = new List<BrowserProxyEntry>();
+        foreach (var hive in new[] { "HKCU", "HKLM" })
+        {
+            bool enable = false; string? server = null, pac = null;
+            try { enable = AsInt((await _registry.GetAsync(hive, InternetSettings, "ProxyEnable", ct)).Data) != 0; } catch { }
+            try { server = (await _registry.GetAsync(hive, InternetSettings, "ProxyServer", ct)).Data?.ToString(); } catch { }
+            try { pac = (await _registry.GetAsync(hive, InternetSettings, "AutoConfigURL", ct)).Data?.ToString(); } catch { }
+            if (enable || !string.IsNullOrEmpty(server) || !string.IsNullOrEmpty(pac))
+                list.Add(new BrowserProxyEntry(hive, enable, server, pac));
+        }
+        return list.ToArray();
+    }
+
+    // ---- trusted zone -------------------------------------------------------------------
+
+    private async Task<TrustedZoneEntry[]> BuildTrustedZoneAsync(CancellationToken ct)
+    {
+        var list = new List<TrustedZoneEntry>();
+        foreach (var hive in new[] { "HKCU", "HKLM" })
+        {
+            string domainsKey = $"{InternetSettings}\\ZoneMap\\Domains";
+            foreach (var domain in await _registry.EnumerateSubKeysAsync(hive, domainsKey, ct))
+            {
+                await AddZoneAsync(hive, $"{domainsKey}\\{domain}", domain, list, ct);
+                foreach (var sub in await _registry.EnumerateSubKeysAsync(hive, $"{domainsKey}\\{domain}", ct))
+                    await AddZoneAsync(hive, $"{domainsKey}\\{domain}\\{sub}", $"{sub}.{domain}", list, ct);
+            }
+        }
+        return list.ToArray();
+    }
+
+    private async Task AddZoneAsync(string hive, string key, string label, List<TrustedZoneEntry> list, CancellationToken ct)
+    {
+        foreach (var v in await _registry.EnumerateValuesAsync(hive, key, ct))
+        {
+            int zone = AsInt(v.Data);
+            // 1 = Local intranet, 2 = Trusted sites (non-default placements worth surfacing).
+            if (zone is 1 or 2)
+                list.Add(new TrustedZoneEntry(hive, $"{v.Name}://{label}", zone == 2 ? "Trusted" : "LocalIntranet"));
+        }
+    }
+
+    // ---- shared helpers -----------------------------------------------------------------
+
+    private (bool Trusted, string? Signer) Sig(string? path)
+    {
+        var info = _auth.Inspect(path);
+        return (info.Trusted, info.Signer);
+    }
+
     private async Task<string?> ResolveClsidDllAsync(string? clsid, CancellationToken ct)
     {
         if (!LooksLikeGuid(clsid)) return null;
@@ -265,8 +517,27 @@ public sealed class StartupReportService : IStartupReportService
         return vals.FirstOrDefault(v => v.Name == "(default)")?.Data?.ToString();
     }
 
+    private async Task<string?> DefaultValueOrAsync(string hive, string path, string valueName, CancellationToken ct)
+    {
+        try
+        {
+            var v = await _registry.GetAsync(hive, path, valueName, ct);
+            return v.Data?.ToString();
+        }
+        catch { return null; }
+    }
+
     private static Dictionary<string, byte[]?> ToFlagMap(RegistryValueDto[] vals) =>
         vals.ToDictionary(v => v.Name, v => v.Data is byte[] b ? b : null, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Reads a registry value as an int whether it came back boxed as int/long or a string DWORD.</summary>
+    private static int AsInt(object? data) => data switch
+    {
+        int i => i,
+        long l => (int)l,
+        string s => int.TryParse(s, out var n) ? n : 0,
+        _ => 0,
+    };
 
     private static string? NormalizeImagePath(string? p) =>
         string.IsNullOrEmpty(p) ? p : (p.StartsWith("\\??\\") ? p[4..] : p);
@@ -284,9 +555,20 @@ public sealed class StartupReportService : IStartupReportService
         catch { return false; }
     }
 
+    private static string? TryGetCurrentUserSid()
+    {
+        try { using var id = WindowsIdentity.GetCurrent(); return id.User?.Value; }
+        catch { return null; }
+    }
+
     private static async Task<T> Safe<T>(Func<Task<T>> build, string section, List<string> errors, T fallback)
     {
         try { return await build(); }
         catch (Exception ex) { errors.Add($"{section}: {ex.GetType().Name}: {ex.Message}"); return fallback; }
     }
+
+    private const int SM_CLEANBOOT = 67;
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
 }

@@ -79,25 +79,20 @@ public class StartupReportRendererTests
     [Fact]
     public void Render_includes_header_section_titles_and_entries()
     {
-        var dto = new StartupReportDto(
-            new StartupHeader("ZBOOK", "Windows 11", true, new DateTime(2026, 6, 7, 0, 0, 0, DateTimeKind.Utc)),
-            Processes: new[] { new ProcessEntry(123, "foo", "C:\\foo.exe", 10, true, null) },
-            RunEntries: new[] { new RunEntry("HKCU", "Software\\...\\Run", "Zoom", "zoom.exe", false, true, false, null) },
-            StartupFolders: Array.Empty<StartupFolderEntry>(),
-            ScheduledTasks: Array.Empty<StartupTaskEntry>(),
-            Services: Array.Empty<StartupServiceEntry>(),
-            Hosts: Array.Empty<HostsEntry>(),
-            Lsp: Array.Empty<LspProviderEntry>(),
-            ShellExtensions: Array.Empty<ShellExtensionEntry>(),
-            Errors: new[] { "lsp: boom" });
+        var dto = ReportFixtures.Empty(
+            processes: new[] { new ProcessEntry(123, "foo", "C:\\foo.exe", 10, true, null) },
+            run: new[] { new RunEntry("HKCU", "Software\\...\\Run", "Zoom", "zoom.exe", false, true, false, null) },
+            errors: new[] { "lsp: boom" });
 
         var text = StartupReportRenderer.Render(dto);
 
         text.Should().Contain("Windows-mcp Startup Report");
         text.Should().Contain("Elevated: True");
+        text.Should().Contain("Boot: Normal");                       // enriched header
         text.Should().Contain("== Processes (1) ==");
         text.Should().Contain("Zoom = zoom.exe");
         text.Should().Contain("enabled=N");
+        text.Should().Contain("== Image File Execution Options (0) =="); // a new section renders
         text.Should().Contain("== Errors (1) ==").And.Contain("lsp: boom");
     }
 }

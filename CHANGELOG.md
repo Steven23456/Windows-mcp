@@ -3,6 +3,21 @@
 ## [Unreleased]
 
 ### Added
+- **`startup_report` coverage expansion** (from a HiJackThis-vs-tool gap comparison) — new
+  sections, each signer-annotated where file-backed: **DNS servers**, **per-user `HKU\<SID>`
+  Run/RunOnce** entries, **Control Panel applets**, **Accessibility-AT `StartExe` hooks**,
+  **Image File Execution Options** (`Debugger`/`VerifierDlls`), **Winlogon hooks**
+  (`Shell`/`Userinit`/`Taskman`/`VmApplet`), **AppInit_DLLs**, **Active Setup `StubPath`**
+  (HKLM + HKCU), **browser proxy** (ProxyEnable/ProxyServer/PAC), and **Trusted/zoned sites**.
+  Header now also reports boot mode, signed-in user, and default browser. IFEO/Winlogon/
+  AppInit/Active Setup are persistence vectors neither HiJackThis nor the prior report covered.
+  - **Size controls:** `startup_report(includeProcesses=false, format=json|text|both)`. The
+    process inventory (largest, least persistence-relevant section) is now opt-in, and the
+    default `json` format avoids the duplicated text rendering — keeping the default response
+    small instead of spilling to a file.
+  - `IRegistryService.EnumerateSubKeysAsync`/`EnumerateValuesAsync` now explicitly enumerate
+    the hive root for an empty path (used for `HKU\<SID>` discovery) without disposing the
+    predefined base key.
 - **`startup_report` MCP tool** — a HiJackThis-style, read-only boot/persistence report
   (structured JSON + a readable text rendering). Covers running processes, Run/RunOnce keys
   with effective enabled/disabled state, Startup folders, startup-relevant scheduled tasks,

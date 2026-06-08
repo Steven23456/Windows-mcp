@@ -83,4 +83,14 @@ public class RegistryServiceTests : IDisposable
         var subs = await svc.EnumerateSubKeysAsync("HKCU", "Software\\DoesNotExistXYZ123");
         subs.Should().BeEmpty();
     }
+
+    [Fact]
+    public async Task EnumerateSubKeys_for_empty_path_lists_the_hive_root()
+    {
+        // The startup report enumerates HKU\<SID> via an empty root path; ensure that works
+        // (and does not throw from disposing the predefined base key).
+        var svc = new RegistryService();
+        var subs = await svc.EnumerateSubKeysAsync("HKCU", "");
+        subs.Should().Contain("Software");
+    }
 }
