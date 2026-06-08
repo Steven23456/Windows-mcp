@@ -261,7 +261,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 | Method | Description |
 |--------|-------------|
-| `StartupReport` | HiJackThis-style boot/persistence report (JSON + text rendering): processes, Run/RunOnce keys with effective enabled state, Startup folders, startup-relevant scheduled tasks, auto-start services, hosts file, Winsock LSP, shell extensions; every file-backed entry carries a catalog-aware code-signing trust flag |
+| `StartupReport` | HiJackThis-style boot/persistence report. Sections: Run/RunOnce (all hives + per-user SIDs, enabled-state decoded), Startup folders, scheduled tasks, auto-start services, hosts, DNS, Winsock LSP, shell extensions, Control Panel applets (registry + `System32`/`SysWOW64` `*.cpl`), accessibility ATs, Image File Execution Options, Winlogon hooks, AppInit_DLLs, Active Setup, browser proxy, trusted-zone. Catalog-aware code-signing trust on every file-backed entry. `format`: `summary` (default, inline) / `json` / `text` / `both`; `includeProcesses` opt-in |
 
 ---
 

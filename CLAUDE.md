@@ -46,7 +46,23 @@ dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained `
 - **`[Trait("Category","UIAutomation")]` tests need an interactive desktop** with the target
   app (Notepad fixture) in the **foreground**; they fail under headless/background runs and on
   Win11's modern Notepad (documented in `NotepadFixture.cs`). Exclude them when running headless.
+  `ClipboardServiceTests` is similarly environment-flaky (TextCopy `OpenClipboard` access-denied
+  when another app holds the clipboard) — a lone clipboard failure under `Category!=UIAutomation`
+  is environmental, not a regression.
 - Other tests are unit (`Category=Unit`, mocked) or read-only integration (`Category=Integration`).
+
+### Testing a change against the LIVE MCP server (Claude Code)
+
+The plugin runs `dist/WindowsMcp.exe`. Two gotchas when re-deploying a rebuilt exe:
+1. **The running server locks `dist/WindowsMcp.exe`**, and Claude Code auto-restarts a killed
+   server — so you can't just overwrite it. Windows allows **renaming a running image**: rename
+   `WindowsMcp.exe` aside (e.g. `WindowsMcp.old1.exe`), then `dotnet publish -o dist`.
+2. **`/reload-plugins` does NOT restart a server whose `.mcp.json` is unchanged** — it keeps the
+   existing process (serving the OLD exe). To force a fresh process, bump the `_RETRY` env value
+   in `~/.claude/local-marketplace/windows-mcp/.mcp.json`, then `/reload-plugins`. Confirm via the
+   server process `StartTime` being later than the publish time.
+- Orphaned `WindowsMcp.exe` instances + `dist/WindowsMcp.old*.exe` accumulate across reloads;
+  `/kill-plugins` then `/reload-plugins` clears them.
 
 ## Conventions (enforced)
 

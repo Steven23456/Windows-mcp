@@ -62,6 +62,11 @@
     (`IAuthenticodeInspector`, `ILspEnumerator`, `IShortcutResolver`, `IStartupReportService`).
 
 ### Changed
+- **Docs**: added `todo.md` (cross-session tracker: ready/deferred items, out-of-scope decisions,
+  known environmental test flakes); added a "testing a change against the live MCP server" section
+  to `CLAUDE.md` (rename-running-exe to republish; bump `.mcp.json` `_RETRY` to force a reload);
+  refreshed the `startup_report` description in `docs/architecture/OVERVIEW.md` + `COMPONENTS.md`
+  to list all sections, the `summary` default, and the `includeProcesses`/`format` parameters.
 - **Docs**: refreshed for `startup_report` — tool/class/service counts (50→51 tools, 12→13
   tool classes, 20→24 services) across `docs/architecture/*` and `README.md`; added the new
   tool, services, interfaces, and DTOs; updated the `IRegistryService` / `ITaskSchedulerService`

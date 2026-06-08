@@ -178,7 +178,7 @@ Windows-MCP exposes **51 MCP tools** across 13 tool classes:
 ### Startup Tools (`StartupTools` — 1 tool)
 | Tool | Purpose |
 |------|---------|
-| `StartupReport` | HiJackThis-style boot/persistence report (processes, Run keys with enabled state, Startup folders, startup-relevant scheduled tasks, auto-start services, hosts file, Winsock LSP, shell extensions), every file-backed entry annotated with a catalog-aware code-signing trust flag; JSON + text |
+| `StartupReport` | HiJackThis-style boot/persistence report. Sections: Run/RunOnce (all hives incl. per-user SIDs, with enabled state), Startup folders, scheduled tasks, auto-start services, hosts, DNS, Winsock LSP, shell extensions, Control Panel applets (registry + `System32`/`SysWOW64` `*.cpl`), accessibility ATs, Image File Execution Options, Winlogon hooks, AppInit_DLLs, Active Setup, browser proxy, trusted-zone sites. Every file-backed entry has a catalog-aware code-signing trust flag. `format=summary` (default — counts + only flagged entries, inline) \| `json` \| `text` \| `both`; `includeProcesses` opt-in |
 
 ## Core NuGet Dependencies
 
