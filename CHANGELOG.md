@@ -12,7 +12,8 @@
   - New `format=summary` (now the **default**): section counts + only the flagged entries
     (untrusted code-signing or missing target) + proxy/trusted-zone — a compact, inline-able
     triage view instead of the full report spilling to a file. `format=json|text|both` still
-    return the complete report.
+    return the complete report. COM-handler scheduled tasks (no exec action) are not flagged
+    as missing/untrusted (they have no executable to verify).
 - **`startup_report` coverage expansion** (from a HiJackThis-vs-tool gap comparison) — new
   sections, each signer-annotated where file-backed: **DNS servers**, **per-user `HKU\<SID>`
   Run/RunOnce** entries, **Control Panel applets**, **Accessibility-AT `StartExe` hooks**,

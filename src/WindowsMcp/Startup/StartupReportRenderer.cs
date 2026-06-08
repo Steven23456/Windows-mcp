@@ -124,7 +124,10 @@ public static class StartupReportRenderer
         foreach (var e in r.Processes) Consider(e.Trusted, true, $"[process] {e.Name} {e.Path}");
         foreach (var e in r.RunEntries) Consider(e.Trusted, e.TargetExists, $"[run] {e.Hive} {e.Name} = {e.Command}");
         foreach (var e in r.StartupFolders) Consider(e.Trusted, e.TargetExists, $"[startupFolder] {e.Scope} {e.FileName} -> {e.Target}");
-        foreach (var e in r.ScheduledTasks) Consider(e.Trusted, e.TargetExists, $"[task] {e.Path} -> {e.ActionPath}");
+        // Tasks with no exec action (COM-handler tasks) have no executable to verify — skip them
+        // rather than flagging benign Microsoft handler tasks as missing/untrusted.
+        foreach (var e in r.ScheduledTasks)
+            if (!string.IsNullOrEmpty(e.ActionPath)) Consider(e.Trusted, e.TargetExists, $"[task] {e.Path} -> {e.ActionPath}");
         foreach (var e in r.Services) Consider(e.Trusted, true, $"[service] {e.Name} -> {e.BinaryPath}");
         foreach (var e in r.Lsp) Consider(e.Trusted, true, $"[lsp] #{e.CatalogEntryId} {e.ProtocolName} -> {e.ProviderPath}");
         foreach (var e in r.ShellExtensions) Consider(e.Trusted, true, $"[shellExt] {e.Category} {e.Clsid} -> {e.Dll}");

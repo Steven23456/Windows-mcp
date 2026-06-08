@@ -126,4 +126,20 @@ public class StartupReportRendererTests
         text.Should().Contain("Sketchy").And.Contain("UNTRUSTED");
         text.Should().NotContain("Trusted = good.exe");   // trusted entries are omitted from the summary
     }
+
+    [Fact]
+    public void RenderSummary_does_not_flag_tasks_without_an_exec_action()
+    {
+        // COM-handler tasks (null ActionPath) have no executable to verify — they must not
+        // pollute the flagged list even though they carry no signer.
+        var dto = ReportFixtures.Empty(tasks: new[]
+        {
+            new StartupTaskEntry("\\MS\\ComHandlerTask", "Ready", null, null, new[] { "Logon" }, true, false, null),
+        });
+
+        var text = StartupReportRenderer.RenderSummary(dto);
+
+        text.Should().Contain("== Flagged: untrusted or missing target (0) ==");
+        text.Should().NotContain("ComHandlerTask");
+    }
 }

@@ -9,6 +9,7 @@ internal static class ReportFixtures
         StartupHeader? header = null,
         ProcessEntry[]? processes = null,
         RunEntry[]? run = null,
+        StartupTaskEntry[]? tasks = null,
         string[]? errors = null) =>
         new(
             header ?? new StartupHeader("ZBOOK", "Windows 11", true,
@@ -16,7 +17,7 @@ internal static class ReportFixtures
             processes ?? Array.Empty<ProcessEntry>(),
             run ?? Array.Empty<RunEntry>(),
             Array.Empty<StartupFolderEntry>(),
-            Array.Empty<StartupTaskEntry>(),
+            tasks ?? Array.Empty<StartupTaskEntry>(),
             Array.Empty<StartupServiceEntry>(),
             Array.Empty<HostsEntry>(),
             Array.Empty<DnsEntry>(),

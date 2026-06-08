@@ -121,6 +121,21 @@ public class StartupReportServiceTests
     }
 
     [Fact]
+    public async Task Task_with_no_exec_action_is_not_marked_missing_target()
+    {
+        var f = new Fakes();
+        f.Tasks.Setup(x => x.ListDetailedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new[]
+        {
+            // COM-handler logon task: no ExecAction => ActionPath null.
+            new ScheduledTaskDetailDto("ComTask", "\\MS\\ComTask", "Ready", null, null, new[] { "Logon" }),
+        });
+
+        var report = await f.Build().BuildAsync();
+
+        report.ScheduledTasks.Single(t => t.Path == "\\MS\\ComTask").TargetExists.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task ControlPanel_scans_System32_for_cpl_files_not_just_the_registry()
     {
         // Registry Cpls key is empty (default mock), so any applets come from the filesystem scan.

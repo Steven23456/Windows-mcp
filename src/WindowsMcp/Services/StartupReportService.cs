@@ -203,8 +203,10 @@ public sealed class StartupReportService : IStartupReportService
             bool startupTriggered = t.Triggers.Any(x =>
                 x.Equals("Logon", StringComparison.OrdinalIgnoreCase) ||
                 x.Equals("Boot", StringComparison.OrdinalIgnoreCase));
-            bool targetExists = t.ActionPath is not null && CommandTarget.Exists(t.ActionPath);
-            bool missingTarget = t.ActionPath is not null && !targetExists;
+            bool hasAction = !string.IsNullOrWhiteSpace(t.ActionPath);
+            // No exec action (COM-handler task) => nothing to locate, so not "missing".
+            bool targetExists = !hasAction || CommandTarget.Exists(t.ActionPath!);
+            bool missingTarget = hasAction && !targetExists;
             if (!startupTriggered && !missingTarget) continue;
 
             var (tr, s) = Sig(CommandTarget.ResolveFullPath(t.ActionPath));
