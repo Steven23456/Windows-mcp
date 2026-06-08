@@ -121,6 +121,23 @@ public class StartupReportServiceTests
     }
 
     [Fact]
+    public async Task Accessibility_reports_only_real_exe_ATs_not_setting_codes()
+    {
+        const string atKey = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Accessibility\\ATs";
+        var f = new Fakes();
+        f.Registry.Setup(x => x.EnumerateSubKeysAsync("HKLM", atKey, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { "narrator", "animations" });
+        f.Registry.Setup(x => x.GetAsync("HKLM", $"{atKey}\\narrator", "StartExe", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RegistryValueDto(atKey, "StartExe", "C:\\Windows\\System32\\Narrator.exe", "String"));
+        f.Registry.Setup(x => x.GetAsync("HKLM", $"{atKey}\\animations", "StartExe", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RegistryValueDto(atKey, "StartExe", "13", "String"));   // setting code, not an exe
+
+        var report = await f.Build().BuildAsync();
+
+        report.AccessibilityTools.Select(a => a.Name).Should().BeEquivalentTo("narrator");
+    }
+
+    [Fact]
     public async Task Proxy_parses_proxyenable_stored_as_a_string_dword()
     {
         const string internetSettings = "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";

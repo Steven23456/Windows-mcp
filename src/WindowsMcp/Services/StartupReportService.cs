@@ -153,7 +153,7 @@ public sealed class StartupReportService : IStartupReportService
         {
             string command = v.Data?.ToString() ?? string.Empty;
             bool enabled = !approved.TryGetValue(v.Name, out var flag) || StartupApproval.IsEnabled(flag);
-            var (t, s) = Sig(CommandTarget.ResolveExe(command));
+            var (t, s) = Sig(CommandTarget.ResolveFullPath(command));
             list.Add(new RunEntry(displayHive, keyPath, v.Name, command, enabled, CommandTarget.Exists(command), t, s));
         }
     }
@@ -207,7 +207,7 @@ public sealed class StartupReportService : IStartupReportService
             bool missingTarget = t.ActionPath is not null && !targetExists;
             if (!startupTriggered && !missingTarget) continue;
 
-            var (tr, s) = Sig(t.ActionPath);
+            var (tr, s) = Sig(CommandTarget.ResolveFullPath(t.ActionPath));
             list.Add(new StartupTaskEntry(t.Path, t.State, t.ActionPath, t.ActionArguments, t.Triggers, targetExists, tr, s));
         }
         return list.ToArray();
@@ -229,7 +229,7 @@ public sealed class StartupReportService : IStartupReportService
             }
             catch { /* missing ImagePath */ }
 
-            var (t, sig) = Sig(CommandTarget.ResolveExe(NormalizeImagePath(bin)));
+            var (t, sig) = Sig(CommandTarget.ResolveFullPath(NormalizeImagePath(bin)));
             list.Add(new StartupServiceEntry(s.Name, s.DisplayName, s.Status, s.StartType, bin, t, sig));
         }
         return list.ToArray();
@@ -339,9 +339,16 @@ public sealed class StartupReportService : IStartupReportService
             string? startExe = null;
             try { startExe = (await _registry.GetAsync("HKLM", $"{key}\\{name}", "StartExe", ct)).Data?.ToString(); }
             catch { /* no StartExe */ }
-            string? exe = startExe is null ? null : Environment.ExpandEnvironmentVariables(startExe);
-            var (t, s) = Sig(CommandTarget.ResolveExe(exe));
-            list.Add(new AccessibilityToolEntry(name, exe, exe is not null && CommandTarget.Exists(exe), t, s));
+
+            // Most ATs subkeys are accessibility *feature settings* whose StartExe is a numeric
+            // code, not a launchable program. Only report entries whose StartExe is an actual exe.
+            if (string.IsNullOrWhiteSpace(startExe) ||
+                !(startExe.Contains('\\') || startExe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            string exe = Environment.ExpandEnvironmentVariables(startExe);
+            var (t, s) = Sig(CommandTarget.ResolveFullPath(exe));
+            list.Add(new AccessibilityToolEntry(name, exe, CommandTarget.Exists(exe), t, s));
         }
         return list.ToArray();
     }
@@ -365,8 +372,7 @@ public sealed class StartupReportService : IStartupReportService
                     try { val = (await _registry.GetAsync("HKLM", $"{basePath}\\{image}", kind, ct)).Data?.ToString(); }
                     catch { /* value absent */ }
                     if (string.IsNullOrEmpty(val)) continue;
-                    var exe = CommandTarget.ResolveExe(val);
-                    var (t, s) = Sig(exe);
+                    var (t, s) = Sig(CommandTarget.ResolveFullPath(val));
                     list.Add(new IfeoEntry(image, kind, val, CommandTarget.Exists(val), t, s));
                 }
             }
@@ -386,7 +392,7 @@ public sealed class StartupReportService : IStartupReportService
             try { val = (await _registry.GetAsync("HKLM", key, name, ct)).Data?.ToString(); }
             catch { /* value absent */ }
             if (string.IsNullOrEmpty(val)) continue;
-            var (t, s) = Sig(CommandTarget.ResolveExe(val));
+            var (t, s) = Sig(CommandTarget.ResolveFullPath(val));
             list.Add(new WinlogonHookEntry(name, val, CommandTarget.Exists(val), t, s));
         }
         return list.ToArray();
@@ -438,7 +444,7 @@ public sealed class StartupReportService : IStartupReportService
                 string? stub = await DefaultValueOrAsync(hive, $"{basePath}\\{comp}", "StubPath", ct);
                 if (string.IsNullOrWhiteSpace(stub)) continue;
                 string expanded = Environment.ExpandEnvironmentVariables(stub);
-                var (t, s) = Sig(CommandTarget.ResolveExe(expanded));
+                var (t, s) = Sig(CommandTarget.ResolveFullPath(expanded));
                 list.Add(new ActiveSetupEntry(hive, comp, expanded, CommandTarget.Exists(expanded), t, s));
             }
         }

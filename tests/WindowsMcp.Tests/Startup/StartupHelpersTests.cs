@@ -71,6 +71,19 @@ public class CommandTargetTests
         CommandTarget.Exists("powershell.exe").Should().BeTrue();
         CommandTarget.Exists("definitely_missing_wmcp_bare.exe").Should().BeFalse();
     }
+
+    [Fact]
+    public void ResolveFullPath_turns_a_bare_name_into_an_absolute_existing_path()
+    {
+        // Needed so a signature check on a bare command (e.g. Winlogon Shell = "explorer.exe")
+        // can locate the real file instead of failing on a relative path.
+        var p = CommandTarget.ResolveFullPath("explorer.exe");
+
+        p.Should().NotBeNull();
+        Path.IsPathRooted(p!).Should().BeTrue();
+        File.Exists(p).Should().BeTrue();
+        CommandTarget.ResolveFullPath("definitely_missing_wmcp_zzz.exe").Should().BeNull();
+    }
 }
 
 [Trait("Category", "Unit")]

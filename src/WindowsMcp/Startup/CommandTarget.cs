@@ -39,24 +39,35 @@ public static class CommandTarget
     /// (this matters for tasks that store a bare program name, e.g. "powershell.exe", which
     /// lives in System32\WindowsPowerShell\v1.0, not System32 itself).
     /// </summary>
-    public static bool Exists(string? command)
+    public static bool Exists(string? command) => ResolveFullPath(command) is not null;
+
+    /// <summary>
+    /// Resolve a command to the absolute path of its executable on disk, or null if it cannot be
+    /// located. Rooted paths are returned when they exist; a bare name is searched against the
+    /// system directory and PATH. Use this (not <see cref="ResolveExe"/>) before a signature check —
+    /// the Authenticode inspector needs a real, locatable path, so a bare "explorer.exe" must be
+    /// resolved to "C:\Windows\explorer.exe" first.
+    /// </summary>
+    public static string? ResolveFullPath(string? command)
     {
         string? exe = ResolveExe(command);
-        if (string.IsNullOrEmpty(exe)) return false;
+        if (string.IsNullOrEmpty(exe)) return null;
 
-        if (Path.IsPathRooted(exe)) return File.Exists(exe);
+        if (Path.IsPathRooted(exe)) return File.Exists(exe) ? exe : null;
 
         string withExe = exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? exe : exe + ".exe";
         foreach (var dir in SearchDirectories())
         {
             try
             {
-                if (File.Exists(Path.Combine(dir, exe)) || File.Exists(Path.Combine(dir, withExe)))
-                    return true;
+                string p1 = Path.Combine(dir, exe);
+                if (File.Exists(p1)) return p1;
+                string p2 = Path.Combine(dir, withExe);
+                if (File.Exists(p2)) return p2;
             }
             catch { /* malformed PATH entry */ }
         }
-        return false;
+        return null;
     }
 
     private static IEnumerable<string> SearchDirectories()

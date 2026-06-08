@@ -78,6 +78,15 @@
   `WaitFor` polling loop, DI resolution at startup, `AssertElement` state checks.
 
 ### Fixed
+- **`startup_report` signer resolution for bare-name targets** (found via e2e): entries whose
+  command is a bare program name (e.g. Winlogon `Shell = explorer.exe`) reported `Trusted=false`
+  because the signature check ran against a relative path. Added `CommandTarget.ResolveFullPath`
+  (PATH-resolve to an absolute path) and use it before every signature check; `CommandTarget.Exists`
+  is now a thin wrapper over it.
+- **`startup_report` accessibility section noise** (found via e2e): `Accessibility\ATs` on Win11
+  contains ~26 feature-setting subkeys whose `StartExe` is a numeric code, not a program. The
+  section now reports only entries whose `StartExe` is an actual executable path (the real AT
+  tools), matching HiJackThis's behavior.
 - **`AuthenticodeInspector` catalog verification** (found via `startup_report` end-to-end
   validation): catalog-signed Microsoft components (e.g. `cscui.dll`, `ntshrui.dll`, most
   shell-extension DLLs and many services) were reported `Trusted=false` — the exact
