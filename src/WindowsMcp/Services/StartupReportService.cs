@@ -316,13 +316,37 @@ public sealed class StartupReportService : IStartupReportService
     {
         const string key = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Control Panel\\Cpls";
         var list = new List<ControlPanelAppletEntry>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Registered applets (HKLM/HKCU "Control Panel\Cpls").
         foreach (var hive in new[] { "HKLM", "HKCU" })
         {
             foreach (var v in await _registry.EnumerateValuesAsync(hive, key, ct))
             {
                 string path = Environment.ExpandEnvironmentVariables((v.Data?.ToString() ?? "").Trim('"'));
                 var (t, s) = Sig(path);
-                list.Add(new ControlPanelAppletEntry(hive, v.Name, path, File.Exists(path), t, s));
+                if (seen.Add(path))
+                    list.Add(new ControlPanelAppletEntry(hive, v.Name, path, File.Exists(path), t, s));
+            }
+        }
+
+        // Filesystem-resident applets that HiJackThis catches but the Cpls key omits
+        // (e.g. vendor .cpl files dropped straight into System32 / SysWOW64).
+        foreach (var (source, dir) in new[]
+        {
+            ("System32", Environment.GetFolderPath(Environment.SpecialFolder.System)),
+            ("SysWOW64", Environment.GetFolderPath(Environment.SpecialFolder.SystemX86)),
+        })
+        {
+            string[] cpls;
+            try { cpls = Directory.GetFiles(dir, "*.cpl"); }
+            catch { continue; }
+
+            foreach (var path in cpls)
+            {
+                if (!seen.Add(path)) continue;
+                var (t, s) = Sig(path);
+                list.Add(new ControlPanelAppletEntry(source, Path.GetFileName(path), path, true, t, s));
             }
         }
         return list.ToArray();

@@ -21,20 +21,22 @@ public sealed class StartupTools
         "hooks, Image File Execution Options, Winlogon hooks, AppInit_DLLs, Active Setup, " +
         "browser proxy and trusted-zone sites. Every file-backed entry carries a catalog-aware " +
         "code-signing trust flag. Processes are excluded unless includeProcesses=true (they " +
-        "dominate size). format: json (default) | text | both.")]
+        "dominate size). format: summary (default — section counts + only flagged/untrusted/" +
+        "missing-target entries, fits inline) | json (full structured) | text (full rendering) | both.")]
     public async Task<string> StartupReport(
         [Description("Include the full running-process inventory (large). Default false.")] bool includeProcesses = false,
-        [Description("Output format: json | text | both. Default json.")] string format = "json",
+        [Description("Output format: summary | json | text | both. Default summary.")] string format = "summary",
         CancellationToken ct = default)
     {
         var dto = await _report.BuildAsync(includeProcesses, ct);
 
         return format.ToLowerInvariant() switch
         {
+            "summary" => StartupReportRenderer.RenderSummary(dto),
             "text" => StartupReportRenderer.Render(dto),
             "both" => JsonSerializer.Serialize(dto) + "\n\n" + StartupReportRenderer.Render(dto),
             "json" => JsonSerializer.Serialize(dto),
-            _ => throw new ArgumentException($"Unknown format '{format}'; expected json|text|both"),
+            _ => throw new ArgumentException($"Unknown format '{format}'; expected summary|json|text|both"),
         };
     }
 }

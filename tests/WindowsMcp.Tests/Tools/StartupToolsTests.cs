@@ -20,23 +20,33 @@ public class StartupToolsTests
     }
 
     [Fact]
-    public async Task StartupReport_defaults_to_json_only()
+    public async Task StartupReport_defaults_to_compact_summary()
     {
         var (tools, _) = Make();
         var result = await tools.StartupReport();
 
-        result.Should().Contain("\"Header\"");                       // structured JSON
-        result.Should().NotContain("Windows-mcp Startup Report");    // no text rendering by default
+        result.Should().Contain("Windows-mcp Startup Report — SUMMARY");
+        result.Should().Contain("== Section counts ==");
+        result.Should().NotContain("\"Header\"");   // not the full JSON dump
     }
 
     [Fact]
-    public async Task StartupReport_text_format_renders_human_readable()
+    public async Task StartupReport_json_format_emits_full_structured_json()
+    {
+        var (tools, _) = Make();
+        var result = await tools.StartupReport(format: "json");
+
+        result.Should().Contain("\"Header\"").And.Contain("\"ActiveSetup\"");
+        result.Should().NotContain("SUMMARY");
+    }
+
+    [Fact]
+    public async Task StartupReport_text_format_renders_full_human_readable()
     {
         var (tools, _) = Make();
         var result = await tools.StartupReport(format: "text");
 
-        result.Should().Contain("Windows-mcp Startup Report");
-        result.Should().Contain("== DNS servers (0) ==");           // a new section appears
+        result.Should().Contain("== DNS servers (0) ==");   // a full-render section
         result.Should().NotContain("\"Header\"");
     }
 

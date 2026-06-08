@@ -121,6 +121,16 @@ public class StartupReportServiceTests
     }
 
     [Fact]
+    public async Task ControlPanel_scans_System32_for_cpl_files_not_just_the_registry()
+    {
+        // Registry Cpls key is empty (default mock), so any applets come from the filesystem scan.
+        var report = await new Fakes().Build().BuildAsync();
+
+        report.ControlPanelApplets.Should().Contain(a =>
+            a.Source == "System32" && a.Path.EndsWith(".cpl", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task Accessibility_reports_only_real_exe_ATs_not_setting_codes()
     {
         const string atKey = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Accessibility\\ATs";

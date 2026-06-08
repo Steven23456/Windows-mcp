@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- **`startup_report` Control Panel parity + `summary` format** (the two follow-ups from the
+  HiJackThis comparison):
+  - Control Panel applets are now also discovered by scanning `System32` / `SysWOW64` for
+    `*.cpl` files (deduped against the `Cpls` registry key), catching vendor applets dropped
+    straight into the system dirs that the registry key omits (e.g. Xerox `xrxscn`). The DTO
+    field `ControlPanelAppletEntry.Hive` is renamed `Source` (registry hive or directory).
+  - New `format=summary` (now the **default**): section counts + only the flagged entries
+    (untrusted code-signing or missing target) + proxy/trusted-zone — a compact, inline-able
+    triage view instead of the full report spilling to a file. `format=json|text|both` still
+    return the complete report.
 - **`startup_report` coverage expansion** (from a HiJackThis-vs-tool gap comparison) — new
   sections, each signer-annotated where file-backed: **DNS servers**, **per-user `HKU\<SID>`
   Run/RunOnce** entries, **Control Panel applets**, **Accessibility-AT `StartExe` hooks**,

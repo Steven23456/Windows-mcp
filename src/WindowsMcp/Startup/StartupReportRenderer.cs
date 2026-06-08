@@ -53,7 +53,7 @@ public static class StartupReportRenderer
 
         Section(sb, "Control Panel applets", r.ControlPanelApplets.Length);
         foreach (var e in r.ControlPanelApplets)
-            sb.AppendLine($"  [{e.Hive}] {e.Name} -> {e.Path}  {Flag("target", e.TargetExists)} {Sig(e.Trusted, e.Signer)}");
+            sb.AppendLine($"  [{e.Source}] {e.Name} -> {e.Path}  {Flag("target", e.TargetExists)} {Sig(e.Trusted, e.Signer)}");
 
         Section(sb, "Accessibility tools", r.AccessibilityTools.Length);
         foreach (var e in r.AccessibilityTools)
@@ -86,6 +86,73 @@ public static class StartupReportRenderer
         if (r.Errors.Length > 0)
         {
             Section(sb, "Errors", r.Errors.Length);
+            foreach (var e in r.Errors) sb.AppendLine($"  {e}");
+        }
+
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>
+    /// A compact, inline-friendly view: per-section counts plus only the entries that warrant
+    /// attention (untrusted code-signing or a missing target), and any proxy / trusted-zone
+    /// configuration. Keeps the response small instead of dumping every entry.
+    /// </summary>
+    public static string RenderSummary(StartupReportDto r)
+    {
+        var sb = new StringBuilder();
+        var h = r.Header;
+        sb.AppendLine("Windows-mcp Startup Report — SUMMARY");
+        sb.AppendLine($"Machine: {h.Machine}   OS: {h.OsVersion}   Elevated: {h.Elevated}   Boot: {h.BootMode}");
+        sb.AppendLine($"User: {h.User}   DefaultBrowser: {h.DefaultBrowser ?? "(unknown)"}   (UTC {h.TimestampUtc:yyyy-MM-dd HH:mm:ss})");
+
+        sb.AppendLine();
+        sb.AppendLine("== Section counts ==");
+        sb.AppendLine($"  processes={r.Processes.Length} run={r.RunEntries.Length} startupFolders={r.StartupFolders.Length} " +
+                      $"tasks={r.ScheduledTasks.Length} services={r.Services.Length} hosts={r.Hosts.Length} dns={r.Dns.Length}");
+        sb.AppendLine($"  lsp={r.Lsp.Length} shellExt={r.ShellExtensions.Length} controlPanel={r.ControlPanelApplets.Length} " +
+                      $"accessibility={r.AccessibilityTools.Length} ifeo={r.ImageFileExecutionOptions.Length} winlogon={r.WinlogonHooks.Length}");
+        sb.AppendLine($"  appInitDlls={r.AppInitDlls.Length} activeSetup={r.ActiveSetup.Length} proxy={r.BrowserProxy.Length} " +
+                      $"trustedZone={r.TrustedZone.Length} errors={r.Errors.Length}");
+
+        var flagged = new List<string>();
+        void Consider(bool trusted, bool targetExists, string line)
+        {
+            if (trusted && targetExists) return;
+            string note = (targetExists ? "" : "MISSING ") + (trusted ? "" : "UNTRUSTED");
+            flagged.Add($"{line}  [{note.Trim()}]");
+        }
+        foreach (var e in r.Processes) Consider(e.Trusted, true, $"[process] {e.Name} {e.Path}");
+        foreach (var e in r.RunEntries) Consider(e.Trusted, e.TargetExists, $"[run] {e.Hive} {e.Name} = {e.Command}");
+        foreach (var e in r.StartupFolders) Consider(e.Trusted, e.TargetExists, $"[startupFolder] {e.Scope} {e.FileName} -> {e.Target}");
+        foreach (var e in r.ScheduledTasks) Consider(e.Trusted, e.TargetExists, $"[task] {e.Path} -> {e.ActionPath}");
+        foreach (var e in r.Services) Consider(e.Trusted, true, $"[service] {e.Name} -> {e.BinaryPath}");
+        foreach (var e in r.Lsp) Consider(e.Trusted, true, $"[lsp] #{e.CatalogEntryId} {e.ProtocolName} -> {e.ProviderPath}");
+        foreach (var e in r.ShellExtensions) Consider(e.Trusted, true, $"[shellExt] {e.Category} {e.Clsid} -> {e.Dll}");
+        foreach (var e in r.ControlPanelApplets) Consider(e.Trusted, e.TargetExists, $"[cpl] {e.Source} {e.Name} -> {e.Path}");
+        foreach (var e in r.AccessibilityTools) Consider(e.Trusted, e.TargetExists, $"[at] {e.Name} -> {e.StartExe}");
+        foreach (var e in r.ImageFileExecutionOptions) Consider(e.Trusted, e.TargetExists, $"[ifeo] {e.Image} [{e.Kind}] = {e.Value}");
+        foreach (var e in r.WinlogonHooks) Consider(e.Trusted, e.TargetExists, $"[winlogon] {e.Name} = {e.Value}");
+        foreach (var e in r.AppInitDlls) Consider(e.Trusted, e.TargetExists, $"[appinit] {e.Scope} {e.Dll}");
+        foreach (var e in r.ActiveSetup) Consider(e.Trusted, e.TargetExists, $"[activeSetup] {e.Hive} {e.Component} -> {e.StubPath}");
+
+        sb.AppendLine();
+        sb.AppendLine($"== Flagged: untrusted or missing target ({flagged.Count}) ==");
+        foreach (var f in flagged) sb.AppendLine($"  {f}");
+
+        if (r.BrowserProxy.Length > 0 || r.TrustedZone.Length > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"== Network / zone (review) ({r.BrowserProxy.Length + r.TrustedZone.Length}) ==");
+            foreach (var e in r.BrowserProxy)
+                sb.AppendLine($"  [proxy] {e.Hive} enabled={(e.ProxyEnable ? "Y" : "N")} server={e.ProxyServer ?? "(none)"} pac={e.AutoConfigUrl ?? "(none)"}");
+            foreach (var e in r.TrustedZone)
+                sb.AppendLine($"  [zone] {e.Hive} {e.Domain} = {e.Zone}");
+        }
+
+        if (r.Errors.Length > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"== Errors ({r.Errors.Length}) ==");
             foreach (var e in r.Errors) sb.AppendLine($"  {e}");
         }
 

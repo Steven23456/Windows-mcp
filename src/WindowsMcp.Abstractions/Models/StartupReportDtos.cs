@@ -56,9 +56,13 @@ public record LspProviderEntry(
 public record ShellExtensionEntry(
     string Category, string Clsid, string? Dll, bool Trusted, string? Signer);
 
-/// <summary>A registered Control Panel applet (.cpl) — a rogue-applet persistence vector.</summary>
+/// <summary>
+/// A Control Panel applet (.cpl) — a rogue-applet persistence vector. <see cref="Source"/> is
+/// the registry hive it was registered under (HKLM/HKCU) or the directory it was found in
+/// (System32/SysWOW64) for filesystem-discovered applets.
+/// </summary>
 public record ControlPanelAppletEntry(
-    string Hive, string Name, string Path, bool TargetExists, bool Trusted, string? Signer);
+    string Source, string Name, string Path, bool TargetExists, bool Trusted, string? Signer);
 
 /// <summary>An Accessibility Technology "StartExe" hook (utilman/AT-style hijack vector).</summary>
 public record AccessibilityToolEntry(

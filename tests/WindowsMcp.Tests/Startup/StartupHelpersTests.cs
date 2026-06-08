@@ -108,4 +108,22 @@ public class StartupReportRendererTests
         text.Should().Contain("== Image File Execution Options (0) =="); // a new section renders
         text.Should().Contain("== Errors (1) ==").And.Contain("lsp: boom");
     }
+
+    [Fact]
+    public void RenderSummary_lists_only_flagged_entries_plus_counts()
+    {
+        var dto = ReportFixtures.Empty(run: new[]
+        {
+            new RunEntry("HKCU", "...\\Run", "Trusted", "good.exe", true, true, true, "CN=MS"),  // not flagged
+            new RunEntry("HKLM", "...\\Run", "Sketchy", "bad.exe", true, true, false, null),     // untrusted -> flagged
+        });
+
+        var text = StartupReportRenderer.RenderSummary(dto);
+
+        text.Should().Contain("SUMMARY");
+        text.Should().Contain("== Section counts ==").And.Contain("run=2");
+        text.Should().Contain("== Flagged: untrusted or missing target (1) ==");
+        text.Should().Contain("Sketchy").And.Contain("UNTRUSTED");
+        text.Should().NotContain("Trusted = good.exe");   // trusted entries are omitted from the summary
+    }
 }
