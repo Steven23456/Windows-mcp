@@ -21,17 +21,37 @@ public sealed class ScreenTools
     [McpServerTool, Description("Capture a screenshot of the screen or a region.")]
     public async Task<string> Screenshot(
         [Description("Region as 'x,y,w,h' or null for full primary display")] string? region = null,
-        [Description("Image format: png or jpeg")] string format = "png")
+        [Description("Image format: png or jpeg")] string format = "png",
+        [Description("Output mode: 'file' (default) saves to %TEMP%\\WindowsMcp and returns the file path — context-efficient; 'base64' returns inline base64 data")] string output = "file")
     {
         var r = ParseRegion(region);
         var fmt = format.ToLowerInvariant() == "jpeg" ? ImageFormat.Jpeg : ImageFormat.Png;
         var result = await _screenshot.CaptureAsync(r, fmt);
+
+        if (output.Equals("base64", StringComparison.OrdinalIgnoreCase))
+        {
+            return JsonSerializer.Serialize(new
+            {
+                width = result.Width,
+                height = result.Height,
+                format = result.Format.ToString().ToLowerInvariant(),
+                data_base64 = Convert.ToBase64String(result.Bytes)
+            });
+        }
+
+        // Default "file" mode: persist to temp dir, return path (no base64 in context).
+        var ext = result.Format == ImageFormat.Jpeg ? "jpg" : "png";
+        var dir = Path.Combine(Path.GetTempPath(), "WindowsMcp");
+        Directory.CreateDirectory(dir);
+        var fileName = $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss_fff}.{ext}";
+        var filePath = Path.Combine(dir, fileName);
+        await File.WriteAllBytesAsync(filePath, result.Bytes);
         return JsonSerializer.Serialize(new
         {
+            path = filePath,
             width = result.Width,
             height = result.Height,
-            format = result.Format.ToString().ToLowerInvariant(),
-            data_base64 = Convert.ToBase64String(result.Bytes)
+            format = result.Format.ToString().ToLowerInvariant()
         });
     }
 

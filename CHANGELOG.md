@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+- **`Screenshot` tool defaults to `output="file"` instead of inline base64** — saves image to
+  `%TEMP%\WindowsMcp\screenshot_<timestamp>.<ext>` and returns the file path. A full-screen
+  1080p PNG was embedding ~240k tokens of base64 directly in the conversation history; the file
+  path response is ~4 tokens. Pass `output="base64"` to restore the previous inline behavior.
+
 ### Added
 - **`startup_report` Control Panel parity + `summary` format** (the two follow-ups from the
   HiJackThis comparison):
