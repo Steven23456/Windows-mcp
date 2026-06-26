@@ -30,6 +30,16 @@ public class StorageServiceTests
         => StorageService.BuildScript(null, includeUsage: false).Should().NotContain("-eq '");
 
     [Fact]
+    public void BuildScript_gates_physical_disks_and_smart_behind_includeUsage()
+    {
+        var s = StorageService.BuildScript(null, includeUsage: false);
+        s.Should().Contain("if ($includeUsage)");          // physical-disk/SMART section is gated
+        s.Should().Contain("Get-PhysicalDisk");            // present in the script, but behind the gate
+        s.Should().Contain("Get-Disk | Sort-Object");      // fast default path (disks) is always present
+        s.Should().Contain("busType");                     // disks carry bus type for the fast path
+    }
+
+    [Fact]
     public async Task GetHealthAsync_parses_report_json()
     {
         const string json = """

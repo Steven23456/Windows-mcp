@@ -26,11 +26,18 @@ public sealed class StorageService : IStorageService
     public async Task<StorageHealthReport> GetHealthAsync(
         string? driveLetter = null,
         bool includeUsage = false,
-        int timeoutSeconds = 30,
+        int timeoutSeconds = 45,
         CancellationToken ct = default)
     {
         var budget = Math.Clamp(timeoutSeconds, 5, 300);
         var script = BuildScript(driveLetter, includeUsage);
+
+        // This script is large and multi-statement. powershell.exe -Command - (which
+        // IPowerShellService uses, reading the command from stdin) silently returns EMPTY
+        // output for such scripts — but the SAME script runs correctly as a .ps1 FILE.
+        // So stage it to a temp file and invoke that file via a one-liner (which IS reliable
+        // over the -Command - stdin path). Verified live: -File works, -Command - <script> = 0 bytes.
+        var tempScript = Path.Combine(Path.GetTempPath(), $"windowsmcp-storage-{Guid.NewGuid():N}.ps1");
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(budget));
@@ -38,12 +45,17 @@ public sealed class StorageService : IStorageService
         PSResult result;
         try
         {
-            result = await _ps.RunAsync(script, cts.Token);
+            await File.WriteAllTextAsync(tempScript, script, cts.Token);
+            result = await _ps.RunAsync($"& '{tempScript}'", cts.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // The caller didn't cancel, so this is our budget timer — a drive likely wedged the shell.
             return EmptyReport($"storage query exceeded the {budget}s budget and was aborted (a drive may be unresponsive)");
+        }
+        finally
+        {
+            try { if (File.Exists(tempScript)) File.Delete(tempScript); } catch { /* best effort */ }
         }
 
         var json = result.Stdout?.Trim();
@@ -93,8 +105,11 @@ $notes = New-Object System.Collections.ArrayList
 $includeUsage = {{includeLit}}
 function Add-Note($m) { [void]$notes.Add($m) }
 
-# --- Physical disks + reliability (SMART) ---
+# --- Physical disks + reliability (SMART) — OPT-IN: Get-PhysicalDisk + SMART wake sleeping
+#     USB/SD devices and can take a long time (or wedge under repeated aborts), so this runs
+#     only when include_usage is set. The default path below stays on fast storage-stack metadata. ---
 $physicalDisks = @()
+if ($includeUsage) {
 try {
   $physicalDisks = Get-PhysicalDisk | ForEach-Object {
     $pd = $_; $rel = $null
@@ -122,14 +137,18 @@ try {
     }
   }
 } catch { Add-Note "physicalDisks query failed: $($_.Exception.Message)" }
+} else {
+  Add-Note "physical disks + SMART omitted (pass include_usage=true to collect them; that wakes sleeping drives and is slower)"
+}
 
-# --- Disks (online/offline) ---
+# --- Disks (online/offline) — FAST storage-stack metadata; carries model, bus type, health ---
 $disks = @()
 try {
   $disks = Get-Disk | Sort-Object Number | ForEach-Object {
     [ordered]@{
       number            = [int]$_.Number
       friendlyName      = $_.FriendlyName
+      busType           = "$($_.BusType)"
       operationalStatus = "$($_.OperationalStatus)"
       healthStatus      = "$($_.HealthStatus)"
       isOffline         = [bool]$_.IsOffline

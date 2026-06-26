@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`storage_health` returned empty / timed out against the live MCP server** — two defects that
+  only end-to-end testing could surface (unit tests mock the shell):
+  1. The large generated script silently produced **no output over `powershell -Command -`
+     (stdin)**, the path `IPowerShellService` uses — though it ran fine as a `.ps1` file (proven
+     head-to-head: 0 bytes via stdin vs 4714 bytes via `-File`). Fix: `StorageService` now stages
+     the script to a temp `.ps1` and invokes it as a file (a reliable one-liner over stdin),
+     cleaning up after.
+  2. `Get-PhysicalDisk` + per-disk SMART **wake sleeping USB/SD devices** and can take minutes
+     (or wedge the storage stack under repeated aborts), blowing any fixed timeout. Fix: physical
+     disks + SMART reliability are now **opt-in** under `include_usage`; the **default** path stays
+     on fast storage-stack metadata that never wakes a device — `Get-Disk` (now also carrying
+     **bus type**), `Get-Partition`, `MSFT_Volume`, and the event log. Default budget 30→45s.
+
 ## [0.3.0] - 2026-06-25
 
 ### Added
