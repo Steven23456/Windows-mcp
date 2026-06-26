@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Fixed
+- **PowerShell gate could be held forever by a runaway script, wedging every PS-backed tool** — the
+  shared no-timeout `SemaphoreSlim` serializes all PowerShell calls, so one stuck child (e.g. an
+  accidental infinite loop) blocked audio/notification/firewall/disk/system/storage indefinitely.
+  `PowerShellService` now runs every call under a linked CTS with a generous 10-minute backstop
+  (longer than any legitimate caller budget) that tears the child down. Also fixed an orphan window:
+  the process-kill cancellation callback is now registered **before** the stdin write, so a cancel
+  mid-write still kills the child instead of leaking it. New tests cover both the backstop and
+  caller-token cancellation.
 - **`file_search find_duplicates` aborted entirely on one locked/denied file** — `HashFile` threw
   `IOException`/`UnauthorizedAccessException` out of the LINQ grouping, killing the whole search.
   It now returns null for unreadable files and they're skipped from dedup (covered by a new test

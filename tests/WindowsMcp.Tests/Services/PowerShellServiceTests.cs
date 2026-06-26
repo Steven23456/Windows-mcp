@@ -44,6 +44,32 @@ public class PowerShellServiceTests
         Func<Task> act = () => svc.RunAsync("'never reached'");
         await act.Should().ThrowAsync<ObjectDisposedException>();
     }
+
+    [Fact]
+    public async Task RunAsync_backstop_timeout_tears_down_a_runaway_script()
+    {
+        // Short backstop; a 30s sleep would hang the gate forever without the timeout.
+        using var svc = new PowerShellService(NullLogger.Instance, TimeSpan.FromMilliseconds(500));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        Func<Task> act = () => svc.RunAsync("Start-Sleep -Seconds 30");
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(15));
+    }
+
+    [Fact]
+    public async Task RunAsync_honors_caller_cancellation_token()
+    {
+        using var svc = new PowerShellService(NullLogger.Instance);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        Func<Task> act = () => svc.RunAsync("Start-Sleep -Seconds 30", cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(15));
+    }
 }
 
 internal sealed class NullLogger : Microsoft.Extensions.Logging.ILogger
