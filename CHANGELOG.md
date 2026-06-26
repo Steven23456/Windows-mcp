@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Fixed
+- **`power_action` (shutdown/reboot) reported success on a privilege-blocked no-op** — `ExitWindowsEx`
+  silently fails unless `SeShutdownPrivilege` is *enabled* in the process token, and the return value
+  was ignored, so the tool returned "executed" while nothing happened. Now enables the privilege via
+  `AdjustTokenPrivileges` before shutdown/reboot, and **every** power action checks its native return
+  value and throws a `Win32Exception` (or a clear "privilege not held" error) on failure.
 - **`get_table` always returned empty column headers** — `UIAutomationService.GetTableAsync`
   allocated `headers[cols]` but never populated it (GridPattern has no header concept). Now reads
   column headers from the element's TablePattern (`ColumnHeaders`) when supported.
