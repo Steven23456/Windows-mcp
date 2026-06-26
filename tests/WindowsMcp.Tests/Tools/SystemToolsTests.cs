@@ -15,7 +15,8 @@ public class SystemToolsTests
         IPowerService? power = null,
         INotificationService? notification = null,
         IAudioService? audio = null,
-        ISecurityService? security = null)
+        ISecurityService? security = null,
+        IReliabilityService? reliability = null)
     {
         return new SystemTools(
             wmi          ?? new Mock<IWmiService>().Object,
@@ -23,7 +24,8 @@ public class SystemToolsTests
             power        ?? new Mock<IPowerService>().Object,
             notification ?? new Mock<INotificationService>().Object,
             audio        ?? new Mock<IAudioService>().Object,
-            security     ?? new Mock<ISecurityService>().Object);
+            security     ?? new Mock<ISecurityService>().Object,
+            reliability  ?? new Mock<IReliabilityService>().Object);
     }
 
     [Fact]

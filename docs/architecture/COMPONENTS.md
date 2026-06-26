@@ -71,6 +71,7 @@ public static async Task<int> Main(string[] args)
 | `ISecurityService` | `SecurityService` |
 | `IFirewallService` | `FirewallService` |
 | `ICertStoreService` | `CertStoreService` |
+| `IReliabilityService` | `ReliabilityService` |
 | `IEnvService` | `EnvService` |
 | `IPowerService` | `PowerService` |
 | `INotificationService` | `NotificationService` |
@@ -171,20 +172,21 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 ---
 
-### `SystemTools` — 7 tools
+### `SystemTools` — 8 tools
 `src/WindowsMcp/Tools/SystemTools.cs`
 
-**Injected:** `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`
+**Injected:** `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`
 
 | Method | Description |
 |--------|-------------|
-| `SystemInfo` | CPU, RAM, OS version, hostname |
-| `Service` | List, start, stop, restart Windows services |
-| `ScheduledTask` | Create/read/update/delete scheduled tasks |
-| `EventLog` | Query Windows Event Log by source/level/count |
+| `SystemInfo` | WMI system info by category (os/memory/disk/gpu/battery) |
+| `Audio` | Get/set volume or mute/unmute |
+| `Notification` | Show a Windows toast notification |
+| `SecurityAudit` | Firewall/Defender/UAC/BitLocker posture snapshot |
+| `Reliability` | Crash minidumps + recent reliability failure records |
 | `WmiQuery` | Execute arbitrary WMI queries |
-| `Env` | Get or set environment variables |
-| `PowerAction` | Sleep, hibernate, lock workstation, sign out |
+| `Env` | Get, set, or list environment variables (secret-name redaction) |
+| `PowerAction` | Shutdown, reboot, logoff, lock, sleep, hibernate |
 
 ---
 

@@ -14,6 +14,7 @@ public sealed class SystemTools
     private readonly INotificationService _notification;
     private readonly IAudioService _audio;
     private readonly ISecurityService _security;
+    private readonly IReliabilityService _reliability;
 
     public SystemTools(
         IWmiService wmi,
@@ -21,7 +22,8 @@ public sealed class SystemTools
         IPowerService power,
         INotificationService notification,
         IAudioService audio,
-        ISecurityService security)
+        ISecurityService security,
+        IReliabilityService reliability)
     {
         _wmi = wmi;
         _env = env;
@@ -29,6 +31,7 @@ public sealed class SystemTools
         _notification = notification;
         _audio = audio;
         _security = security;
+        _reliability = reliability;
     }
 
     private static readonly Dictionary<string, string> WmiClassMap = new(StringComparer.OrdinalIgnoreCase)
@@ -98,6 +101,15 @@ public sealed class SystemTools
     {
         var audit = await _security.AuditAsync(ct);
         return JsonSerializer.Serialize(audit);
+    }
+
+    [McpServerTool, Description("Report system stability: crash minidumps in C:\\Windows\\Minidump (name, size, time) plus recent reliability failure records (app/OS/hardware failures). Useful for investigating BSODs and instability.")]
+    public async Task<string> Reliability(
+        [Description("Max reliability failure records to return (default 50)")] int max_records = 50,
+        CancellationToken ct = default)
+    {
+        var report = await _reliability.GetAsync(max_records, ct);
+        return JsonSerializer.Serialize(report);
     }
 
     [McpServerTool, Description("Run a raw WMI query. class_name: WMI class, e.g. Win32_OperatingSystem.")]

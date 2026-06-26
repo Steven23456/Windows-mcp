@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- **`reliability` tool** — system stability snapshot: crash minidumps in `C:\Windows\Minidump`
+  (name/size/time) plus recent `Win32_ReliabilityRecords` failure entries (app/OS/hardware), for
+  BSOD/instability investigation. New `IReliabilityService` (in `SystemTools`).
 - **`cert_store` tool** — enumerate a Windows certificate store (LocalMachine/CurrentUser × Root/CA/My/…)
   via native `X509Store`; each cert reports subject/issuer/thumbprint/expiry and self-signed + expired
   flags. Surfaces rogue/MITM root CAs (a self-signed cert in Root). New `ICertStoreService`.

@@ -76,6 +76,7 @@ internal static class Program
         builder.Services.AddSingleton<ISecurityService, SecurityService>();
         builder.Services.AddSingleton<IFirewallService, FirewallService>();
         builder.Services.AddSingleton<ICertStoreService, CertStoreService>();
+        builder.Services.AddSingleton<IReliabilityService, ReliabilityService>();
         builder.Services.AddSingleton<IEnvService, EnvService>();
         builder.Services.AddSingleton<IPowerService, PowerService>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
