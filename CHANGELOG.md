@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+- **`CancellationToken` now plumbed from tools into the service layer** for `powershell`, the
+  process/service/scheduled-task/event-log tools, and the file tools — the services already
+  accepted a token but the tools dropped it, so MCP-framework cancellation never reached a running
+  operation (a long `powershell`/`file_search` couldn't be cancelled). (`DiskTools`/`NetworkTools`/
+  `SystemTools` get the same treatment as part of their service refactors.)
+
 ### Fixed
 - **PowerShell gate could be held forever by a runaway script, wedging every PS-backed tool** — the
   shared no-timeout `SemaphoreSlim` serializes all PowerShell calls, so one stuck child (e.g. an
