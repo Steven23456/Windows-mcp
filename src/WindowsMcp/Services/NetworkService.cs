@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
@@ -9,11 +10,14 @@ namespace WindowsMcp.Services;
 
 public sealed class NetworkService : INetworkService
 {
+    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
     private readonly ILogger _log;
+    private readonly IPowerShellService _ps;
 
-    public NetworkService(ILogger<NetworkService> log)
+    public NetworkService(ILogger<NetworkService> log, IPowerShellService ps)
     {
         _log = log;
+        _ps = ps;
     }
 
     public Task<NetworkAdapterDto[]> ListAdaptersAsync(CancellationToken ct = default)
@@ -35,32 +39,34 @@ public sealed class NetworkService : INetworkService
         return Task.FromResult(adapters);
     }
 
-    public Task<PortInfoDto[]> ListPortsAsync(CancellationToken ct = default)
+    public async Task<PortInfoDto[]> ListPortsAsync(CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested();
-        var props = IPGlobalProperties.GetIPGlobalProperties();
-
-        var listeners = props.GetActiveTcpListeners()
-            .Select(ep => new PortInfoDto(
-                LocalAddress: ep.Address.ToString(),
-                LocalPort: ep.Port,
-                RemoteAddress: null,
-                RemotePort: null,
-                State: "Listen"))
-            .ToArray();
-
-        var connections = props.GetActiveTcpConnections()
-            .Select(conn => new PortInfoDto(
-                LocalAddress: conn.LocalEndPoint.Address.ToString(),
-                LocalPort: conn.LocalEndPoint.Port,
-                RemoteAddress: conn.RemoteEndPoint.Address.ToString(),
-                RemotePort: conn.RemoteEndPoint.Port,
-                State: conn.State.ToString()))
-            .ToArray();
-
-        var combined = listeners.Concat(connections).ToArray();
-        return Task.FromResult(combined);
+        // The managed IPGlobalProperties API gives endpoints but NOT the owning PID — the single
+        // most useful field for "what is this machine talking to and who owns it". Get-NetTCPConnection
+        // provides it (plus state) uniformly for IPv4 and IPv6; we join PID -> process name in-shell.
+        var result = await _ps.RunAsync(PortsScript, ct);
+        return ParsePorts(result.Stdout);
     }
+
+    internal static PortInfoDto[] ParsePorts(string? stdout)
+    {
+        var json = stdout?.Trim();
+        if (string.IsNullOrEmpty(json)) return Array.Empty<PortInfoDto>();
+        if (json[0] == '[')
+            return JsonSerializer.Deserialize<PortInfoDto[]>(json, JsonOpts) ?? Array.Empty<PortInfoDto>();
+        var single = JsonSerializer.Deserialize<PortInfoDto>(json, JsonOpts);
+        return single is null ? Array.Empty<PortInfoDto>() : new[] { single };
+    }
+
+    // Must be a SINGLE pipeline statement: a multi-statement script (e.g. a leading
+    // `$map = @{}` prelude) silently returns empty over `powershell -Command -` stdin — the same
+    // failure mode storage_health hit. ProcessName is resolved per-row via Get-Process.
+    private const string PortsScript =
+        "Get-NetTCPConnection | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort," +
+        "@{n='State';e={$_.State.ToString()}}," +
+        "@{n='OwningPid';e={[int]$_.OwningProcess}}," +
+        "@{n='ProcessName';e={(Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName}} " +
+        "| ConvertTo-Json -Depth 2";
 
     public async Task<PingResult> PingAsync(string host, CancellationToken ct = default)
     {

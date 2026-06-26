@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
+using WindowsMcp.Abstractions;
 using WindowsMcp.Services;
 using Xunit;
 
@@ -9,7 +10,8 @@ namespace WindowsMcp.Tests.Services;
 [Trait("Category", "Integration")]
 public class NetworkServiceTests
 {
-    private static NetworkService Make() => new(new Mock<ILogger<NetworkService>>().Object);
+    private static NetworkService Make(IPowerShellService? ps = null)
+        => new(new Mock<ILogger<NetworkService>>().Object, ps ?? new Mock<IPowerShellService>().Object);
 
     [Fact]
     public async Task ListAdaptersAsync_returns_at_least_the_loopback()
@@ -20,11 +22,36 @@ public class NetworkServiceTests
     }
 
     [Fact]
-    public async Task ListPortsAsync_returns_a_non_null_array()
+    public async Task ListPortsAsync_returns_ports_with_owning_pid()
     {
-        var ports = await Make().ListPortsAsync();
+        // Real PowerShell so Get-NetTCPConnection actually runs.
+        var ports = await Make(new PowerShellService(NullLogger.Instance)).ListPortsAsync();
         ports.Should().NotBeNull();
         ports.Should().OnlyContain(p => p.LocalPort >= 0);
+        // At least one endpoint should carry an owning PID (the enrichment this tool adds).
+        ports.Should().Contain(p => p.OwningPid.HasValue && p.OwningPid > 0);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ParsePorts_reads_pid_and_process_name()
+    {
+        var ports = NetworkService.ParsePorts(
+            """[{"LocalAddress":"0.0.0.0","LocalPort":135,"RemoteAddress":"0.0.0.0","RemotePort":0,"State":"Listen","OwningPid":1044,"ProcessName":"svchost"}]""");
+
+        ports.Should().ContainSingle();
+        ports[0].LocalPort.Should().Be(135);
+        ports[0].OwningPid.Should().Be(1044);
+        ports[0].ProcessName.Should().Be("svchost");
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public void ParsePorts_handles_single_object_and_blank()
+    {
+        NetworkService.ParsePorts("""{"LocalAddress":"::","LocalPort":445,"RemoteAddress":"::","RemotePort":0,"State":"Listen","OwningPid":4,"ProcessName":"System"}""")
+            .Should().ContainSingle().Which.OwningPid.Should().Be(4);
+        NetworkService.ParsePorts("").Should().BeEmpty();
     }
 
     [Fact]

@@ -11,6 +11,12 @@
   and IOC lookups (the internal hasher was MD5-only and unexposed). Tool count 52 → 54.
 
 ### Changed
+- **`network ports` now reports the owning process (PID + name)** — `PortInfoDto` gained
+  `OwningPid`/`ProcessName`, the single most useful field for "who owns this connection". The
+  managed `IPGlobalProperties` API doesn't expose it, so `ListPortsAsync` now uses
+  `Get-NetTCPConnection` (uniform IPv4/IPv6, with state), kept as a single-pipeline script so it
+  survives the `-Command -` stdin path (a multi-statement version returns empty — the storage_health
+  failure class). `ParsePorts` is white-box unit-tested.
 - **Test coverage added for previously-untested services** — `WebService` SSRF guard
   (`IsPrivateAddress` widened to internal for white-box testing: loopback / RFC1918 / link-local /
   unique-local / IPv4-mapped-IPv6 evasion + public-address allow, plus loopback-URL and malformed-URL
