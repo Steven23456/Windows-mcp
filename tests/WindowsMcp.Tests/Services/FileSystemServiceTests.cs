@@ -57,6 +57,31 @@ public class FileSystemServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task HashFileAsync_computes_known_sha256()
+    {
+        var svc = new FileSystemService();
+        var path = Path.Combine(_tmp, "abc.txt");
+        await File.WriteAllTextAsync(path, "abc");
+
+        var hash = await svc.HashFileAsync(path, "sha256");
+
+        // Canonical SHA-256("abc").
+        hash.Should().Be("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+
+    [Fact]
+    public async Task HashFileAsync_rejects_unknown_algorithm()
+    {
+        var svc = new FileSystemService();
+        var path = Path.Combine(_tmp, "x.txt");
+        await File.WriteAllTextAsync(path, "x");
+
+        var act = () => svc.HashFileAsync(path, "crc32");
+
+        await act.Should().ThrowAsync<ArgumentException>().WithMessage("*algorithm*");
+    }
+
+    [Fact]
     public async Task Search_find_duplicates_skips_locked_files_without_aborting()
     {
         var svc = new FileSystemService();

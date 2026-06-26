@@ -142,7 +142,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 ### `FileTools` — 7 tools
 `src/WindowsMcp/Tools/FileTools.cs`
 
-**Injected:** `IFileSystemService`
+**Injected:** `IFileSystemService`, `IInputService`
 
 | Method | Description |
 |--------|-------------|
@@ -151,8 +151,20 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 | `FileManage` | Copy, move, delete, or create files/directories |
 | `FileInfo` | Get file or directory metadata |
 | `FileSearch` | Search for files by glob pattern |
+| `FileHash` | Compute a file's SHA256/SHA1/MD5 hex digest |
 | `FileDialog` | Interact with a native open/save dialog |
 | `Archive` | Create, extract, or list zip/tar archives |
+
+---
+
+### `SecurityTools` — 1 tool
+`src/WindowsMcp/Tools/SecurityTools.cs`
+
+**Injected:** `IAuthenticodeInspector`
+
+| Method | Description |
+|--------|-------------|
+| `VerifySignature` | Catalog-aware Authenticode trust verdict for a file |
 
 ---
 

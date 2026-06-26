@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- **`verify_signature` tool** (new `SecurityTools` class) — exposes the existing catalog-aware
+  `AuthenticodeInspector` standalone, so any file path (a suspicious process binary, an unknown
+  autostart entry) can be checked for code-signing trust, not just files surfaced by `startup_report`.
+  Returns `{trusted, signer}`.
+- **`file_hash` tool** — SHA256 (default), SHA1, or MD5 hex digest of a file, for integrity checks
+  and IOC lookups (the internal hasher was MD5-only and unexposed). Tool count 52 → 54.
+
 ### Changed
 - **Test coverage added for previously-untested services** — `WebService` SSRF guard
   (`IsPrivateAddress` widened to internal for white-box testing: loopback / RFC1918 / link-local /

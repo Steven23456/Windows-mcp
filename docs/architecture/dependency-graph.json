@@ -3,9 +3,9 @@
     "name": "unknown",
     "version": "0.0.0",
     "lastUpdated": "2026-06-26",
-    "totalFiles": 89,
+    "totalFiles": 90,
     "totalModules": 5,
-    "totalExports": 190
+    "totalExports": 193
   },
   "entryPoints": [],
   "modules": {
@@ -1087,6 +1087,7 @@
           "FileDialog",
           "FileRead",
           "FileWrite",
+          "FileHash",
           "FileInfo",
           "Archive"
         ],
@@ -1099,6 +1100,7 @@
           "FileDialog",
           "FileRead",
           "FileWrite",
+          "FileHash",
           "FileInfo",
           "Archive"
         ]
@@ -1326,6 +1328,43 @@
         "functions": [
           "Screenshot",
           "Ocr"
+        ]
+      },
+      "src/WindowsMcp/Tools/SecurityTools.cs": {
+        "description": "SecurityTools module",
+        "externalDependencies": [
+          {
+            "package": "ModelContextProtocol",
+            "imports": [
+              "ModelContextProtocol.Server"
+            ]
+          }
+        ],
+        "nodeDependencies": [
+          {
+            "module": "System",
+            "imports": [
+              "System"
+            ]
+          }
+        ],
+        "internalDependencies": [
+          {
+            "file": "WindowsMcp.Abstractions",
+            "imports": [
+              "WindowsMcp.Abstractions"
+            ]
+          }
+        ],
+        "exports": [
+          "SecurityTools",
+          "VerifySignature"
+        ],
+        "classes": [
+          "SecurityTools"
+        ],
+        "functions": [
+          "VerifySignature"
         ]
       },
       "src/WindowsMcp/Tools/ShellTools.cs": {
@@ -2471,6 +2510,7 @@
           "src/WindowsMcp/Tools/ProcessTools.cs",
           "src/WindowsMcp/Tools/RegistryTools.cs",
           "src/WindowsMcp/Tools/ScreenTools.cs",
+          "src/WindowsMcp/Tools/SecurityTools.cs",
           "src/WindowsMcp/Tools/ShellTools.cs",
           "src/WindowsMcp/Tools/StartupTools.cs",
           "src/WindowsMcp/Tools/StorageTools.cs",
@@ -2536,13 +2576,13 @@
     ]
   },
   "statistics": {
-    "totalSourceFiles": 89,
+    "totalSourceFiles": 90,
     "totalModules": 5,
-    "totalLinesOfCode": 5614,
-    "totalExports": 190,
-    "totalClasses": 107,
+    "totalLinesOfCode": 5668,
+    "totalExports": 193,
+    "totalClasses": 108,
     "totalInterfaces": 28,
-    "totalFunctions": 52,
+    "totalFunctions": 54,
     "totalTypeGuards": 0,
     "totalEnums": 3,
     "totalConstants": 0,

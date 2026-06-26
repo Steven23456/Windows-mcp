@@ -116,6 +116,20 @@ public sealed class FileSystemService : IFileSystemService
         return Task.FromResult(hits.ToArray());
     }
 
+    public async Task<string> HashFileAsync(string path, string algorithm = "sha256", CancellationToken ct = default)
+    {
+        using System.Security.Cryptography.HashAlgorithm hasher = algorithm.ToLowerInvariant() switch
+        {
+            "sha256" => System.Security.Cryptography.SHA256.Create(),
+            "sha1"   => System.Security.Cryptography.SHA1.Create(),
+            "md5"    => System.Security.Cryptography.MD5.Create(),
+            _ => throw new ArgumentException($"Unknown algorithm '{algorithm}'; expected sha256|sha1|md5")
+        };
+        await using var stream = File.OpenRead(path);
+        var hash = await hasher.ComputeHashAsync(stream, ct);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
     private static string? HashFile(string path)
     {
         try

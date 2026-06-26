@@ -27,7 +27,7 @@ The codebase is organized into the following modules:
 
 - **entry**: 4 files
 - **services**: 28 files
-- **tools**: 14 files
+- **tools**: 15 files
 - **abstractions**: 28 files
 - **models**: 15 files
 
@@ -649,7 +649,7 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `FileTools`
-- Functions: `FileSearch`, `FileManage`, `FileDialog`, `FileRead`, `FileWrite`, `FileInfo`, `Archive`
+- Functions: `FileSearch`, `FileManage`, `FileDialog`, `FileRead`, `FileWrite`, `FileHash`, `FileInfo`, `Archive`
 
 ---
 
@@ -767,6 +767,29 @@ The codebase is organized into the following modules:
 **Exports:**
 - Classes: `ScreenTools`
 - Functions: `Screenshot`, `Ocr`
+
+---
+
+### `src/WindowsMcp/Tools/SecurityTools.cs` - SecurityTools.cs module
+
+**External Dependencies:**
+| Package | Import |
+|---------|--------|
+| `ModelContextProtocol` | `ModelContextProtocol.Server` |
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+
+**Exports:**
+- Classes: `SecurityTools`
+- Functions: `VerifySignature`
 
 ---
 
@@ -1417,7 +1440,7 @@ graph TD
         N12[InputTools.cs]
         N13[NetworkTools.cs]
         N14[ProcessTools.cs]
-        N15[...9 more]
+        N15[...10 more]
     end
 
     subgraph Abstractions
@@ -1446,14 +1469,14 @@ graph TD
 
 | Category | Count |
 |----------|-------|
-| Total Source Files | 89 |
+| Total Source Files | 90 |
 | Total Modules | 5 |
-| Total Lines of Code | 5614 |
-| Total Exports | 190 |
+| Total Lines of Code | 5668 |
+| Total Exports | 193 |
 | Total Re-exports | 0 |
-| Total Classes | 107 |
+| Total Classes | 108 |
 | Total Interfaces | 28 |
-| Total Functions | 52 |
+| Total Functions | 54 |
 | Total Type Guards | 0 |
 | Total Enums | 3 |
 | Type-only Imports | 0 |

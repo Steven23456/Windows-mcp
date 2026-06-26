@@ -53,8 +53,8 @@ Ordered for safety/atomicity. Each is its own dev-workflow task + atomic commit.
 
 ### Batch 5 — expansions
 - [ ] **E1 network ports → owning PID/name/path** (`PortInfoDto` completeness defect; `Get-NetTCPConnection -OwningProcess`).
-- [ ] **E2 verify_signature** — expose existing catalog-aware `AuthenticodeInspector` as a standalone tool.
-- [ ] **E3 file_hash (SHA256/SHA1/MD5)** — upgrade `FileSystemService.HashFile` (MD5-only) + expose.
+- [x] **E2 verify_signature** — expose existing catalog-aware `AuthenticodeInspector` as a standalone tool.
+- [x] **E3 file_hash (SHA256/SHA1/MD5)** — upgrade `FileSystemService.HashFile` (MD5-only) + expose.
 - [ ] **E4 process_inspect** — parent PID / cmdline / owner / loaded modules (WMI `Win32_Process` + `Process.Modules`).
 - [ ] **E5 defender_status** (`Get-MpComputerStatus`/`Get-MpThreat`), **E6 cert_store** (rogue root CAs),
   **E7 reliability/minidump list**, **E8 driver_list** (BYOVD), **E9 NTFS ADS + reparse**.

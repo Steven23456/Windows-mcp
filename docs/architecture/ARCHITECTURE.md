@@ -14,7 +14,7 @@ Windows-MCP follows a four-layer architecture built on .NET 9 with dependency in
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Tool Layer                                         │
-│                 (14 [McpServerToolType] classes, 52 tools)                   │
+│                 (15 [McpServerToolType] classes, 54 tools)                   │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ │
 │  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │ │
 │  │  8 tools   │ │  8 tools   │ │  7 tools   │ │  7 tools   │ │  5 tools   │ │
@@ -120,17 +120,18 @@ public sealed class InputTools
 |------------|-------|------------------|
 | `InputTools` | 8 | `IInputService`, `IClipboardService` |
 | `UIAutomationTools` | 8 | `IUIAutomationService` |
-| `FileTools` | 7 | `IFileSystemService` |
-| `SystemTools` | 7 | `IServiceControlService`, `IEventLogService`, `ITaskSchedulerService`, `IWmiService`, `IEnvService`, `IPowerService` |
+| `FileTools` | 8 | `IFileSystemService`, `IInputService` |
+| `SystemTools` | 7 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService` |
 | `WindowTools` | 5 | `IWindowService`, `IProcessService` |
-| `ProcessTools` | 5 | `IProcessService`, `INetworkService` |
+| `ProcessTools` | 5 | `IProcessService`, `IServiceControlService`, `ITaskSchedulerService`, `IEventLogService` |
 | `ScreenTools` | 2 | `IScreenshotService`, `IOcrService` |
 | `WebTools` | 2 | `IWebService` |
 | `RegistryTools` | 2 | `IRegistryService` |
-| `NetworkTools` | 2 | `INetworkService` |
+| `NetworkTools` | 2 | `INetworkService`, `IFirewallService` |
 | `ShellTools` | 1 | `IPowerShellService` |
-| `DiskTools` | 1 | `IFileSystemService` |
+| `DiskTools` | 1 | `IDiskService` |
 | `StorageTools` | 1 | `IStorageService` |
+| `SecurityTools` | 1 | `IAuthenticodeInspector` |
 
 ---
 
@@ -237,7 +238,7 @@ Windows-mcp.sln
 │   ├── WindowsMcp/                        ← Main project
 │   │   ├── WindowsMcp.csproj              (targets net9.0-windows10.0.22621)
 │   │   ├── Program.cs                     (host + DI wiring)
-│   │   ├── Tools/                         (14 tool classes)
+│   │   ├── Tools/                         (15 tool classes)
 │   │   │   ├── InputTools.cs
 │   │   │   ├── UIAutomationTools.cs
 │   │   │   ├── FileTools.cs

@@ -107,6 +107,15 @@ public sealed class FileTools
         return $"wrote {content.Length} chars to '{path}'";
     }
 
+    [McpServerTool, Description("Compute a file's hash digest for integrity checks or IOC lookups (e.g. VirusTotal). algorithm: sha256 (default), sha1, or md5. Returns the lowercase hex digest.")]
+    public async Task<string> FileHash(
+        [Description("File path to hash")] string path,
+        [Description("Hash algorithm: sha256, sha1, or md5")] string algorithm = "sha256",
+        CancellationToken ct = default)
+    {
+        return await _fs.HashFileAsync(path, algorithm, ct);
+    }
+
     [McpServerTool, Description("Get metadata for a file or directory.")]
     public async Task<string> FileInfo(
         [Description("Path to inspect")] string path,
