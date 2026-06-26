@@ -57,7 +57,7 @@ Ordered for safety/atomicity. Each is its own dev-workflow task + atomic commit.
 - [x] **E3 file_hash (SHA256/SHA1/MD5)** — upgrade `FileSystemService.HashFile` (MD5-only) + expose.
 - [x] **E4 process_inspect** — parent PID / cmdline / owner / loaded modules (WMI `Win32_Process` + `Process.Modules`).
 - [ ] **E5 defender_status** [DONE] (`Get-MpComputerStatus`/`Get-MpThreat`), **E6 cert_store** [DONE] (rogue root CAs),
-  **E7 reliability/minidump list** [DONE], **E8 driver_list** (BYOVD), **E9 NTFS ADS + reparse**.
+  **E7 reliability/minidump list** [DONE], **E8 driver_list** [DONE] (BYOVD), **E9 NTFS ADS + reparse**.
 
 ## 🟢 Ready / candidates (none blocking)
 

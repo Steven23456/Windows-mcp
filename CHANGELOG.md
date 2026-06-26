@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- **`driver_list` tool** — installed PnP device drivers (`Win32_PnPSignedDriver`) with version,
+  date, manufacturer, signed-state, and INF name; nameless bus/enumerator stubs filtered out. Old or
+  unsigned drivers are a real attack surface (BYOVD). New `IDriverService` (in `SystemTools`).
 - **`reliability` tool** — system stability snapshot: crash minidumps in `C:\Windows\Minidump`
   (name/size/time) plus recent `Win32_ReliabilityRecords` failure entries (app/OS/hardware), for
   BSOD/instability investigation. New `IReliabilityService` (in `SystemTools`).

@@ -72,6 +72,7 @@ public static async Task<int> Main(string[] args)
 | `IFirewallService` | `FirewallService` |
 | `ICertStoreService` | `CertStoreService` |
 | `IReliabilityService` | `ReliabilityService` |
+| `IDriverService` | `DriverService` |
 | `IEnvService` | `EnvService` |
 | `IPowerService` | `PowerService` |
 | `INotificationService` | `NotificationService` |
@@ -172,10 +173,10 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 ---
 
-### `SystemTools` — 8 tools
+### `SystemTools` — 9 tools
 `src/WindowsMcp/Tools/SystemTools.cs`
 
-**Injected:** `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`
+**Injected:** `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService`
 
 | Method | Description |
 |--------|-------------|
@@ -184,6 +185,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 | `Notification` | Show a Windows toast notification |
 | `SecurityAudit` | Firewall/Defender/UAC/BitLocker posture snapshot |
 | `Reliability` | Crash minidumps + recent reliability failure records |
+| `DriverList` | Installed PnP drivers with version/date/signer/signed-state (BYOVD surface) |
 | `WmiQuery` | Execute arbitrary WMI queries |
 | `Env` | Get, set, or list environment variables (secret-name redaction) |
 | `PowerAction` | Shutdown, reboot, logoff, lock, sleep, hibernate |

@@ -15,6 +15,7 @@ public sealed class SystemTools
     private readonly IAudioService _audio;
     private readonly ISecurityService _security;
     private readonly IReliabilityService _reliability;
+    private readonly IDriverService _drivers;
 
     public SystemTools(
         IWmiService wmi,
@@ -23,7 +24,8 @@ public sealed class SystemTools
         INotificationService notification,
         IAudioService audio,
         ISecurityService security,
-        IReliabilityService reliability)
+        IReliabilityService reliability,
+        IDriverService drivers)
     {
         _wmi = wmi;
         _env = env;
@@ -32,6 +34,7 @@ public sealed class SystemTools
         _audio = audio;
         _security = security;
         _reliability = reliability;
+        _drivers = drivers;
     }
 
     private static readonly Dictionary<string, string> WmiClassMap = new(StringComparer.OrdinalIgnoreCase)
@@ -110,6 +113,13 @@ public sealed class SystemTools
     {
         var report = await _reliability.GetAsync(max_records, ct);
         return JsonSerializer.Serialize(report);
+    }
+
+    [McpServerTool, Description("List installed PnP device drivers with version, date, manufacturer, signed-state, and INF name. Old or unsigned drivers are a real attack surface (BYOVD - bring-your-own-vulnerable-driver).")]
+    public async Task<string> DriverList(CancellationToken ct = default)
+    {
+        var drivers = await _drivers.ListAsync(ct);
+        return JsonSerializer.Serialize(drivers);
     }
 
     [McpServerTool, Description("Run a raw WMI query. class_name: WMI class, e.g. Win32_OperatingSystem.")]
