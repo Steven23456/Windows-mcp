@@ -3,9 +3,9 @@
     "name": "unknown",
     "version": "0.0.0",
     "lastUpdated": "2026-06-26",
-    "totalFiles": 81,
+    "totalFiles": 84,
     "totalModules": 5,
-    "totalExports": 178
+    "totalExports": 184
   },
   "entryPoints": [],
   "modules": {
@@ -183,6 +183,38 @@
         ],
         "classes": [
           "ClipboardService"
+        ]
+      },
+      "src/WindowsMcp/Services/DiskService.cs": {
+        "description": "DiskService module",
+        "externalDependencies": [],
+        "nodeDependencies": [
+          {
+            "module": "System",
+            "imports": [
+              "System"
+            ]
+          }
+        ],
+        "internalDependencies": [
+          {
+            "file": "WindowsMcp.Abstractions",
+            "imports": [
+              "WindowsMcp.Abstractions"
+            ]
+          },
+          {
+            "file": "WindowsMcp.Abstractions.Models",
+            "imports": [
+              "WindowsMcp.Abstractions.Models"
+            ]
+          }
+        ],
+        "exports": [
+          "DiskService"
+        ],
+        "classes": [
+          "DiskService"
         ]
       },
       "src/WindowsMcp/Services/EnvService.cs": {
@@ -439,6 +471,12 @@
         "description": "PowerService module",
         "externalDependencies": [],
         "nodeDependencies": [
+          {
+            "module": "System",
+            "imports": [
+              "System"
+            ]
+          },
           {
             "module": "Windows",
             "imports": [
@@ -1582,6 +1620,25 @@
           "IClipboardService"
         ]
       },
+      "src/WindowsMcp.Abstractions/IDiskService.cs": {
+        "description": "IDiskService module",
+        "externalDependencies": [],
+        "nodeDependencies": [],
+        "internalDependencies": [
+          {
+            "file": "WindowsMcp.Abstractions.Models",
+            "imports": [
+              "WindowsMcp.Abstractions.Models"
+            ]
+          }
+        ],
+        "exports": [
+          "IDiskService"
+        ],
+        "interfaces": [
+          "IDiskService"
+        ]
+      },
       "src/WindowsMcp.Abstractions/IEnvService.cs": {
         "description": "IEnvService module",
         "externalDependencies": [],
@@ -1967,6 +2024,24 @@
       }
     },
     "models": {
+      "src/WindowsMcp.Abstractions/Models/DiskDtos.cs": {
+        "description": "DiskDtos module",
+        "externalDependencies": [],
+        "nodeDependencies": [],
+        "internalDependencies": [],
+        "exports": [
+          "DiskUsageEntry",
+          "FileTypeEntry",
+          "StaleFileEntry",
+          "ReclaimableSpace"
+        ],
+        "classes": [
+          "DiskUsageEntry",
+          "FileTypeEntry",
+          "StaleFileEntry",
+          "ReclaimableSpace"
+        ]
+      },
       "src/WindowsMcp.Abstractions/Models/FileSystemDtos.cs": {
         "description": "<summary>",
         "externalDependencies": [],
@@ -2243,6 +2318,7 @@
           "src/WindowsMcp/Services/AudioService.cs",
           "src/WindowsMcp/Services/AuthenticodeInspector.cs",
           "src/WindowsMcp/Services/ClipboardService.cs",
+          "src/WindowsMcp/Services/DiskService.cs",
           "src/WindowsMcp/Services/EnvService.cs",
           "src/WindowsMcp/Services/EventLogService.cs",
           "src/WindowsMcp/Services/FileSystemService.cs",
@@ -2292,6 +2368,7 @@
           "src/WindowsMcp.Abstractions/IAudioService.cs",
           "src/WindowsMcp.Abstractions/IAuthenticodeInspector.cs",
           "src/WindowsMcp.Abstractions/IClipboardService.cs",
+          "src/WindowsMcp.Abstractions/IDiskService.cs",
           "src/WindowsMcp.Abstractions/IEnvService.cs",
           "src/WindowsMcp.Abstractions/IEventLogService.cs",
           "src/WindowsMcp.Abstractions/IFileSystemService.cs",
@@ -2319,6 +2396,7 @@
       {
         "name": "Models",
         "files": [
+          "src/WindowsMcp.Abstractions/Models/DiskDtos.cs",
           "src/WindowsMcp.Abstractions/Models/FileSystemDtos.cs",
           "src/WindowsMcp.Abstractions/Models/InputDtos.cs",
           "src/WindowsMcp.Abstractions/Models/NetworkDtos.cs",
@@ -2337,12 +2415,12 @@
     ]
   },
   "statistics": {
-    "totalSourceFiles": 81,
+    "totalSourceFiles": 84,
     "totalModules": 5,
-    "totalLinesOfCode": 5303,
-    "totalExports": 178,
-    "totalClasses": 98,
-    "totalInterfaces": 25,
+    "totalLinesOfCode": 5497,
+    "totalExports": 184,
+    "totalClasses": 103,
+    "totalInterfaces": 26,
     "totalFunctions": 52,
     "totalTypeGuards": 0,
     "totalEnums": 3,

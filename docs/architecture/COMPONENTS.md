@@ -67,6 +67,7 @@ public static async Task<int> Main(string[] args)
 | `IWindowService` | `WindowService` |
 | `IWmiService` | `WmiService` |
 | `IStorageService` | `StorageService` |
+| `IDiskService` | `DiskService` |
 | `IEnvService` | `EnvService` |
 | `IPowerService` | `PowerService` |
 | `INotificationService` | `NotificationService` |
@@ -247,11 +248,11 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 ### `DiskTools` — 1 tool
 `src/WindowsMcp/Tools/DiskTools.cs`
 
-**Injected:** `IFileSystemService`
+**Injected:** `IDiskService`
 
 | Method | Description |
 |--------|-------------|
-| `DiskInspect` | List drives with size, free space, file system |
+| `DiskInspect` | Disk usage analysis: usage (top dirs), reclaimable, file_types, stale |
 
 ---
 
@@ -299,6 +300,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IWindowService` | `ListAsync`, `FocusAsync`, `GetAsync`, `LaunchAsync` |
 | `IWmiService` | `QueryAsync(wql)` |
 | `IStorageService` | `GetHealthAsync(driveLetter?, includeUsage, timeoutSeconds)` → `StorageHealthReport` |
+| `IDiskService` | `GetUsageAsync`, `GetFileTypesAsync`, `GetStaleAsync`, `GetReclaimableAsync` |
 | `IEnvService` | `GetAsync`, `SetAsync`, `ListAsync` |
 | `IPowerService` | `SleepAsync`, `HibernateAsync`, `LockAsync`, `SignOutAsync` |
 | `INotificationService` | `ShowAsync` |

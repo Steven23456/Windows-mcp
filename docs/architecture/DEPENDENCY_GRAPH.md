@@ -26,10 +26,10 @@ This document provides a comprehensive dependency graph of all files, components
 The codebase is organized into the following modules:
 
 - **entry**: 4 files
-- **services**: 25 files
+- **services**: 26 files
 - **tools**: 14 files
-- **abstractions**: 25 files
-- **models**: 13 files
+- **abstractions**: 26 files
+- **models**: 14 files
 
 ---
 
@@ -132,6 +132,24 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `ClipboardService`
+
+---
+
+### `src/WindowsMcp/Services/DiskService.cs` - DiskService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `DiskService`
 
 ---
 
@@ -283,6 +301,7 @@ The codebase is organized into the following modules:
 **Node.js Built-in Dependencies:**
 | Module | Import |
 |--------|--------|
+| `System` | `System` |
 | `Windows` | `Windows` |
 
 **Internal Dependencies:**
@@ -907,6 +926,18 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp.Abstractions/IDiskService.cs` - IDiskService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IDiskService`
+
+---
+
 ### `src/WindowsMcp.Abstractions/IEnvService.cs` - IEnvService.cs module
 
 **Exports:**
@@ -1148,6 +1179,13 @@ The codebase is organized into the following modules:
 
 ## Models Dependencies
 
+### `src/WindowsMcp.Abstractions/Models/DiskDtos.cs` - DiskDtos.cs module
+
+**Exports:**
+- Classes: `DiskUsageEntry`, `FileTypeEntry`, `StaleFileEntry`, `ReclaimableSpace`
+
+---
+
 ### `src/WindowsMcp.Abstractions/Models/FileSystemDtos.cs` - <summary>
 
 **Exports:**
@@ -1252,6 +1290,7 @@ The codebase is organized into the following modules:
 | `AudioService.cs` | 2 files | 1 files |
 | `AuthenticodeInspector.cs` | 2 files | 1 files |
 | `ClipboardService.cs` | 1 files | 1 files |
+| `DiskService.cs` | 2 files | 1 files |
 | `EnvService.cs` | 1 files | 1 files |
 | `EventLogService.cs` | 2 files | 1 files |
 | `FileSystemService.cs` | 2 files | 1 files |
@@ -1277,7 +1316,6 @@ The codebase is organized into the following modules:
 | `CommandTarget.cs` | 0 files | 2 files |
 | `StartupApproval.cs` | 0 files | 2 files |
 | `StartupReportRenderer.cs` | 1 files | 2 files |
-| `DiskTools.cs` | 1 files | 0 files |
 
 ---
 
@@ -1301,9 +1339,9 @@ graph TD
         N4[AudioService.cs]
         N5[AuthenticodeInspector.cs]
         N6[ClipboardService.cs]
-        N7[EnvService.cs]
-        N8[EventLogService.cs]
-        N9[...20 more]
+        N7[DiskService.cs]
+        N8[EnvService.cs]
+        N9[...21 more]
     end
 
     subgraph Tools
@@ -1319,18 +1357,18 @@ graph TD
         N16[IAudioService.cs]
         N17[IAuthenticodeInspector.cs]
         N18[IClipboardService.cs]
-        N19[IEnvService.cs]
-        N20[IEventLogService.cs]
-        N21[...20 more]
+        N19[IDiskService.cs]
+        N20[IEnvService.cs]
+        N21[...21 more]
     end
 
     subgraph Models
-        N22[FileSystemDtos.cs]
-        N23[InputDtos.cs]
-        N24[NetworkDtos.cs]
-        N25[PowerShellDtos.cs]
-        N26[ProcessDtos.cs]
-        N27[...8 more]
+        N22[DiskDtos.cs]
+        N23[FileSystemDtos.cs]
+        N24[InputDtos.cs]
+        N25[NetworkDtos.cs]
+        N26[PowerShellDtos.cs]
+        N27[...9 more]
     end
 
 ```
@@ -1341,13 +1379,13 @@ graph TD
 
 | Category | Count |
 |----------|-------|
-| Total Source Files | 81 |
+| Total Source Files | 84 |
 | Total Modules | 5 |
-| Total Lines of Code | 5303 |
-| Total Exports | 178 |
+| Total Lines of Code | 5497 |
+| Total Exports | 184 |
 | Total Re-exports | 0 |
-| Total Classes | 98 |
-| Total Interfaces | 25 |
+| Total Classes | 103 |
+| Total Interfaces | 26 |
 | Total Functions | 52 |
 | Total Type Guards | 0 |
 | Total Enums | 3 |

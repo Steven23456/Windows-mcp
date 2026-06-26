@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Changed
+- **`disk_inspect` logic extracted into `IDiskService`/`DiskService`** — the aggregation (top-dir
+  usage, file-type grouping, stale-file filtering) and the reclaimable-space PowerShell lived
+  directly in `DiskTools`, making it untestable. Now behind a service returning typed DTOs
+  (`DiskUsageEntry`, `FileTypeEntry`, `StaleFileEntry`, `ReclaimableSpace`); the tool is a thin
+  serialize wrapper that forwards a `CancellationToken`. Fixes a latent bug along the way: the
+  reclaimable script used PowerShell 7 `??` null-coalescing, which is a parse error under the
+  `powershell.exe` (5.1) the server invokes — rewritten 5.1-safe — and the result is now parsed
+  into a typed DTO with an empty-output guard (the storage_health failure class). Unit-tested via
+  `InternalsVisibleTo` (FormatBytes/GetTopLevelDir) + mocked aggregation/parse paths.
 - **`CancellationToken` now plumbed from tools into the service layer** for `powershell`, the
   process/service/scheduled-task/event-log tools, and the file tools — the services already
   accepted a token but the tools dropped it, so MCP-framework cancellation never reached a running
