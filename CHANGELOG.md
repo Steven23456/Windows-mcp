@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-26
+
+Codebase-audit sweep: fixes every defect a 3-agent audit found, restores the thin-tool pattern
+across the last hold-outs, closes the service test-coverage gaps, and adds 8 inspection tools
+(tool count 52 → 60). Highlights below.
+
 ### Added
 - **`file_streams` tool** — NTFS alternate data streams (e.g. `Zone.Identifier`, hidden payloads) on a
   file plus the reparse target if the path is a symlink/junction — forensic checks `file_info` can't

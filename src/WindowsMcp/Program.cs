@@ -92,7 +92,7 @@ internal static class Program
         builder.Services
             .AddMcpServer(o =>
             {
-                o.ServerInfo = new() { Name = "Windows-mcp", Version = "0.3.1" };
+                o.ServerInfo = new() { Name = "Windows-mcp", Version = "0.4.0" };
             })
             .WithStdioServerTransport()
             .WithToolsFromAssembly();   // source generator discovers [McpServerTool] methods
