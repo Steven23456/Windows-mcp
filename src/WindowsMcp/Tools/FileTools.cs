@@ -10,11 +10,13 @@ public sealed class FileTools
 {
     private readonly IFileSystemService _fs;
     private readonly IInputService _input;
+    private readonly IFileStreamService _streams;
 
-    public FileTools(IFileSystemService fs, IInputService input)
+    public FileTools(IFileSystemService fs, IInputService input, IFileStreamService streams)
     {
         _fs = fs;
         _input = input;
+        _streams = streams;
     }
 
     [McpServerTool, Description("Search for files. root: starting directory. pattern: glob (e.g. '*.txt'). min_size: bytes. modified_since: ISO 8601 datetime. find_duplicates: group identical files.")]
@@ -114,6 +116,15 @@ public sealed class FileTools
         CancellationToken ct = default)
     {
         return await _fs.HashFileAsync(path, algorithm, ct);
+    }
+
+    [McpServerTool, Description("List NTFS alternate data streams (e.g. Zone.Identifier or hidden payloads) on a file, and the reparse target if the path is a symlink/junction. Forensic checks that file_info doesn't surface.")]
+    public async Task<string> FileStreams(
+        [Description("File or directory path to inspect")] string path,
+        CancellationToken ct = default)
+    {
+        var streams = await _streams.GetStreamsAsync(path, ct);
+        return JsonSerializer.Serialize(streams);
     }
 
     [McpServerTool, Description("Get metadata for a file or directory.")]

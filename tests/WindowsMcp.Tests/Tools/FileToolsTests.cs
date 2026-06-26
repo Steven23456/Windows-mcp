@@ -12,11 +12,13 @@ public class FileToolsTests
 {
     private static FileTools MakeTools(
         IFileSystemService? fs = null,
-        IInputService? input = null)
+        IInputService? input = null,
+        IFileStreamService? streams = null)
     {
         return new FileTools(
-            fs    ?? new Mock<IFileSystemService>().Object,
-            input ?? new Mock<IInputService>().Object);
+            fs      ?? new Mock<IFileSystemService>().Object,
+            input   ?? new Mock<IInputService>().Object,
+            streams ?? new Mock<IFileStreamService>().Object);
     }
 
     [Fact]

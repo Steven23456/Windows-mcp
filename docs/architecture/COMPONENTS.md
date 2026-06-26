@@ -73,6 +73,7 @@ public static async Task<int> Main(string[] args)
 | `ICertStoreService` | `CertStoreService` |
 | `IReliabilityService` | `ReliabilityService` |
 | `IDriverService` | `DriverService` |
+| `IFileStreamService` | `FileStreamService` |
 | `IEnvService` | `EnvService` |
 | `IPowerService` | `PowerService` |
 | `INotificationService` | `NotificationService` |
@@ -142,10 +143,10 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 ---
 
-### `FileTools` — 7 tools
+### `FileTools` — 9 tools
 `src/WindowsMcp/Tools/FileTools.cs`
 
-**Injected:** `IFileSystemService`, `IInputService`
+**Injected:** `IFileSystemService`, `IInputService`, `IFileStreamService`
 
 | Method | Description |
 |--------|-------------|
@@ -155,6 +156,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 | `FileInfo` | Get file or directory metadata |
 | `FileSearch` | Search for files by glob pattern |
 | `FileHash` | Compute a file's SHA256/SHA1/MD5 hex digest |
+| `FileStreams` | NTFS alternate data streams + reparse (symlink/junction) target |
 | `FileDialog` | Interact with a native open/save dialog |
 | `Archive` | Create, extract, or list zip/tar archives |
 

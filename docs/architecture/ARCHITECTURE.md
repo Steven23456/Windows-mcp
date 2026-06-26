@@ -14,10 +14,10 @@ Windows-MCP follows a four-layer architecture built on .NET 9 with dependency in
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Tool Layer                                         │
-│                 (15 [McpServerToolType] classes, 55 tools)                   │
+│                 (15 [McpServerToolType] classes, 60 tools)                   │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ │
 │  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │ │
-│  │  8 tools   │ │  8 tools   │ │  7 tools   │ │  7 tools   │ │  5 tools   │ │
+│  │  8 tools   │ │  8 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │ │
 │  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘ │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ │
 │  │ProcessTools│ │ScreenTools │ │  WebTools  │ │RegistryTls │ │NetworkTls  │ │
@@ -27,7 +27,7 @@ Windows-MCP follows a four-layer architecture built on .NET 9 with dependency in
 │   │ShellTools(1)│ │ DiskTools(1)│ │StorageTools(1)│                          │
 │   └─────────────┘ └────────────┘ └──────────────┘                           │
 │            ┌───────────────────┐                                            │
-│            │ SecurityTools (1) │                                            │
+│            │ SecurityTools (3) │                                            │
 │            └───────────────────┘                                            │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │ constructor injection
@@ -40,7 +40,7 @@ Windows-MCP follows a four-layer architecture built on .NET 9 with dependency in
 │  IRegistryService · IServiceControlService · IEventLogService               │
 │  ITaskSchedulerService · IProcessService · IWindowService · IWmiService     │
 │  IEnvService · IPowerService · INotificationService · INetworkService       │
-│  IWebService   (28 interfaces total)                                        │
+│  IWebService   (32 interfaces total)                                        │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │ implemented by
                                     ▼
@@ -52,7 +52,7 @@ Windows-MCP follows a four-layer architecture built on .NET 9 with dependency in
 │  RegistryService · ServiceControlService · EventLogService                  │
 │  TaskSchedulerService · ProcessService · WindowService · WmiService         │
 │  EnvService · PowerService · NotificationService · NetworkService           │
-│  WebService   (28 singletons — all registered in Program.cs via DI)         │
+│  WebService   (32 singletons — all registered in Program.cs via DI)         │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -123,8 +123,8 @@ public sealed class InputTools
 |------------|-------|------------------|
 | `InputTools` | 8 | `IInputService`, `IClipboardService` |
 | `UIAutomationTools` | 8 | `IUIAutomationService` |
-| `FileTools` | 8 | `IFileSystemService`, `IInputService` |
-| `SystemTools` | 7 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService` |
+| `FileTools` | 9 | `IFileSystemService`, `IInputService`, `IFileStreamService` |
+| `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService` |
 | `WindowTools` | 5 | `IWindowService`, `IProcessService` |
 | `ProcessTools` | 6 | `IProcessService`, `IServiceControlService`, `ITaskSchedulerService`, `IEventLogService` |
 | `ScreenTools` | 2 | `IScreenshotService`, `IOcrService` |
@@ -134,14 +134,14 @@ public sealed class InputTools
 | `ShellTools` | 1 | `IPowerShellService` |
 | `DiskTools` | 1 | `IDiskService` |
 | `StorageTools` | 1 | `IStorageService` |
-| `SecurityTools` | 1 | `IAuthenticodeInspector` |
+| `SecurityTools` | 3 | `IAuthenticodeInspector`, `ISecurityService`, `ICertStoreService` |
 
 ---
 
 ### 3. Service Abstraction Layer (`WindowsMcp.Abstractions`)
 
 A separate assembly (`WindowsMcp.Abstractions.csproj`) containing:
-- **28 `IXxxService` interfaces** — define the contract for each domain
+- **32 `IXxxService` interfaces** — define the contract for each domain
 - **Model DTOs** in `WindowsMcp.Abstractions.Models` — records/classes shared between tools and services
 
 The abstraction layer exists so tool classes compile against interfaces, not concrete types. This enforces the dependency inversion principle and makes services independently testable.
@@ -256,7 +256,7 @@ Windows-mcp.sln
 │   │   │   ├── DiskTools.cs
 │   │   │   ├── StorageTools.cs
 │   │   │   └── StartupTools.cs
-│   │   └── Services/                      (28 service implementations)
+│   │   └── Services/                      (32 service implementations)
 │   │       ├── InputService.cs
 │   │       ├── UIAutomationService.cs
 │   │       └── ...

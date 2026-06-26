@@ -7,6 +7,7 @@ namespace WindowsMcp.Services;
 
 public sealed class FileSystemService : IFileSystemService
 {
+
     public async Task<string> ReadTextAsync(string path, long maxBytes, string encoding, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();

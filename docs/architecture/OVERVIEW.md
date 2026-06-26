@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 9 and C#, it exposes 55 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — all via the standard MCP stdio transport.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 9 and C#, it exposes 60 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — all via the standard MCP stdio transport.
 
 ## Purpose
 
@@ -20,7 +20,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 | Feature | Description |
 |---------|-------------|
 | **Native Windows Integration** | Direct access to Windows UI Automation API via `FlaUI.UIA3` |
-| **Dependency Injection** | All 28 services are singleton-scoped, wired via `Microsoft.Extensions.Hosting` |
+| **Dependency Injection** | All 32 services are singleton-scoped, wired via `Microsoft.Extensions.Hosting` |
 | **Source-Generated Tool Discovery** | `[McpServerTool]` attributes are discovered at compile time by the MCP SDK source generator |
 | **Interface-Driven Architecture** | Every service backed by an `IXxxService` interface in a separate Abstractions assembly |
 | **DPI-Aware** | Per-Monitor DPI Awareness V2 enabled at startup for correct multi-monitor coordinate handling |
@@ -55,11 +55,11 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Abstraction Layer  (WindowsMcp.Abstractions)      ││
-│  │        28 IXxxService interfaces + Model DTOs               ││
+│  │        32 IXxxService interfaces + Model DTOs               ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Implementation Layer  (WindowsMcp.Services)       ││
-│  │        28 XxxService singletons registered via DI           ││
+│  │        32 XxxService singletons registered via DI           ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
                                 │
@@ -75,7 +75,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 ## Available Tools
 
-Windows-MCP exposes **55 MCP tools** across 15 tool classes:
+Windows-MCP exposes **60 MCP tools** across 15 tool classes:
 
 ### Input Tools (`InputTools` — 8 tools)
 | Tool | Purpose |
@@ -110,7 +110,7 @@ Windows-MCP exposes **55 MCP tools** across 15 tool classes:
 | `Launch` | Launch an application by name |
 | `StartProcess` | Start a detached process that survives independently |
 
-### File Tools (`FileTools` — 8 tools)
+### File Tools (`FileTools` — 9 tools)
 | Tool | Purpose |
 |------|---------|
 | `FileRead` | Read file contents |
@@ -119,19 +119,29 @@ Windows-MCP exposes **55 MCP tools** across 15 tool classes:
 | `FileInfo` | Get file/directory metadata |
 | `FileSearch` | Search for files by pattern |
 | `FileHash` | Compute SHA256/SHA1/MD5 hex digest |
+| `FileStreams` | NTFS alternate data streams + reparse target |
 | `FileDialog` | Interact with open/save dialogs |
 | `Archive` | Create, extract, or inspect zip/tar archives |
 
-### System Tools (`SystemTools` — 7 tools)
+### System Tools (`SystemTools` — 9 tools)
 | Tool | Purpose |
 |------|---------|
-| `SystemInfo` | Get CPU, RAM, OS version, hostname |
-| `Service` | List, start, stop, or restart Windows services |
-| `ScheduledTask` | Manage Windows Task Scheduler tasks |
-| `EventLog` | Query Windows Event Log entries |
+| `SystemInfo` | WMI system info by category (os/memory/disk/gpu/battery) |
+| `Audio` | Get/set volume or mute/unmute |
+| `Notification` | Show a Windows toast notification |
+| `SecurityAudit` | Firewall/Defender/UAC/BitLocker posture snapshot |
+| `Reliability` | Crash minidumps + recent reliability failure records |
+| `DriverList` | Installed PnP drivers with version/date/signer/signed-state (BYOVD surface) |
 | `WmiQuery` | Execute WMI queries for system data |
-| `Env` | Get or set environment variables |
-| `PowerAction` | Sleep, hibernate, lock, or sign out |
+| `Env` | Get, set, or list environment variables (secret-name redaction) |
+| `PowerAction` | Shutdown, reboot, logoff, lock, sleep, hibernate |
+
+### Security Tools (`SecurityTools` — 3 tools)
+| Tool | Purpose |
+|------|---------|
+| `VerifySignature` | Catalog-aware Authenticode trust verdict for a file |
+| `DefenderStatus` | Microsoft Defender posture (real-time/tamper protection, signature age, scans) |
+| `CertStore` | Enumerate a cert store; flags self-signed (rogue-root) and expired certs |
 
 ### Screen Tools (`ScreenTools` — 2 tools)
 | Tool | Purpose |

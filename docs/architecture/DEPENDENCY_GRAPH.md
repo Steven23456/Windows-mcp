@@ -26,10 +26,10 @@ This document provides a comprehensive dependency graph of all files, components
 The codebase is organized into the following modules:
 
 - **entry**: 4 files
-- **services**: 28 files
+- **services**: 32 files
 - **tools**: 15 files
-- **abstractions**: 28 files
-- **models**: 15 files
+- **abstractions**: 32 files
+- **models**: 17 files
 
 ---
 
@@ -123,6 +123,24 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp/Services/CertStoreService.cs` - CertStoreService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `CertStoreService`
+
+---
+
 ### `src/WindowsMcp/Services/ClipboardService.cs` - ClipboardService.cs module
 
 **Internal Dependencies:**
@@ -153,6 +171,24 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp/Services/DriverService.cs` - DriverService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `DriverService`
+
+---
+
 ### `src/WindowsMcp/Services/EnvService.cs` - EnvService.cs module
 
 **Internal Dependencies:**
@@ -180,6 +216,24 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `EventLogService`
+
+---
+
+### `src/WindowsMcp/Services/FileStreamService.cs` - FileStreamService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `FileStreamService`
 
 ---
 
@@ -388,6 +442,24 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `RegistryService`
+
+---
+
+### `src/WindowsMcp/Services/ReliabilityService.cs` - ReliabilityService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `ReliabilityService`
 
 ---
 
@@ -649,7 +721,7 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `FileTools`
-- Functions: `FileSearch`, `FileManage`, `FileDialog`, `FileRead`, `FileWrite`, `FileHash`, `FileInfo`, `Archive`
+- Functions: `FileSearch`, `FileManage`, `FileDialog`, `FileRead`, `FileWrite`, `FileHash`, `FileStreams`, `FileInfo`, `Archive`
 
 ---
 
@@ -789,7 +861,7 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `SecurityTools`
-- Functions: `VerifySignature`
+- Functions: `VerifySignature`, `DefenderStatus`, `CertStore`
 
 ---
 
@@ -882,7 +954,7 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `SystemTools`
-- Functions: `SystemInfo`, `Audio`, `Notification`, `SecurityAudit`, `WmiQuery`, `Env`, `PowerAction`
+- Functions: `SystemInfo`, `Audio`, `Notification`, `SecurityAudit`, `Reliability`, `DriverList`, `WmiQuery`, `Env`, `PowerAction`
 
 ---
 
@@ -978,6 +1050,18 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp.Abstractions/ICertStoreService.cs` - ICertStoreService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `ICertStoreService`
+
+---
+
 ### `src/WindowsMcp.Abstractions/IClipboardService.cs` - IClipboardService.cs module
 
 **Exports:**
@@ -997,6 +1081,18 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp.Abstractions/IDriverService.cs` - IDriverService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IDriverService`
+
+---
+
 ### `src/WindowsMcp.Abstractions/IEnvService.cs` - IEnvService.cs module
 
 **Exports:**
@@ -1013,6 +1109,18 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Interfaces: `IEventLogService`
+
+---
+
+### `src/WindowsMcp.Abstractions/IFileStreamService.cs` - IFileStreamService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IFileStreamService`
 
 ---
 
@@ -1135,6 +1243,18 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Interfaces: `IRegistryService`
+
+---
+
+### `src/WindowsMcp.Abstractions/IReliabilityService.cs` - IReliabilityService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IReliabilityService`
 
 ---
 
@@ -1269,10 +1389,17 @@ The codebase is organized into the following modules:
 
 ---
 
-### `src/WindowsMcp.Abstractions/Models/FileSystemDtos.cs` - <summary>
+### `src/WindowsMcp.Abstractions/Models/DriverDtos.cs` - <summary>
 
 **Exports:**
-- Classes: `FileInfoDto`, `FileSearchHit`, `RegistryValueDto`, `ServiceDto`, `EventLogEntryDto`, `ScheduledTaskDto`, `ScheduledTaskDetailDto`
+- Classes: `DriverInfo`
+
+---
+
+### `src/WindowsMcp.Abstractions/Models/FileSystemDtos.cs` - <summary>An NTFS alternate data stream (e.g. <c>:Zone.Identifier:$DATA</c>).</summary>
+
+**Exports:**
+- Classes: `AlternateStreamInfo`, `FileStreamsDto`, `FileInfoDto`, `FileSearchHit`, `RegistryValueDto`, `ServiceDto`, `EventLogEntryDto`, `ScheduledTaskDto`, `ScheduledTaskDetailDto`
 
 ---
 
@@ -1312,6 +1439,13 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp.Abstractions/Models/ReliabilityDtos.cs` - <summary>A crash minidump file in C:\Windows\Minidump.</summary>
+
+**Exports:**
+- Classes: `MinidumpInfo`, `ReliabilityRecord`, `ReliabilityReport`
+
+---
+
 ### `src/WindowsMcp.Abstractions/Models/ScreenDtos.cs` - ScreenDtos.cs module
 
 **Exports:**
@@ -1323,7 +1457,7 @@ The codebase is organized into the following modules:
 ### `src/WindowsMcp.Abstractions/Models/SecurityDtos.cs` - <summary>
 
 **Exports:**
-- Classes: `AuthenticodeInfo`, `LspProviderDto`, `SecurityAuditDto`
+- Classes: `AuthenticodeInfo`, `LspProviderDto`, `SecurityAuditDto`, `CertInfoDto`, `DefenderStatusDto`
 
 ---
 
@@ -1379,10 +1513,13 @@ The codebase is organized into the following modules:
 | `Program.cs` | 2 files | 0 files |
 | `AudioService.cs` | 2 files | 1 files |
 | `AuthenticodeInspector.cs` | 2 files | 1 files |
+| `CertStoreService.cs` | 2 files | 1 files |
 | `ClipboardService.cs` | 1 files | 1 files |
 | `DiskService.cs` | 2 files | 1 files |
+| `DriverService.cs` | 2 files | 1 files |
 | `EnvService.cs` | 1 files | 1 files |
 | `EventLogService.cs` | 2 files | 1 files |
+| `FileStreamService.cs` | 2 files | 1 files |
 | `FileSystemService.cs` | 2 files | 1 files |
 | `FirewallService.cs` | 2 files | 1 files |
 | `InputService.cs` | 2 files | 1 files |
@@ -1394,6 +1531,7 @@ The codebase is organized into the following modules:
 | `PowerShellService.cs` | 2 files | 1 files |
 | `ProcessService.cs` | 2 files | 1 files |
 | `RegistryService.cs` | 2 files | 1 files |
+| `ReliabilityService.cs` | 2 files | 1 files |
 | `ScreenshotService.cs` | 2 files | 1 files |
 | `SecurityService.cs` | 2 files | 1 files |
 | `ServiceControlService.cs` | 2 files | 1 files |
@@ -1402,10 +1540,6 @@ The codebase is organized into the following modules:
 | `StorageService.cs` | 2 files | 1 files |
 | `TaskSchedulerService.cs` | 2 files | 1 files |
 | `UIAutomationService.cs` | 2 files | 1 files |
-| `WebService.cs` | 2 files | 1 files |
-| `WindowService.cs` | 2 files | 1 files |
-| `WmiService.cs` | 1 files | 1 files |
-| `CommandTarget.cs` | 0 files | 2 files |
 
 ---
 
@@ -1428,10 +1562,10 @@ graph TD
     subgraph Services
         N4[AudioService.cs]
         N5[AuthenticodeInspector.cs]
-        N6[ClipboardService.cs]
-        N7[DiskService.cs]
-        N8[EnvService.cs]
-        N9[...23 more]
+        N6[CertStoreService.cs]
+        N7[ClipboardService.cs]
+        N8[DiskService.cs]
+        N9[...27 more]
     end
 
     subgraph Tools
@@ -1446,19 +1580,19 @@ graph TD
     subgraph Abstractions
         N16[IAudioService.cs]
         N17[IAuthenticodeInspector.cs]
-        N18[IClipboardService.cs]
-        N19[IDiskService.cs]
-        N20[IEnvService.cs]
-        N21[...23 more]
+        N18[ICertStoreService.cs]
+        N19[IClipboardService.cs]
+        N20[IDiskService.cs]
+        N21[...27 more]
     end
 
     subgraph Models
         N22[DiskDtos.cs]
-        N23[FileSystemDtos.cs]
-        N24[FirewallDtos.cs]
-        N25[InputDtos.cs]
-        N26[NetworkDtos.cs]
-        N27[...10 more]
+        N23[DriverDtos.cs]
+        N24[FileSystemDtos.cs]
+        N25[FirewallDtos.cs]
+        N26[InputDtos.cs]
+        N27[...12 more]
     end
 
 ```
@@ -1469,14 +1603,14 @@ graph TD
 
 | Category | Count |
 |----------|-------|
-| Total Source Files | 90 |
+| Total Source Files | 100 |
 | Total Modules | 5 |
-| Total Lines of Code | 5754 |
-| Total Exports | 196 |
+| Total Lines of Code | 6128 |
+| Total Exports | 217 |
 | Total Re-exports | 0 |
-| Total Classes | 110 |
-| Total Interfaces | 28 |
-| Total Functions | 55 |
+| Total Classes | 122 |
+| Total Interfaces | 32 |
+| Total Functions | 60 |
 | Total Type Guards | 0 |
 | Total Enums | 3 |
 | Type-only Imports | 0 |

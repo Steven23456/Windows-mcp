@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- **`file_streams` tool** — NTFS alternate data streams (e.g. `Zone.Identifier`, hidden payloads) on a
+  file plus the reparse target if the path is a symlink/junction — forensic checks `file_info` can't
+  surface. Reparse target via native `FileSystemInfo.LinkTarget`; ADS via `Get-Item -Stream`. New
+  `IFileStreamService`. **Tool count 55 → 60 across this expansion batch** (verify_signature,
+  file_hash, defender_status, cert_store, reliability, driver_list, process_inspect, file_streams,
+  plus `network ports` enrichment); interfaces/singletons 28 → 32; tool classes 15.
 - **`driver_list` tool** — installed PnP device drivers (`Win32_PnPSignedDriver`) with version,
   date, manufacturer, signed-state, and INF name; nameless bus/enumerator stubs filtered out. Old or
   unsigned drivers are a real attack surface (BYOVD). New `IDriverService` (in `SystemTools`).

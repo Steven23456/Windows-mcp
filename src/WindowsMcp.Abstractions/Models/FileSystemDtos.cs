@@ -1,5 +1,15 @@
 namespace WindowsMcp.Abstractions.Models;
 
+/// <summary>An NTFS alternate data stream (e.g. <c>:Zone.Identifier:$DATA</c>).</summary>
+public record AlternateStreamInfo(string Name, long Size);
+
+/// <summary>
+/// NTFS forensic view of a path: alternate data streams (hidden payloads / Zone.Identifier) and
+/// the reparse target if the path is a symlink/junction. <see cref="LinkTarget"/> is null for a
+/// normal file/dir.
+/// </summary>
+public record FileStreamsDto(string Path, string? LinkTarget, AlternateStreamInfo[] AlternateStreams);
+
 public record FileInfoDto(
     string Path,
     long Size,
