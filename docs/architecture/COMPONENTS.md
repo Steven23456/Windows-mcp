@@ -69,6 +69,7 @@ public static async Task<int> Main(string[] args)
 | `IStorageService` | `StorageService` |
 | `IDiskService` | `DiskService` |
 | `ISecurityService` | `SecurityService` |
+| `IFirewallService` | `FirewallService` |
 | `IEnvService` | `EnvService` |
 | `IPowerService` | `PowerService` |
 | `INotificationService` | `NotificationService` |
@@ -225,7 +226,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 ### `NetworkTools` — 2 tools
 `src/WindowsMcp/Tools/NetworkTools.cs`
 
-**Injected:** `INetworkService`
+**Injected:** `INetworkService`, `IFirewallService`
 
 | Method | Description |
 |--------|-------------|
@@ -303,6 +304,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IStorageService` | `GetHealthAsync(driveLetter?, includeUsage, timeoutSeconds)` → `StorageHealthReport` |
 | `IDiskService` | `GetUsageAsync`, `GetFileTypesAsync`, `GetStaleAsync`, `GetReclaimableAsync` |
 | `ISecurityService` | `AuditAsync()` → `SecurityAuditDto` |
+| `IFirewallService` | `ListAsync`, `AddAsync`, `RemoveAsync` |
 | `IEnvService` | `GetAsync`, `SetAsync`, `ListAsync` |
 | `IPowerService` | `SleepAsync`, `HibernateAsync`, `LockAsync`, `SignOutAsync` |
 | `INotificationService` | `ShowAsync` |

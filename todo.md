@@ -39,12 +39,12 @@ Ordered for safety/atomicity. Each is its own dev-workflow task + atomic commit.
 ### Batch 3 — service refactors (restore thin-tool pattern)
 - [x] **R1 IDiskService** — extract aggregation + reclaimable script out of `DiskTools.cs:28-107` into a
   service + typed DTOs (`DiskUsageEntry`…); white-box test helpers via InternalsVisibleTo.
-- [ ] **R2 ISecurityService** — move `SystemTools.SecurityAudit` inline PS (`:103-121`) behind a service
+- [x] **R2 ISecurityService** — move `SystemTools.SecurityAudit` inline PS (`:103-121`) behind a service
   + `SecurityAuditDto`; replace hardcoded JSON fallback literal.
-- [ ] **R3 IFirewallService** — move `NetworkTools.Firewall` inline PS (`:66-116`) behind a service.
-- [ ] **R4 empty-output guards** — `DiskTools.reclaimable` + `NetworkTools` raw-`Stdout` returns lack
+- [x] **R3 IFirewallService** — move `NetworkTools.Firewall` inline PS (`:66-116`) behind a service.
+- [x] **R4 empty-output guards** — `DiskTools.reclaimable` + `NetworkTools` raw-`Stdout` returns lack
   the empty-output guard that hid the storage bug; add guard or stage-to-file.
-- [ ] **R5 StorageService temp-path quote** (`StorageService.cs:49`) — `& '{tempScript}'` breaks if the
+- [x] **R5 StorageService temp-path quote** (`StorageService.cs:49`) — `& '{tempScript}'` breaks if the
   profile path contains a `'`. Escape or use `-File`.
 
 ### Batch 4 — missing tests (10 services have none)

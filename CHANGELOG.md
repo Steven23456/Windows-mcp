@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Changed
+- **`firewall` logic extracted into `IFirewallService`/`FirewallService`** — `NetworkTools.Firewall`
+  built inline PowerShell for list/add/remove and returned raw stdout, so it was untestable. Now
+  behind a service: `list` returns typed `FirewallRuleDto[]` (enum fields rendered as strings,
+  handling both the single-object and array shapes `ConvertTo-Json` produces), and add/remove throw
+  on cmdlet failure. `NetworkTools` no longer depends on `IPowerShellService`; the `network` action
+  now also forwards a `CancellationToken`. This also closes the R4 empty-output-guard item (the
+  reclaimable guard landed with the disk refactor; the firewall path is now typed + failure-checked).
+  Unit-tested via `InternalsVisibleTo` (`ParseRules` single/array/blank) + mocked list/add paths.
 - **`security_audit` logic extracted into `ISecurityService`/`SecurityService`** — `SystemTools`
   embedded the audit PowerShell inline and returned raw stdout (with a hardcoded JSON fallback
   literal), so the success path was untestable. Now behind a service that parses into a typed

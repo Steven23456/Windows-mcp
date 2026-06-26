@@ -26,10 +26,10 @@ This document provides a comprehensive dependency graph of all files, components
 The codebase is organized into the following modules:
 
 - **entry**: 4 files
-- **services**: 27 files
+- **services**: 28 files
 - **tools**: 14 files
-- **abstractions**: 27 files
-- **models**: 14 files
+- **abstractions**: 28 files
+- **models**: 15 files
 
 ---
 
@@ -198,6 +198,24 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `FileSystemService`
+
+---
+
+### `src/WindowsMcp/Services/FirewallService.cs` - FirewallService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `FirewallService`
 
 ---
 
@@ -987,6 +1005,18 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp.Abstractions/IFirewallService.cs` - IFirewallService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IFirewallService`
+
+---
+
 ### `src/WindowsMcp.Abstractions/IInputService.cs` - IInputService.cs module
 
 **Internal Dependencies:**
@@ -1223,6 +1253,13 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp.Abstractions/Models/FirewallDtos.cs` - <summary>A Windows Firewall rule (enabled-state, direction, and action rendered as strings).</summary>
+
+**Exports:**
+- Classes: `FirewallRuleDto`
+
+---
+
 ### `src/WindowsMcp.Abstractions/Models/InputDtos.cs` - InputDtos.cs module
 
 **Exports:**
@@ -1324,6 +1361,7 @@ The codebase is organized into the following modules:
 | `EnvService.cs` | 1 files | 1 files |
 | `EventLogService.cs` | 2 files | 1 files |
 | `FileSystemService.cs` | 2 files | 1 files |
+| `FirewallService.cs` | 2 files | 1 files |
 | `InputService.cs` | 2 files | 1 files |
 | `LspEnumerator.cs` | 2 files | 1 files |
 | `NetworkService.cs` | 2 files | 1 files |
@@ -1345,7 +1383,6 @@ The codebase is organized into the following modules:
 | `WindowService.cs` | 2 files | 1 files |
 | `WmiService.cs` | 1 files | 1 files |
 | `CommandTarget.cs` | 0 files | 2 files |
-| `StartupApproval.cs` | 0 files | 2 files |
 
 ---
 
@@ -1371,7 +1408,7 @@ graph TD
         N6[ClipboardService.cs]
         N7[DiskService.cs]
         N8[EnvService.cs]
-        N9[...22 more]
+        N9[...23 more]
     end
 
     subgraph Tools
@@ -1389,16 +1426,16 @@ graph TD
         N18[IClipboardService.cs]
         N19[IDiskService.cs]
         N20[IEnvService.cs]
-        N21[...22 more]
+        N21[...23 more]
     end
 
     subgraph Models
         N22[DiskDtos.cs]
         N23[FileSystemDtos.cs]
-        N24[InputDtos.cs]
-        N25[NetworkDtos.cs]
-        N26[PowerShellDtos.cs]
-        N27[...9 more]
+        N24[FirewallDtos.cs]
+        N25[InputDtos.cs]
+        N26[NetworkDtos.cs]
+        N27[...10 more]
     end
 
 ```
@@ -1409,13 +1446,13 @@ graph TD
 
 | Category | Count |
 |----------|-------|
-| Total Source Files | 86 |
+| Total Source Files | 89 |
 | Total Modules | 5 |
-| Total Lines of Code | 5551 |
-| Total Exports | 187 |
+| Total Lines of Code | 5614 |
+| Total Exports | 190 |
 | Total Re-exports | 0 |
-| Total Classes | 105 |
-| Total Interfaces | 27 |
+| Total Classes | 107 |
+| Total Interfaces | 28 |
 | Total Functions | 52 |
 | Total Type Guards | 0 |
 | Total Enums | 3 |

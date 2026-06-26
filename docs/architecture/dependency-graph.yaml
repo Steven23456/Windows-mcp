@@ -2,9 +2,9 @@ metadata:
   name: unknown
   version: 0.0.0
   lastUpdated: "2026-06-26"
-  totalFiles: 86
+  totalFiles: 89
   totalModules: 5
-  totalExports: 187
+  totalExports: 190
 entryPoints: []
 modules:
   entry:
@@ -179,6 +179,24 @@ modules:
         - FileSystemService
       classes:
         - FileSystemService
+    src/WindowsMcp/Services/FirewallService.cs:
+      description: FirewallService module
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - FirewallService
+      classes:
+        - FirewallService
     src/WindowsMcp/Services/InputService.cs:
       description: "Disambiguate: H.InputSimulator also exposes a WindowsInput.MouseButton enum."
       externalDependencies:
@@ -1021,6 +1039,18 @@ modules:
         - IFileSystemService
       interfaces:
         - IFileSystemService
+    src/WindowsMcp.Abstractions/IFirewallService.cs:
+      description: IFirewallService module
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - IFirewallService
+      interfaces:
+        - IFirewallService
     src/WindowsMcp.Abstractions/IInputService.cs:
       description: IInputService module
       externalDependencies: []
@@ -1286,6 +1316,15 @@ modules:
         - EventLogEntryDto
         - ScheduledTaskDto
         - ScheduledTaskDetailDto
+    src/WindowsMcp.Abstractions/Models/FirewallDtos.cs:
+      description: <summary>A Windows Firewall rule (enabled-state, direction, and action rendered as strings).</summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies: []
+      exports:
+        - FirewallRuleDto
+      classes:
+        - FirewallRuleDto
     src/WindowsMcp.Abstractions/Models/InputDtos.cs:
       description: InputDtos module
       externalDependencies: []
@@ -1498,6 +1537,7 @@ dependencyGraph:
         - src/WindowsMcp/Services/EnvService.cs
         - src/WindowsMcp/Services/EventLogService.cs
         - src/WindowsMcp/Services/FileSystemService.cs
+        - src/WindowsMcp/Services/FirewallService.cs
         - src/WindowsMcp/Services/InputService.cs
         - src/WindowsMcp/Services/LspEnumerator.cs
         - src/WindowsMcp/Services/NetworkService.cs
@@ -1543,6 +1583,7 @@ dependencyGraph:
         - src/WindowsMcp.Abstractions/IEnvService.cs
         - src/WindowsMcp.Abstractions/IEventLogService.cs
         - src/WindowsMcp.Abstractions/IFileSystemService.cs
+        - src/WindowsMcp.Abstractions/IFirewallService.cs
         - src/WindowsMcp.Abstractions/IInputService.cs
         - src/WindowsMcp.Abstractions/ILspEnumerator.cs
         - src/WindowsMcp.Abstractions/INetworkService.cs
@@ -1567,6 +1608,7 @@ dependencyGraph:
       files:
         - src/WindowsMcp.Abstractions/Models/DiskDtos.cs
         - src/WindowsMcp.Abstractions/Models/FileSystemDtos.cs
+        - src/WindowsMcp.Abstractions/Models/FirewallDtos.cs
         - src/WindowsMcp.Abstractions/Models/InputDtos.cs
         - src/WindowsMcp.Abstractions/Models/NetworkDtos.cs
         - src/WindowsMcp.Abstractions/Models/PowerShellDtos.cs
@@ -1580,12 +1622,12 @@ dependencyGraph:
         - src/WindowsMcp.Abstractions/Models/WebDtos.cs
         - src/WindowsMcp.Abstractions/Models/WindowDtos.cs
 statistics:
-  totalSourceFiles: 86
+  totalSourceFiles: 89
   totalModules: 5
-  totalLinesOfCode: 5551
-  totalExports: 187
-  totalClasses: 105
-  totalInterfaces: 27
+  totalLinesOfCode: 5614
+  totalExports: 190
+  totalClasses: 107
+  totalInterfaces: 28
   totalFunctions: 52
   totalTypeGuards: 0
   totalEnums: 3
