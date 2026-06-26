@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Fixed
+- **`get_table` always returned empty column headers** — `UIAutomationService.GetTableAsync`
+  allocated `headers[cols]` but never populated it (GridPattern has no header concept). Now reads
+  column headers from the element's TablePattern (`ColumnHeaders`) when supported.
 - **Native handle / COM-object leaks in the process and WMI paths** (found by a codebase audit):
   - `ProcessService.ListAsync` never disposed the `Process` wrappers returned by
     `Process.GetProcesses()` — and touching `WorkingSet64`/`MainModule` opens a kernel handle per

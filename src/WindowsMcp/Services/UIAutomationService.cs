@@ -269,7 +269,18 @@ public sealed class UIAutomationService : IUIAutomationService
                 ?? throw new InvalidOperationException("Element doesn't support GridPattern");
             var rows = grid.RowCount.Value;
             var cols = grid.ColumnCount.Value;
+
+            // GridPattern exposes no headers; column headers come from the TablePattern (if the
+            // control supports it). Without this the header row was always empty.
             var headers = new string[cols];
+            var table = el.Patterns.Table.PatternOrDefault;
+            var headerEls = table?.ColumnHeaders.ValueOrDefault;
+            if (headerEls != null)
+            {
+                for (int c = 0; c < cols && c < headerEls.Length; c++)
+                    headers[c] = headerEls[c].Name ?? "";
+            }
+
             var data = new string[rows][];
             for (int r = 0; r < rows; r++)
             {
