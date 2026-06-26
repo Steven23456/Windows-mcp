@@ -10,6 +10,55 @@ full record.
   opt-in SMART/physical (`include_usage`). **Both storage_health paths E2E-verified against the
   live server** (fast default never wakes devices; deep path returns real SMART + free space).
 
+## 🔧 Audit backlog (2026-06-26 — 3-agent codebase audit; full sweep approved)
+
+Ordered for safety/atomicity. Each is its own dev-workflow task + atomic commit.
+
+### Batch 1 — clear defects
+- [ ] **D1 ProcessService handle leak** (`ProcessService.cs:13-21,29,74`) — `Process` objects from
+  `GetProcesses`/`GetProcessById`/`Start` never disposed → native handle leak per `process list` /
+  `startup_report`. Wrap in `using`/dispose after projecting DTO.
+- [ ] **D2 WmiService COM leak** (`WmiService.cs:20-26`) — `ManagementObjectCollection` + each
+  `ManagementObject` not disposed. Dispose collection + per-row objects.
+- [ ] **D3 WindowService Process leak** (`WindowService.cs:73`) — `Process.Start` result not disposed.
+- [ ] **D4 get_table empty headers** (`UIAutomationService.cs:272-283`) — `headers[]` allocated, never
+  populated; table always returns null headers. Populate from header cells.
+- [ ] **D5 PowerAction false-success** (`PowerService.cs:16-22`) — `SE_SHUTDOWN_NAME` never enabled,
+  `ExitWindowsEx` bool ignored → unelevated no-op reported as "executed". Enable privilege; throw on false.
+- [ ] **D6 HashFile aborts find_duplicates** (`FileSystemService.cs:105-119`) — locked/denied file throws
+  out of the grouping and kills the whole search. Guard per-file, skip failures.
+- [ ] **D7 PowerShell orphan-on-cancel** (`PowerShellService.cs:57-66`) — `ct.Register(kill)` installed
+  after stdin write; cancel during write orphans the child. Register kill before the write.
+
+### Batch 2 — cross-cutting (both agents flagged)
+- [ ] **X1 PowerShellService default timeout** — the no-timeout `SemaphoreSlim` gate lets one runaway
+  script wedge ALL PS-backed tools. Add a default per-call timeout (the storage budget pattern).
+- [ ] **X2 Plumb CancellationToken through tools** — services accept `ct`; most tools drop it
+  (`ShellTools`, `DiskTools`, `NetworkTools`, `ProcessTools`, `FileTools`). Add `ct` params + forward.
+
+### Batch 3 — service refactors (restore thin-tool pattern)
+- [ ] **R1 IDiskService** — extract aggregation + reclaimable script out of `DiskTools.cs:28-107` into a
+  service + typed DTOs (`DiskUsageEntry`…); white-box test helpers via InternalsVisibleTo.
+- [ ] **R2 ISecurityService** — move `SystemTools.SecurityAudit` inline PS (`:103-121`) behind a service
+  + `SecurityAuditDto`; replace hardcoded JSON fallback literal.
+- [ ] **R3 IFirewallService** — move `NetworkTools.Firewall` inline PS (`:66-116`) behind a service.
+- [ ] **R4 empty-output guards** — `DiskTools.reclaimable` + `NetworkTools` raw-`Stdout` returns lack
+  the empty-output guard that hid the storage bug; add guard or stage-to-file.
+- [ ] **R5 StorageService temp-path quote** (`StorageService.cs:49`) — `& '{tempScript}'` breaks if the
+  profile path contains a `'`. Escape or use `-File`.
+
+### Batch 4 — missing tests (10 services have none)
+- [ ] **T1 WebService tests** — SSRF/private-IP guard + HTML→markdown (highest value).
+- [ ] **T2 NetworkService tests**, **T3 ProcessService tests** — pure-logic paths.
+
+### Batch 5 — expansions
+- [ ] **E1 network ports → owning PID/name/path** (`PortInfoDto` completeness defect; `Get-NetTCPConnection -OwningProcess`).
+- [ ] **E2 verify_signature** — expose existing catalog-aware `AuthenticodeInspector` as a standalone tool.
+- [ ] **E3 file_hash (SHA256/SHA1/MD5)** — upgrade `FileSystemService.HashFile` (MD5-only) + expose.
+- [ ] **E4 process_inspect** — parent PID / cmdline / owner / loaded modules (WMI `Win32_Process` + `Process.Modules`).
+- [ ] **E5 defender_status** (`Get-MpComputerStatus`/`Get-MpThreat`), **E6 cert_store** (rogue root CAs),
+  **E7 reliability/minidump list**, **E8 driver_list** (BYOVD), **E9 NTFS ADS + reparse**.
+
 ## 🟢 Ready / candidates (none blocking)
 
 - [ ] **`startup_report` — scheduled-task COM-handler resolution.** ComHandler tasks (NGEN,

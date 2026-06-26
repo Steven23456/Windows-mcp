@@ -18,13 +18,21 @@ public sealed class WmiService : IWmiService
         var query = new ObjectQuery(wql);
 
         using var searcher = new ManagementObjectSearcher(scope, query);
-        var rows = searcher.Get()
-            .Cast<ManagementObject>()
-            .Select(mo => (object)mo.Properties
-                .Cast<PropertyData>()
-                .ToDictionary(p => p.Name, p => p.Value))
-            .ToArray();
 
-        return Task.FromResult(rows);
+        // ManagementObjectCollection and each ManagementObject are COM-backed and disposable;
+        // project to plain dictionaries, then dispose every row + the collection.
+        using var collection = searcher.Get();
+        var rows = new List<object>();
+        foreach (ManagementObject mo in collection)
+        {
+            using (mo)
+            {
+                rows.Add(mo.Properties
+                    .Cast<PropertyData>()
+                    .ToDictionary(p => p.Name, p => p.Value));
+            }
+        }
+
+        return Task.FromResult(rows.ToArray());
     }
 }

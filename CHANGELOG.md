@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Fixed
+- **Native handle / COM-object leaks in the process and WMI paths** (found by a codebase audit):
+  - `ProcessService.ListAsync` never disposed the `Process` wrappers returned by
+    `Process.GetProcesses()` — and touching `WorkingSet64`/`MainModule` opens a kernel handle per
+    wrapper. Since `startup_report` also walks this path, handles accumulated on every call. Now
+    disposed in a `try/finally` after projecting to DTOs. `KillAsync`/`StartDetachedAsync` and
+    `WindowService.LaunchAsync` likewise `using`-dispose their `Process` wrappers (the detached
+    child keeps running; only our handle is released).
+  - `WmiService.QueryAsync` disposed only the `ManagementObjectSearcher`, leaking the
+    `ManagementObjectCollection` and every COM-backed `ManagementObject` row on each
+    `wmi_query`/`system_info` call. Now disposes the collection and each row.
+  - Added `ProcessServiceTests` + `WmiServiceTests` (these services previously had no direct
+    coverage) as regression guards for the behavior across the disposal change.
+
 ## [0.3.1] - 2026-06-26
 
 ### Fixed

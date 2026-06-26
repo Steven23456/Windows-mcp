@@ -10,23 +10,35 @@ public sealed class ProcessService : IProcessService
     {
         ct.ThrowIfCancellationRequested();
 
-        var dtos = Process.GetProcesses()
-            .Select(p =>
-            {
-                string? path = null;
-                try { path = p.MainModule?.FileName; }
-                catch { /* system/protected processes throw on MainModule access */ }
-                return new ProcessDto(p.Id, p.ProcessName, path, p.WorkingSet64 / 1024 / 1024);
-            })
-            .ToArray();
+        // Process wrappers hold native handles (opened on WorkingSet64/MainModule access);
+        // dispose every one after projecting to DTOs, or handles leak per call.
+        var processes = Process.GetProcesses();
+        try
+        {
+            var dtos = processes
+                .Select(p =>
+                {
+                    string? path = null;
+                    try { path = p.MainModule?.FileName; }
+                    catch { /* system/protected processes throw on MainModule access */ }
+                    return new ProcessDto(p.Id, p.ProcessName, path, p.WorkingSet64 / 1024 / 1024);
+                })
+                .ToArray();
 
-        return Task.FromResult(dtos);
+            return Task.FromResult(dtos);
+        }
+        finally
+        {
+            foreach (var p in processes)
+                p.Dispose();
+        }
     }
 
     public Task KillAsync(int pid, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        Process.GetProcessById(pid).Kill();
+        using var process = Process.GetProcessById(pid);
+        process.Kill();
         return Task.CompletedTask;
     }
 
@@ -71,7 +83,9 @@ public sealed class ProcessService : IProcessService
             CreateNoWindow = false
         };
 
-        var process = Process.Start(psi)
+        // Detached child keeps running after we dispose the wrapper (UseShellExecute=false,
+        // no handles we own); dispose only releases our handle to it.
+        using var process = Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to start process: {command}");
 
         return Task.FromResult(process.Id);
