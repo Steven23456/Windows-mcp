@@ -29,6 +29,19 @@ public record SecurityAuditDto(
     string? Note = null);
 
 /// <summary>
+/// A certificate from a Windows certificate store. <see cref="SelfSigned"/> (Subject == Issuer) in a
+/// root store is normal for legitimate CAs but is also how a MITM/rogue root persists — review
+/// unfamiliar self-signed roots.
+/// </summary>
+public record CertInfoDto(
+    string Subject,
+    string Issuer,
+    string Thumbprint,
+    DateTime NotAfter,
+    bool SelfSigned,
+    bool Expired);
+
+/// <summary>
 /// Microsoft Defender posture from Get-MpComputerStatus. Null fields / a set <see cref="Note"/>
 /// indicate Defender is absent or its cmdlets are unavailable (e.g. a third-party AV is active).
 /// </summary>

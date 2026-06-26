@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- **`cert_store` tool** — enumerate a Windows certificate store (LocalMachine/CurrentUser × Root/CA/My/…)
+  via native `X509Store`; each cert reports subject/issuer/thumbprint/expiry and self-signed + expired
+  flags. Surfaces rogue/MITM root CAs (a self-signed cert in Root). New `ICertStoreService`.
 - **`defender_status` tool** — Microsoft Defender posture via `Get-MpComputerStatus`: real-time
   protection, tamper protection, behavior monitoring, signature version + last-updated, and last
   quick/full scan times. Null fields + a `Note` when Defender is disabled/replaced. (`SecurityTools`.)

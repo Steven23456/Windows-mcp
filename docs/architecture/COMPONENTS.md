@@ -70,6 +70,7 @@ public static async Task<int> Main(string[] args)
 | `IDiskService` | `DiskService` |
 | `ISecurityService` | `SecurityService` |
 | `IFirewallService` | `FirewallService` |
+| `ICertStoreService` | `CertStoreService` |
 | `IEnvService` | `EnvService` |
 | `IPowerService` | `PowerService` |
 | `INotificationService` | `NotificationService` |
@@ -157,15 +158,16 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 ---
 
-### `SecurityTools` — 2 tools
+### `SecurityTools` — 3 tools
 `src/WindowsMcp/Tools/SecurityTools.cs`
 
-**Injected:** `IAuthenticodeInspector`, `ISecurityService`
+**Injected:** `IAuthenticodeInspector`, `ISecurityService`, `ICertStoreService`
 
 | Method | Description |
 |--------|-------------|
 | `VerifySignature` | Catalog-aware Authenticode trust verdict for a file |
 | `DefenderStatus` | Microsoft Defender posture (real-time/tamper protection, signature age, last scans) |
+| `CertStore` | Enumerate a certificate store; flags self-signed (rogue-root) and expired certs |
 
 ---
 

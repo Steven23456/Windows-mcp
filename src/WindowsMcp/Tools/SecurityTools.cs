@@ -10,11 +10,13 @@ public sealed class SecurityTools
 {
     private readonly IAuthenticodeInspector _authenticode;
     private readonly ISecurityService _security;
+    private readonly ICertStoreService _certStore;
 
-    public SecurityTools(IAuthenticodeInspector authenticode, ISecurityService security)
+    public SecurityTools(IAuthenticodeInspector authenticode, ISecurityService security, ICertStoreService certStore)
     {
         _authenticode = authenticode;
         _security = security;
+        _certStore = certStore;
     }
 
     [McpServerTool, Description(
@@ -38,5 +40,19 @@ public sealed class SecurityTools
     {
         var status = await _security.GetDefenderStatusAsync(ct);
         return JsonSerializer.Serialize(status);
+    }
+
+    [McpServerTool, Description(
+        "Enumerate certificates in a Windows certificate store. location: LocalMachine (default) or " +
+        "CurrentUser; store_name: Root (default), CA, My, etc. Each cert reports subject, issuer, " +
+        "thumbprint, expiry, and self-signed/expired flags. A self-signed cert in the Root store is " +
+        "normal for legitimate CAs but is also how a rogue/MITM root persists — review unfamiliar ones.")]
+    public async Task<string> CertStore(
+        [Description("Store location: LocalMachine or CurrentUser")] string location = "LocalMachine",
+        [Description("Store name: Root, CA, My, etc.")] string store_name = "Root",
+        CancellationToken ct = default)
+    {
+        var certs = await _certStore.ListAsync(location, store_name, ct);
+        return JsonSerializer.Serialize(certs);
     }
 }
