@@ -27,3 +27,18 @@ public record SecurityAuditDto(
     int? UacLevel,
     string? BitlockerStatus,
     string? Note = null);
+
+/// <summary>
+/// Microsoft Defender posture from Get-MpComputerStatus. Null fields / a set <see cref="Note"/>
+/// indicate Defender is absent or its cmdlets are unavailable (e.g. a third-party AV is active).
+/// </summary>
+public record DefenderStatusDto(
+    bool? RealTimeProtectionEnabled,
+    bool? AntivirusEnabled,
+    bool? IsTamperProtected,
+    bool? BehaviorMonitorEnabled,
+    string? AntivirusSignatureVersion,
+    DateTime? AntivirusSignatureLastUpdated,
+    DateTime? QuickScanEndTime,
+    DateTime? FullScanEndTime,
+    string? Note = null);

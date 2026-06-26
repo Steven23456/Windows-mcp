@@ -16,7 +16,7 @@ public class SecurityToolsTests
         var inspector = new Mock<IAuthenticodeInspector>();
         inspector.Setup(i => i.Inspect(@"C:\app.exe"))
                  .Returns(new AuthenticodeInfo(true, "CN=Contoso"));
-        var tools = new SecurityTools(inspector.Object);
+        var tools = new SecurityTools(inspector.Object, new Mock<ISecurityService>().Object);
 
         var json = tools.VerifySignature(@"C:\app.exe");
 
@@ -29,7 +29,7 @@ public class SecurityToolsTests
         var inspector = new Mock<IAuthenticodeInspector>();
         inspector.Setup(i => i.Inspect(It.IsAny<string>()))
                  .Returns(new AuthenticodeInfo(false, null));
-        var tools = new SecurityTools(inspector.Object);
+        var tools = new SecurityTools(inspector.Object, new Mock<ISecurityService>().Object);
 
         tools.VerifySignature(@"C:\unknown.bin");
 

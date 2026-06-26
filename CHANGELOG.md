@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- **`defender_status` tool** — Microsoft Defender posture via `Get-MpComputerStatus`: real-time
+  protection, tamper protection, behavior monitoring, signature version + last-updated, and last
+  quick/full scan times. Null fields + a `Note` when Defender is disabled/replaced. (`SecurityTools`.)
 - **`process_inspect` tool** — deep per-process detail: parent PID and command line (via WMI),
   start time, and the **loaded-module (DLL) inventory** (via the live process) — the core signal for
   spotting injected/sideloaded DLLs and tracing process lineage. The module list degrades gracefully

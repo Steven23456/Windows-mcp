@@ -45,6 +45,34 @@ public class SecurityServiceTests
     }
 
     [Fact]
+    public async Task GetDefenderStatusAsync_parses_status()
+    {
+        var ps = new Mock<IPowerShellService>();
+        ps.Setup(p => p.RunAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+          .ReturnsAsync(Ok("""{"RealTimeProtectionEnabled":true,"AntivirusEnabled":true,"IsTamperProtected":true,"BehaviorMonitorEnabled":true,"AntivirusSignatureVersion":"1.405.0.0","AntivirusSignatureLastUpdated":"2026-06-26T00:00:00","QuickScanEndTime":null,"FullScanEndTime":null}"""));
+
+        var s = await Make(ps).GetDefenderStatusAsync();
+
+        s.RealTimeProtectionEnabled.Should().BeTrue();
+        s.IsTamperProtected.Should().BeTrue();
+        s.AntivirusSignatureVersion.Should().Be("1.405.0.0");
+        s.Note.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetDefenderStatusAsync_returns_note_when_unavailable()
+    {
+        var ps = new Mock<IPowerShellService>();
+        ps.Setup(p => p.RunAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+          .ReturnsAsync(Ok(""));
+
+        var s = await Make(ps).GetDefenderStatusAsync();
+
+        s.RealTimeProtectionEnabled.Should().BeNull();
+        s.Note.Should().Contain("unavailable");
+    }
+
+    [Fact]
     public async Task AuditAsync_tolerates_partial_results()
     {
         // BitLocker probe failed (unelevated) → null; others present.

@@ -157,14 +157,15 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 ---
 
-### `SecurityTools` — 1 tool
+### `SecurityTools` — 2 tools
 `src/WindowsMcp/Tools/SecurityTools.cs`
 
-**Injected:** `IAuthenticodeInspector`
+**Injected:** `IAuthenticodeInspector`, `ISecurityService`
 
 | Method | Description |
 |--------|-------------|
 | `VerifySignature` | Catalog-aware Authenticode trust verdict for a file |
+| `DefenderStatus` | Microsoft Defender posture (real-time/tamper protection, signature age, last scans) |
 
 ---
 

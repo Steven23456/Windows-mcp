@@ -25,6 +25,24 @@ public sealed class SecurityService : ISecurityService
             ?? new SecurityAuditDto(null, null, null, null, "audit returned unparseable output");
     }
 
+    public async Task<DefenderStatusDto> GetDefenderStatusAsync(CancellationToken ct = default)
+    {
+        var result = await _ps.RunAsync(DefenderScript, ct);
+        var stdout = result.Stdout?.Trim();
+        if (string.IsNullOrEmpty(stdout))
+            return new DefenderStatusDto(null, null, null, null, null, null, null, null,
+                "Defender status unavailable (Get-MpComputerStatus failed; Defender may be disabled or replaced by a third-party AV)");
+
+        return JsonSerializer.Deserialize<DefenderStatusDto>(stdout, JsonOpts)
+            ?? new DefenderStatusDto(null, null, null, null, null, null, null, null, "unparseable Defender status output");
+    }
+
+    // Single pipeline (survives the -Command - stdin path). Property names match DefenderStatusDto.
+    private const string DefenderScript =
+        "Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled,AntivirusEnabled,IsTamperProtected," +
+        "BehaviorMonitorEnabled,AntivirusSignatureVersion,AntivirusSignatureLastUpdated,QuickScanEndTime,FullScanEndTime " +
+        "| ConvertTo-Json";
+
     // Each probe is isolated in its own try/catch so one missing cmdlet or permission failure
     // doesn't blank the whole report. Keys are PascalCase to match SecurityAuditDto.
     private const string AuditScript = @"

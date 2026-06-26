@@ -9,8 +9,13 @@ namespace WindowsMcp.Tools;
 public sealed class SecurityTools
 {
     private readonly IAuthenticodeInspector _authenticode;
+    private readonly ISecurityService _security;
 
-    public SecurityTools(IAuthenticodeInspector authenticode) => _authenticode = authenticode;
+    public SecurityTools(IAuthenticodeInspector authenticode, ISecurityService security)
+    {
+        _authenticode = authenticode;
+        _security = security;
+    }
 
     [McpServerTool, Description(
         "Verify a file's Authenticode code-signing trust. Catalog-aware: Windows system files and " +
@@ -23,5 +28,15 @@ public sealed class SecurityTools
     {
         var info = _authenticode.Inspect(path);
         return JsonSerializer.Serialize(info);
+    }
+
+    [McpServerTool, Description(
+        "Get Microsoft Defender posture: real-time protection, tamper protection, behavior monitoring, " +
+        "signature version + last-updated, and last quick/full scan times. Null fields (with a Note) mean " +
+        "Defender is disabled or replaced by a third-party AV.")]
+    public async Task<string> DefenderStatus(CancellationToken ct = default)
+    {
+        var status = await _security.GetDefenderStatusAsync(ct);
+        return JsonSerializer.Serialize(status);
     }
 }

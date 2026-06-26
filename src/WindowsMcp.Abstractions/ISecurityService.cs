@@ -9,4 +9,7 @@ public interface ISecurityService
     /// return null fields when run unelevated rather than failing the whole audit.
     /// </summary>
     Task<SecurityAuditDto> AuditAsync(CancellationToken ct = default);
+
+    /// <summary>Microsoft Defender posture (real-time/tamper protection, signature age, last scans).</summary>
+    Task<DefenderStatusDto> GetDefenderStatusAsync(CancellationToken ct = default);
 }
