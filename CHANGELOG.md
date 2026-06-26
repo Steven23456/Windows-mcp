@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-25
+
 ### Added
 - **`storage_health` MCP tool** — disk/drive HEALTH diagnostics (distinct from `disk_inspect`'s
   usage analysis): physical disks (model, bus/media type, SMART `HealthStatus` + reliability
