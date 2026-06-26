@@ -2,9 +2,9 @@ metadata:
   name: unknown
   version: 0.0.0
   lastUpdated: "2026-06-26"
-  totalFiles: 84
+  totalFiles: 86
   totalModules: 5
-  totalExports: 184
+  totalExports: 187
 entryPoints: []
 modules:
   entry:
@@ -371,6 +371,24 @@ modules:
         - ScreenshotService
       classes:
         - ScreenshotService
+    src/WindowsMcp/Services/SecurityService.cs:
+      description: SecurityService module
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - SecurityService
+      classes:
+        - SecurityService
     src/WindowsMcp/Services/ServiceControlService.cs:
       description: ServiceControlService module
       externalDependencies: []
@@ -1117,6 +1135,18 @@ modules:
         - IScreenshotService
       interfaces:
         - IScreenshotService
+    src/WindowsMcp.Abstractions/ISecurityService.cs:
+      description: ISecurityService module
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - ISecurityService
+      interfaces:
+        - ISecurityService
     src/WindowsMcp.Abstractions/IServiceControlService.cs:
       description: IServiceControlService module
       externalDependencies: []
@@ -1327,9 +1357,11 @@ modules:
       exports:
         - AuthenticodeInfo
         - LspProviderDto
+        - SecurityAuditDto
       classes:
         - AuthenticodeInfo
         - LspProviderDto
+        - SecurityAuditDto
     src/WindowsMcp.Abstractions/Models/StartupReportDtos.cs:
       description: <summary>Aggregated boot/persistence report (the HiJackThis-style snapshot).</summary>
       externalDependencies: []
@@ -1476,6 +1508,7 @@ dependencyGraph:
         - src/WindowsMcp/Services/ProcessService.cs
         - src/WindowsMcp/Services/RegistryService.cs
         - src/WindowsMcp/Services/ScreenshotService.cs
+        - src/WindowsMcp/Services/SecurityService.cs
         - src/WindowsMcp/Services/ServiceControlService.cs
         - src/WindowsMcp/Services/ShortcutResolver.cs
         - src/WindowsMcp/Services/StartupReportService.cs
@@ -1520,6 +1553,7 @@ dependencyGraph:
         - src/WindowsMcp.Abstractions/IProcessService.cs
         - src/WindowsMcp.Abstractions/IRegistryService.cs
         - src/WindowsMcp.Abstractions/IScreenshotService.cs
+        - src/WindowsMcp.Abstractions/ISecurityService.cs
         - src/WindowsMcp.Abstractions/IServiceControlService.cs
         - src/WindowsMcp.Abstractions/IShortcutResolver.cs
         - src/WindowsMcp.Abstractions/IStartupReportService.cs
@@ -1546,12 +1580,12 @@ dependencyGraph:
         - src/WindowsMcp.Abstractions/Models/WebDtos.cs
         - src/WindowsMcp.Abstractions/Models/WindowDtos.cs
 statistics:
-  totalSourceFiles: 84
+  totalSourceFiles: 86
   totalModules: 5
-  totalLinesOfCode: 5497
-  totalExports: 184
-  totalClasses: 103
-  totalInterfaces: 26
+  totalLinesOfCode: 5551
+  totalExports: 187
+  totalClasses: 105
+  totalInterfaces: 27
   totalFunctions: 52
   totalTypeGuards: 0
   totalEnums: 3

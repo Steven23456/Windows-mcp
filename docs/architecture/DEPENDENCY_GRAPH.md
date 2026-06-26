@@ -26,9 +26,9 @@ This document provides a comprehensive dependency graph of all files, components
 The codebase is organized into the following modules:
 
 - **entry**: 4 files
-- **services**: 26 files
+- **services**: 27 files
 - **tools**: 14 files
-- **abstractions**: 26 files
+- **abstractions**: 27 files
 - **models**: 14 files
 
 ---
@@ -394,6 +394,24 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `ScreenshotService`
+
+---
+
+### `src/WindowsMcp/Services/SecurityService.cs` - SecurityService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `SecurityService`
 
 ---
 
@@ -1079,6 +1097,18 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp.Abstractions/ISecurityService.cs` - ISecurityService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `ISecurityService`
+
+---
+
 ### `src/WindowsMcp.Abstractions/IServiceControlService.cs` - IServiceControlService.cs module
 
 **Internal Dependencies:**
@@ -1233,7 +1263,7 @@ The codebase is organized into the following modules:
 ### `src/WindowsMcp.Abstractions/Models/SecurityDtos.cs` - <summary>
 
 **Exports:**
-- Classes: `AuthenticodeInfo`, `LspProviderDto`
+- Classes: `AuthenticodeInfo`, `LspProviderDto`, `SecurityAuditDto`
 
 ---
 
@@ -1304,6 +1334,7 @@ The codebase is organized into the following modules:
 | `ProcessService.cs` | 2 files | 1 files |
 | `RegistryService.cs` | 2 files | 1 files |
 | `ScreenshotService.cs` | 2 files | 1 files |
+| `SecurityService.cs` | 2 files | 1 files |
 | `ServiceControlService.cs` | 2 files | 1 files |
 | `ShortcutResolver.cs` | 1 files | 1 files |
 | `StartupReportService.cs` | 3 files | 1 files |
@@ -1315,7 +1346,6 @@ The codebase is organized into the following modules:
 | `WmiService.cs` | 1 files | 1 files |
 | `CommandTarget.cs` | 0 files | 2 files |
 | `StartupApproval.cs` | 0 files | 2 files |
-| `StartupReportRenderer.cs` | 1 files | 2 files |
 
 ---
 
@@ -1341,7 +1371,7 @@ graph TD
         N6[ClipboardService.cs]
         N7[DiskService.cs]
         N8[EnvService.cs]
-        N9[...21 more]
+        N9[...22 more]
     end
 
     subgraph Tools
@@ -1359,7 +1389,7 @@ graph TD
         N18[IClipboardService.cs]
         N19[IDiskService.cs]
         N20[IEnvService.cs]
-        N21[...21 more]
+        N21[...22 more]
     end
 
     subgraph Models
@@ -1379,13 +1409,13 @@ graph TD
 
 | Category | Count |
 |----------|-------|
-| Total Source Files | 84 |
+| Total Source Files | 86 |
 | Total Modules | 5 |
-| Total Lines of Code | 5497 |
-| Total Exports | 184 |
+| Total Lines of Code | 5551 |
+| Total Exports | 187 |
 | Total Re-exports | 0 |
-| Total Classes | 103 |
-| Total Interfaces | 26 |
+| Total Classes | 105 |
+| Total Interfaces | 27 |
 | Total Functions | 52 |
 | Total Type Guards | 0 |
 | Total Enums | 3 |

@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Changed
+- **`security_audit` logic extracted into `ISecurityService`/`SecurityService`** — `SystemTools`
+  embedded the audit PowerShell inline and returned raw stdout (with a hardcoded JSON fallback
+  literal), so the success path was untestable. Now behind a service that parses into a typed
+  `SecurityAuditDto` (firewall/Defender/UAC/BitLocker, plus a `Note` when all probes fail). Tool is
+  a thin wrapper; `SystemTools` no longer depends on `IPowerShellService`. Unit-tested via a mocked
+  shell (parse, empty-output note, partial results).
 - **`disk_inspect` logic extracted into `IDiskService`/`DiskService`** — the aggregation (top-dir
   usage, file-type grouping, stale-file filtering) and the reclaimable-space PowerShell lived
   directly in `DiskTools`, making it untestable. Now behind a service returning typed DTOs

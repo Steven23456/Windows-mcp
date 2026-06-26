@@ -252,7 +252,7 @@ Windows-mcp.sln
 │   │   │   ├── DiskTools.cs
 │   │   │   ├── StorageTools.cs
 │   │   │   └── StartupTools.cs
-│   │   └── Services/                      (26 service implementations)
+│   │   └── Services/                      (27 service implementations)
 │   │       ├── InputService.cs
 │   │       ├── UIAutomationService.cs
 │   │       └── ...

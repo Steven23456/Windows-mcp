@@ -55,11 +55,11 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Abstraction Layer  (WindowsMcp.Abstractions)      ││
-│  │        26 IXxxService interfaces + Model DTOs               ││
+│  │        27 IXxxService interfaces + Model DTOs               ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Implementation Layer  (WindowsMcp.Services)       ││
-│  │        26 XxxService singletons registered via DI           ││
+│  │        27 XxxService singletons registered via DI           ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
                                 │

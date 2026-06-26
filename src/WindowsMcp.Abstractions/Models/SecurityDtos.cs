@@ -14,3 +14,16 @@ public record AuthenticodeInfo(bool Trusted, string? Signer);
 /// and the backing provider DLL path (environment variables expanded), if resolvable.
 /// </summary>
 public record LspProviderDto(int CatalogEntryId, string ProtocolName, string? ProviderPath);
+
+/// <summary>
+/// Windows security posture snapshot. Fields are null when their probe failed — typically
+/// because it needs admin (BitLocker, some firewall profiles) and the server runs unelevated;
+/// non-null fields are still meaningful. <see cref="Note"/> is set when the whole audit produced
+/// no output (e.g. all probes failed).
+/// </summary>
+public record SecurityAuditDto(
+    bool? FirewallEnabled,
+    bool? DefenderRunning,
+    int? UacLevel,
+    string? BitlockerStatus,
+    string? Note = null);

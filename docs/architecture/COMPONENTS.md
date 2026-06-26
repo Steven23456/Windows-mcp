@@ -68,6 +68,7 @@ public static async Task<int> Main(string[] args)
 | `IWmiService` | `WmiService` |
 | `IStorageService` | `StorageService` |
 | `IDiskService` | `DiskService` |
+| `ISecurityService` | `SecurityService` |
 | `IEnvService` | `EnvService` |
 | `IPowerService` | `PowerService` |
 | `INotificationService` | `NotificationService` |
@@ -157,7 +158,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 ### `SystemTools` — 7 tools
 `src/WindowsMcp/Tools/SystemTools.cs`
 
-**Injected:** `IServiceControlService`, `IEventLogService`, `ITaskSchedulerService`, `IWmiService`, `IEnvService`, `IPowerService`
+**Injected:** `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`
 
 | Method | Description |
 |--------|-------------|
@@ -301,6 +302,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IWmiService` | `QueryAsync(wql)` |
 | `IStorageService` | `GetHealthAsync(driveLetter?, includeUsage, timeoutSeconds)` → `StorageHealthReport` |
 | `IDiskService` | `GetUsageAsync`, `GetFileTypesAsync`, `GetStaleAsync`, `GetReclaimableAsync` |
+| `ISecurityService` | `AuditAsync()` → `SecurityAuditDto` |
 | `IEnvService` | `GetAsync`, `SetAsync`, `ListAsync` |
 | `IPowerService` | `SleepAsync`, `HibernateAsync`, `LockAsync`, `SignOutAsync` |
 | `INotificationService` | `ShowAsync` |
