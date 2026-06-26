@@ -60,6 +60,20 @@ public class SecurityServiceTests
     }
 
     [Fact]
+    public async Task GetDefenderStatusAsync_degrades_gracefully_on_legacy_date_json()
+    {
+        // PowerShell 5.1 ConvertTo-Json emits DateTime as "\/Date(ms)\/", which System.Text.Json
+        // cannot parse into DateTime? — the tool must surface a note, not throw.
+        var ps = new Mock<IPowerShellService>();
+        ps.Setup(p => p.RunAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+          .ReturnsAsync(Ok("""{"RealTimeProtectionEnabled":true,"AntivirusSignatureLastUpdated":"\/Date(1782454172000)\/"}"""));
+
+        var s = await Make(ps).GetDefenderStatusAsync();
+
+        s.Note.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task GetDefenderStatusAsync_returns_note_when_unavailable()
     {
         var ps = new Mock<IPowerShellService>();

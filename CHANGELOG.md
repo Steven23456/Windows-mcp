@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-26
+
+### Fixed
+- **`defender_status` faulted instead of returning data** — found by live end-to-end testing right
+  after the v0.4.0 release. Windows PowerShell 5.1's `ConvertTo-Json` serializes `DateTime` as
+  `"\/Date(ms)\/"`, which `System.Text.Json` can't parse into `DateTime?`, so deserialization threw
+  out of the tool. The unit test used canned ISO data and missed it. Fix: the script now forces the
+  date fields to ISO 8601 (`.ToString('o')`), and deserialization is wrapped to degrade to a `Note`
+  rather than fault on any future unexpected shape. (The other PS-backed tools were checked — only
+  `defender_status` deserializes `DateTime` from PowerShell JSON.)
+
 ## [0.4.0] - 2026-06-26
 
 Codebase-audit sweep: fixes every defect a 3-agent audit found, restores the thin-tool pattern

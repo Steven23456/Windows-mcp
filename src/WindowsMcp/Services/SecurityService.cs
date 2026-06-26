@@ -33,14 +33,28 @@ public sealed class SecurityService : ISecurityService
             return new DefenderStatusDto(null, null, null, null, null, null, null, null,
                 "Defender status unavailable (Get-MpComputerStatus failed; Defender may be disabled or replaced by a third-party AV)");
 
-        return JsonSerializer.Deserialize<DefenderStatusDto>(stdout, JsonOpts)
-            ?? new DefenderStatusDto(null, null, null, null, null, null, null, null, "unparseable Defender status output");
+        try
+        {
+            return JsonSerializer.Deserialize<DefenderStatusDto>(stdout, JsonOpts)
+                ?? new DefenderStatusDto(null, null, null, null, null, null, null, null, "unparseable Defender status output");
+        }
+        catch (JsonException ex)
+        {
+            // Don't let an unexpected JSON shape (e.g. a legacy date format) fault the whole tool.
+            return new DefenderStatusDto(null, null, null, null, null, null, null, null,
+                "could not parse Defender status: " + ex.Message);
+        }
     }
 
     // Single pipeline (survives the -Command - stdin path). Property names match DefenderStatusDto.
+    // DateTime fields are forced to ISO 8601 via .ToString('o'): Windows PowerShell 5.1 otherwise
+    // serializes them as "\/Date(ms)\/", which System.Text.Json cannot parse into DateTime?.
     private const string DefenderScript =
         "Get-MpComputerStatus | Select-Object RealTimeProtectionEnabled,AntivirusEnabled,IsTamperProtected," +
-        "BehaviorMonitorEnabled,AntivirusSignatureVersion,AntivirusSignatureLastUpdated,QuickScanEndTime,FullScanEndTime " +
+        "BehaviorMonitorEnabled,AntivirusSignatureVersion," +
+        "@{n='AntivirusSignatureLastUpdated';e={if($_.AntivirusSignatureLastUpdated){$_.AntivirusSignatureLastUpdated.ToString('o')}}}," +
+        "@{n='QuickScanEndTime';e={if($_.QuickScanEndTime){$_.QuickScanEndTime.ToString('o')}}}," +
+        "@{n='FullScanEndTime';e={if($_.FullScanEndTime){$_.FullScanEndTime.ToString('o')}}} " +
         "| ConvertTo-Json";
 
     // Each probe is isolated in its own try/catch so one missing cmdlet or permission failure
