@@ -55,4 +55,25 @@ public class FileSystemServiceTests : IDisposable
         var hits = await svc.SearchAsync(_tmp, "*.txt", null, null, false);
         hits.Should().HaveCount(2);
     }
+
+    [Fact]
+    public async Task Search_find_duplicates_skips_locked_files_without_aborting()
+    {
+        var svc = new FileSystemService();
+        const string content = "duplicate-content-xyz";
+        var f1 = Path.Combine(_tmp, "dup1.bin");
+        var f2 = Path.Combine(_tmp, "dup2.bin");
+        var locked = Path.Combine(_tmp, "dup3-locked.bin");
+        await File.WriteAllTextAsync(f1, content);
+        await File.WriteAllTextAsync(f2, content);
+        await File.WriteAllTextAsync(locked, content);
+
+        // Hold the third file open exclusively so HashFile's File.OpenRead throws IOException.
+        using var hold = new FileStream(locked, FileMode.Open, FileAccess.Read, FileShare.None);
+
+        var dups = await svc.SearchAsync(_tmp, "*.bin", null, null, findDuplicates: true);
+
+        // The two accessible identical files are still found; the locked one is skipped, not fatal.
+        dups.Select(d => d.Path).Should().BeEquivalentTo(new[] { f1, f2 });
+    }
 }

@@ -102,7 +102,12 @@ public sealed class FileSystemService : IFileSystemService
             foreach (var group in grouped)
             {
                 ct.ThrowIfCancellationRequested();
-                var byHash = group.GroupBy(h => HashFile(h.Path));
+                // Files that can't be hashed (locked/denied) return null and are skipped —
+                // one unreadable file must not abort the whole duplicate search.
+                var byHash = group
+                    .Select(h => (Hit: h, Hash: HashFile(h.Path)))
+                    .Where(x => x.Hash is not null)
+                    .GroupBy(x => x.Hash!, x => x.Hit);
                 foreach (var hg in byHash.Where(g => g.Count() > 1))
                     dups.AddRange(hg);
             }
@@ -111,11 +116,19 @@ public sealed class FileSystemService : IFileSystemService
         return Task.FromResult(hits.ToArray());
     }
 
-    private static string HashFile(string path)
+    private static string? HashFile(string path)
     {
-        using var stream = File.OpenRead(path);
-        using var md5 = System.Security.Cryptography.MD5.Create();
-        return Convert.ToHexString(md5.ComputeHash(stream));
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var md5 = System.Security.Cryptography.MD5.Create();
+            return Convert.ToHexString(md5.ComputeHash(stream));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Locked or access-denied file: skip it from dedup rather than fail the search.
+            return null;
+        }
     }
 
     public Task CopyAsync(string src, string dst, CancellationToken ct = default)

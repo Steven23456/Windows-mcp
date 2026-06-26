@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Fixed
+- **`file_search find_duplicates` aborted entirely on one locked/denied file** — `HashFile` threw
+  `IOException`/`UnauthorizedAccessException` out of the LINQ grouping, killing the whole search.
+  It now returns null for unreadable files and they're skipped from dedup (covered by a new test
+  that holds a duplicate open exclusively).
 - **`power_action` (shutdown/reboot) reported success on a privilege-blocked no-op** — `ExitWindowsEx`
   silently fails unless `SeShutdownPrivilege` is *enabled* in the process token, and the return value
   was ignored, so the tool returned "executed" while nothing happened. Now enables the privilege via
