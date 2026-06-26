@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Changed
+- **Test coverage added for previously-untested services** — `WebService` SSRF guard
+  (`IsPrivateAddress` widened to internal for white-box testing: loopback / RFC1918 / link-local /
+  unique-local / IPv4-mapped-IPv6 evasion + public-address allow, plus loopback-URL and malformed-URL
+  rejection through `ScrapeAsync`), and `NetworkService` (adapters, ports, loopback ping, DNS,
+  unresolvable-host failure, wifi placeholder). `ProcessService`/`WmiService` coverage landed with
+  the disposal fixes above.
 - **`firewall` logic extracted into `IFirewallService`/`FirewallService`** — `NetworkTools.Firewall`
   built inline PowerShell for list/add/remove and returned raw stdout, so it was untestable. Now
   behind a service: `list` returns typed `FirewallRuleDto[]` (enum fields rendered as strings,

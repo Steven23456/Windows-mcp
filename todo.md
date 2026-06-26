@@ -48,8 +48,8 @@ Ordered for safety/atomicity. Each is its own dev-workflow task + atomic commit.
   profile path contains a `'`. Escape or use `-File`.
 
 ### Batch 4 — missing tests (10 services have none)
-- [ ] **T1 WebService tests** — SSRF/private-IP guard + HTML→markdown (highest value).
-- [ ] **T2 NetworkService tests**, **T3 ProcessService tests** — pure-logic paths.
+- [x] **T1 WebService tests** — SSRF/private-IP guard + HTML→markdown (highest value).
+- [x] **T2 NetworkService tests**, **T3 ProcessService tests** — pure-logic paths.
 
 ### Batch 5 — expansions
 - [ ] **E1 network ports → owning PID/name/path** (`PortInfoDto` completeness defect; `Get-NetTCPConnection -OwningProcess`).
