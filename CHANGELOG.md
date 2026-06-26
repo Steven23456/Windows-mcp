@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-26
+
 ### Fixed
 - **`storage_health` returned empty / timed out against the live MCP server** — two defects that
   only end-to-end testing could surface (unit tests mock the shell):
@@ -15,6 +17,10 @@
      disks + SMART reliability are now **opt-in** under `include_usage`; the **default** path stays
      on fast storage-stack metadata that never wakes a device — `Get-Disk` (now also carrying
      **bus type**), `Get-Partition`, `MSFT_Volume`, and the event log. Default budget 30→45s.
+- Both paths are now **end-to-end verified against the live MCP server**: the fast default
+  returns disks/volumes/events without waking devices (`PhysicalDisks: []`, `UsageProbed:false`),
+  and `include_usage:true` adds real SMART (per-disk temperature/power-on-hours/uncorrected
+  errors) and per-volume free space (`UsageProbed:true`).
 
 ## [0.3.0] - 2026-06-25
 
