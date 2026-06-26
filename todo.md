@@ -15,29 +15,29 @@ full record.
 Ordered for safety/atomicity. Each is its own dev-workflow task + atomic commit.
 
 ### Batch 1 — clear defects
-- [ ] **D1 ProcessService handle leak** (`ProcessService.cs:13-21,29,74`) — `Process` objects from
+- [x] **D1 ProcessService handle leak** (`ProcessService.cs:13-21,29,74`) — `Process` objects from
   `GetProcesses`/`GetProcessById`/`Start` never disposed → native handle leak per `process list` /
   `startup_report`. Wrap in `using`/dispose after projecting DTO.
-- [ ] **D2 WmiService COM leak** (`WmiService.cs:20-26`) — `ManagementObjectCollection` + each
+- [x] **D2 WmiService COM leak** (`WmiService.cs:20-26`) — `ManagementObjectCollection` + each
   `ManagementObject` not disposed. Dispose collection + per-row objects.
-- [ ] **D3 WindowService Process leak** (`WindowService.cs:73`) — `Process.Start` result not disposed.
-- [ ] **D4 get_table empty headers** (`UIAutomationService.cs:272-283`) — `headers[]` allocated, never
+- [x] **D3 WindowService Process leak** (`WindowService.cs:73`) — `Process.Start` result not disposed.
+- [x] **D4 get_table empty headers** (`UIAutomationService.cs:272-283`) — `headers[]` allocated, never
   populated; table always returns null headers. Populate from header cells.
-- [ ] **D5 PowerAction false-success** (`PowerService.cs:16-22`) — `SE_SHUTDOWN_NAME` never enabled,
+- [x] **D5 PowerAction false-success** (`PowerService.cs:16-22`) — `SE_SHUTDOWN_NAME` never enabled,
   `ExitWindowsEx` bool ignored → unelevated no-op reported as "executed". Enable privilege; throw on false.
-- [ ] **D6 HashFile aborts find_duplicates** (`FileSystemService.cs:105-119`) — locked/denied file throws
+- [x] **D6 HashFile aborts find_duplicates** (`FileSystemService.cs:105-119`) — locked/denied file throws
   out of the grouping and kills the whole search. Guard per-file, skip failures.
-- [ ] **D7 PowerShell orphan-on-cancel** (`PowerShellService.cs:57-66`) — `ct.Register(kill)` installed
+- [x] **D7 PowerShell orphan-on-cancel** (`PowerShellService.cs:57-66`) — `ct.Register(kill)` installed
   after stdin write; cancel during write orphans the child. Register kill before the write.
 
 ### Batch 2 — cross-cutting (both agents flagged)
-- [ ] **X1 PowerShellService default timeout** — the no-timeout `SemaphoreSlim` gate lets one runaway
+- [x] **X1 PowerShellService default timeout** — the no-timeout `SemaphoreSlim` gate lets one runaway
   script wedge ALL PS-backed tools. Add a default per-call timeout (the storage budget pattern).
-- [ ] **X2 Plumb CancellationToken through tools** — services accept `ct`; most tools drop it
+- [x] **X2 Plumb CancellationToken through tools** — services accept `ct`; most tools drop it
   (`ShellTools`, `DiskTools`, `NetworkTools`, `ProcessTools`, `FileTools`). Add `ct` params + forward.
 
 ### Batch 3 — service refactors (restore thin-tool pattern)
-- [ ] **R1 IDiskService** — extract aggregation + reclaimable script out of `DiskTools.cs:28-107` into a
+- [x] **R1 IDiskService** — extract aggregation + reclaimable script out of `DiskTools.cs:28-107` into a
   service + typed DTOs (`DiskUsageEntry`…); white-box test helpers via InternalsVisibleTo.
 - [ ] **R2 ISecurityService** — move `SystemTools.SecurityAudit` inline PS (`:103-121`) behind a service
   + `SecurityAuditDto`; replace hardcoded JSON fallback literal.

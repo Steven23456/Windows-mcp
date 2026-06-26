@@ -19,6 +19,9 @@
   `SystemTools` get the same treatment as part of their service refactors.)
 
 ### Fixed
+- **`storage_health` temp-script invocation broke on a username containing an apostrophe** — the
+  staged `.ps1` path was interpolated into a single-quoted PowerShell string (`& '{path}'`) without
+  escaping, so a profile path like `C:\Users\O'Brien\…` corrupted the command. Now doubles `'`.
 - **PowerShell gate could be held forever by a runaway script, wedging every PS-backed tool** — the
   shared no-timeout `SemaphoreSlim` serializes all PowerShell calls, so one stuck child (e.g. an
   accidental infinite loop) blocked audio/notification/firewall/disk/system/storage indefinitely.

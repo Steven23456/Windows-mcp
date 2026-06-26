@@ -46,7 +46,10 @@ public sealed class StorageService : IStorageService
         try
         {
             await File.WriteAllTextAsync(tempScript, script, cts.Token);
-            result = await _ps.RunAsync($"& '{tempScript}'", cts.Token);
+            // Escape ' for the single-quoted PS string: the temp path embeds the username,
+            // which can legitimately contain an apostrophe (e.g. C:\Users\O'Brien\AppData\...).
+            var psPath = tempScript.Replace("'", "''");
+            result = await _ps.RunAsync($"& '{psPath}'", cts.Token);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
