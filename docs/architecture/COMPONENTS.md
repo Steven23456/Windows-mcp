@@ -185,18 +185,19 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 ---
 
-### `ProcessTools` — 5 tools
+### `ProcessTools` — 6 tools
 `src/WindowsMcp/Tools/ProcessTools.cs`
 
-**Injected:** `IProcessService`, `INetworkService`
+**Injected:** `IProcessService`, `IServiceControlService`, `ITaskSchedulerService`, `IEventLogService`
 
 | Method | Description |
 |--------|-------------|
 | `Process` | List processes or kill by PID/name |
-| `GetProcess` | Detailed info for a specific process |
-| `Network` | List active connections per process |
-| `SecurityAudit` | Audit process security posture |
-| `FirewallRules` | List/manage Windows Firewall rules |
+| `ProcessInspect` | Deep per-process detail: parent PID, command line, start time, loaded modules |
+| `StartProcess` | Start a detached process; returns the PID |
+| `Service` | List/status/start/stop/restart Windows services |
+| `ScheduledTask` | List/get/run/create/delete scheduled tasks |
+| `EventLog` | Query the Windows Event Log |
 
 ---
 

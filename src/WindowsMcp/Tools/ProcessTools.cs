@@ -62,6 +62,15 @@ public sealed class ProcessTools
         }
     }
 
+    [McpServerTool, Description("Deep-inspect a process by PID: parent PID, command line, start time, and the loaded-module (DLL) inventory. Use to spot injected/sideloaded DLLs or trace a process's lineage. The module list may be unavailable (ModulesError set) for protected or higher-integrity processes.")]
+    public async Task<string> ProcessInspect(
+        [Description("Process ID to inspect")] int pid,
+        CancellationToken ct = default)
+    {
+        var detail = await _process.InspectAsync(pid, ct);
+        return JsonSerializer.Serialize(detail);
+    }
+
     [McpServerTool, Description("Start a process detached from the MCP server. Returns the PID.")]
     public async Task<string> StartProcess(
         [Description("Command line to execute (exe + args)")] string command,

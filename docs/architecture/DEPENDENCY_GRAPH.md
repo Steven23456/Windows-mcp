@@ -719,7 +719,7 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `ProcessTools`
-- Functions: `Process`, `StartProcess`, `Service`, `ScheduledTask`, `EventLog`
+- Functions: `Process`, `ProcessInspect`, `StartProcess`, `Service`, `ScheduledTask`, `EventLog`
 
 ---
 
@@ -1305,10 +1305,10 @@ The codebase is organized into the following modules:
 
 ---
 
-### `src/WindowsMcp.Abstractions/Models/ProcessDtos.cs` - ProcessDtos.cs module
+### `src/WindowsMcp.Abstractions/Models/ProcessDtos.cs` - <summary>A DLL/module loaded into a process.</summary>
 
 **Exports:**
-- Classes: `ProcessDto`
+- Classes: `ProcessDto`, `ModuleInfo`, `ProcessDetailDto`
 
 ---
 
@@ -1471,12 +1471,12 @@ graph TD
 |----------|-------|
 | Total Source Files | 90 |
 | Total Modules | 5 |
-| Total Lines of Code | 5668 |
-| Total Exports | 193 |
+| Total Lines of Code | 5754 |
+| Total Exports | 196 |
 | Total Re-exports | 0 |
-| Total Classes | 108 |
+| Total Classes | 110 |
 | Total Interfaces | 28 |
-| Total Functions | 54 |
+| Total Functions | 55 |
 | Total Type Guards | 0 |
 | Total Enums | 3 |
 | Type-only Imports | 0 |

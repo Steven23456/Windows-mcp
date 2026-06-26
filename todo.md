@@ -55,11 +55,13 @@ Ordered for safety/atomicity. Each is its own dev-workflow task + atomic commit.
 - [x] **E1 network ports → owning PID/name/path** (`PortInfoDto` completeness defect; `Get-NetTCPConnection -OwningProcess`).
 - [x] **E2 verify_signature** — expose existing catalog-aware `AuthenticodeInspector` as a standalone tool.
 - [x] **E3 file_hash (SHA256/SHA1/MD5)** — upgrade `FileSystemService.HashFile` (MD5-only) + expose.
-- [ ] **E4 process_inspect** — parent PID / cmdline / owner / loaded modules (WMI `Win32_Process` + `Process.Modules`).
+- [x] **E4 process_inspect** — parent PID / cmdline / owner / loaded modules (WMI `Win32_Process` + `Process.Modules`).
 - [ ] **E5 defender_status** (`Get-MpComputerStatus`/`Get-MpThreat`), **E6 cert_store** (rogue root CAs),
   **E7 reliability/minidump list**, **E8 driver_list** (BYOVD), **E9 NTFS ADS + reparse**.
 
 ## 🟢 Ready / candidates (none blocking)
+
+- [ ] **OVERVIEW.md tool-catalog reconciliation** — per-tool tables have pre-existing drift (SystemTools lists ProcessTools tools; WindowTools lists StartProcess; missing Disk/Storage/Security/Network/Registry/Web sections; ARCHITECTURE ServerInfo "0.2.0"). Counts are correct now; do a full pass against COMPONENTS.md.
 
 - [ ] **`startup_report` — scheduled-task COM-handler resolution.** ComHandler tasks (NGEN,
   CertificateServicesClient, …) expose a CLSID, not an exec path; currently reported with no

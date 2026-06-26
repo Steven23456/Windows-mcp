@@ -5,7 +5,7 @@
     "lastUpdated": "2026-06-26",
     "totalFiles": 90,
     "totalModules": 5,
-    "totalExports": 193
+    "totalExports": 196
   },
   "entryPoints": [],
   "modules": {
@@ -1230,6 +1230,7 @@
         "exports": [
           "ProcessTools",
           "Process",
+          "ProcessInspect",
           "StartProcess",
           "Service",
           "ScheduledTask",
@@ -1240,6 +1241,7 @@
         ],
         "functions": [
           "Process",
+          "ProcessInspect",
           "StartProcess",
           "Service",
           "ScheduledTask",
@@ -2270,15 +2272,19 @@
         ]
       },
       "src/WindowsMcp.Abstractions/Models/ProcessDtos.cs": {
-        "description": "ProcessDtos module",
+        "description": "<summary>A DLL/module loaded into a process.</summary>",
         "externalDependencies": [],
         "nodeDependencies": [],
         "internalDependencies": [],
         "exports": [
-          "ProcessDto"
+          "ProcessDto",
+          "ModuleInfo",
+          "ProcessDetailDto"
         ],
         "classes": [
-          "ProcessDto"
+          "ProcessDto",
+          "ModuleInfo",
+          "ProcessDetailDto"
         ]
       },
       "src/WindowsMcp.Abstractions/Models/ScreenDtos.cs": {
@@ -2578,11 +2584,11 @@
   "statistics": {
     "totalSourceFiles": 90,
     "totalModules": 5,
-    "totalLinesOfCode": 5668,
-    "totalExports": 193,
-    "totalClasses": 108,
+    "totalLinesOfCode": 5754,
+    "totalExports": 196,
+    "totalClasses": 110,
     "totalInterfaces": 28,
-    "totalFunctions": 54,
+    "totalFunctions": 55,
     "totalTypeGuards": 0,
     "totalEnums": 3,
     "totalConstants": 0,

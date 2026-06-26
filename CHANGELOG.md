@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Added
+- **`process_inspect` tool** — deep per-process detail: parent PID and command line (via WMI),
+  start time, and the **loaded-module (DLL) inventory** (via the live process) — the core signal for
+  spotting injected/sideloaded DLLs and tracing process lineage. The module list degrades gracefully
+  (`ModulesError` set) for protected/higher-integrity processes. `ProcessService` gained an
+  `IWmiService` dependency. Tool count 54 → 55.
 - **`verify_signature` tool** (new `SecurityTools` class) — exposes the existing catalog-aware
   `AuthenticodeInspector` standalone, so any file path (a suspicious process binary, an unknown
   autostart entry) can be checked for code-signing trust, not just files surfaced by `startup_report`.

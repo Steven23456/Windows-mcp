@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 9 and C#, it exposes 54 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — all via the standard MCP stdio transport.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 9 and C#, it exposes 55 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — all via the standard MCP stdio transport.
 
 ## Purpose
 
@@ -20,7 +20,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 | Feature | Description |
 |---------|-------------|
 | **Native Windows Integration** | Direct access to Windows UI Automation API via `FlaUI.UIA3` |
-| **Dependency Injection** | All 24 services are singleton-scoped, wired via `Microsoft.Extensions.Hosting` |
+| **Dependency Injection** | All 28 services are singleton-scoped, wired via `Microsoft.Extensions.Hosting` |
 | **Source-Generated Tool Discovery** | `[McpServerTool]` attributes are discovered at compile time by the MCP SDK source generator |
 | **Interface-Driven Architecture** | Every service backed by an `IXxxService` interface in a separate Abstractions assembly |
 | **DPI-Aware** | Per-Monitor DPI Awareness V2 enabled at startup for correct multi-monitor coordinate handling |
@@ -48,7 +48,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 │  │         ModelContextProtocol SDK (WithStdioServerTransport) ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │        MCP Tool Layer  (12 [McpServerToolType] classes)     ││
+│  │        MCP Tool Layer  (15 [McpServerToolType] classes)     ││
 │  │   InputTools · UIAutomationTools · FileTools · ShellTools   ││
 │  │   SystemTools · WindowTools · ProcessTools · ScreenTools    ││
 │  │   NetworkTools · RegistryTools · WebTools · DiskTools       ││
@@ -75,7 +75,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 ## Available Tools
 
-Windows-MCP exposes **54 MCP tools** across 15 tool classes:
+Windows-MCP exposes **55 MCP tools** across 15 tool classes:
 
 ### Input Tools (`InputTools` — 8 tools)
 | Tool | Purpose |
@@ -110,7 +110,7 @@ Windows-MCP exposes **54 MCP tools** across 15 tool classes:
 | `Launch` | Launch an application by name |
 | `StartProcess` | Start a detached process that survives independently |
 
-### File Tools (`FileTools` — 7 tools)
+### File Tools (`FileTools` — 8 tools)
 | Tool | Purpose |
 |------|---------|
 | `FileRead` | Read file contents |
@@ -118,6 +118,7 @@ Windows-MCP exposes **54 MCP tools** across 15 tool classes:
 | `FileManage` | Copy, move, delete, or create files/directories |
 | `FileInfo` | Get file/directory metadata |
 | `FileSearch` | Search for files by pattern |
+| `FileHash` | Compute SHA256/SHA1/MD5 hex digest |
 | `FileDialog` | Interact with open/save dialogs |
 | `Archive` | Create, extract, or inspect zip/tar archives |
 
@@ -138,14 +139,15 @@ Windows-MCP exposes **54 MCP tools** across 15 tool classes:
 | `Screenshot` | Capture a screenshot (full screen or region) |
 | `Ocr` | Extract text from a screen region via OCR |
 
-### Process Tools (`ProcessTools` — 5 tools)
+### Process Tools (`ProcessTools` — 6 tools)
 | Tool | Purpose |
 |------|---------|
-| `Process` | List, start, or kill processes |
-| `GetProcess` | Get details for a specific process |
-| `NetworkConnections` | List active network connections per process |
-| `SecurityAudit` | Audit running process security posture |
-| `FirewallRules` | List or manage Windows Firewall rules |
+| `Process` | List processes or kill by PID/name |
+| `ProcessInspect` | Deep per-process detail: parent PID, command line, start time, loaded modules |
+| `StartProcess` | Start a detached process; returns the PID |
+| `Service` | List/status/start/stop/restart Windows services |
+| `ScheduledTask` | List/get/run/create/delete scheduled tasks |
+| `EventLog` | Query the Windows Event Log |
 
 ### Shell Tool (`ShellTools` — 1 tool)
 | Tool | Purpose |
