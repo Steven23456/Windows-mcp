@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 9 and C#, it exposes 51 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — all via the standard MCP stdio transport.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 9 and C#, it exposes 52 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — all via the standard MCP stdio transport.
 
 ## Purpose
 
@@ -55,11 +55,11 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Abstraction Layer  (WindowsMcp.Abstractions)      ││
-│  │        20 IXxxService interfaces + Model DTOs               ││
+│  │        25 IXxxService interfaces + Model DTOs               ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Implementation Layer  (WindowsMcp.Services)       ││
-│  │        20 XxxService singletons registered via DI           ││
+│  │        25 XxxService singletons registered via DI           ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
                                 │
@@ -75,7 +75,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 ## Available Tools
 
-Windows-MCP exposes **51 MCP tools** across 13 tool classes:
+Windows-MCP exposes **52 MCP tools** across 14 tool classes:
 
 ### Input Tools (`InputTools` — 8 tools)
 | Tool | Purpose |
@@ -174,6 +174,11 @@ Windows-MCP exposes **51 MCP tools** across 13 tool classes:
 | Tool | Purpose |
 |------|---------|
 | `DiskInspect` | List drives with capacity, free space, file system |
+
+### Storage Tool (`StorageTools` — 1 tool)
+| Tool | Purpose |
+|------|---------|
+| `StorageHealth` | Diagnose disk/drive health: physical disks (model, bus/media type, SMART health + reliability counters), per-disk online/offline, volume→disk/partition map, and recent disk-stack error/warning events. Metadata-first + hang-safe; free space only when `include_usage:true` (time-boxed). |
 
 ### Startup Tools (`StartupTools` — 1 tool)
 | Tool | Purpose |

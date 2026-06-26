@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 ### Added
+- **`storage_health` MCP tool** — disk/drive HEALTH diagnostics (distinct from `disk_inspect`'s
+  usage analysis): physical disks (model, bus/media type, SMART `HealthStatus` + reliability
+  counters — temperature, power-on-hours, uncorrected read/write errors), per-disk online/offline
+  + health, the volume→disk/partition map (filesystem, label, health), and recent disk-stack
+  Error/Warning events. **Metadata-first and hang-safe:** free space (which stalls on
+  slow/sleeping/USB drives) is only probed with `include_usage:true`, each probe time-boxed in an
+  in-process PowerShell runspace, under an overall `CancellationToken` budget that tears down a
+  wedged shell. Backed by `IStorageService`/`StorageService` (the embedded PowerShell was
+  validated live on real hardware first). `drive_letter` scopes the volumes section.
+  - **Docs:** architecture counts refreshed — 51→52 tools across 13→14 tool classes; corrected the
+    stale OVERVIEW interface/singleton count (20→25) to match the 25 registered services.
+  - Added `InternalsVisibleTo("WindowsMcp.Tests")` so pure helpers (e.g. `StorageService.BuildScript`)
+    can be white-box unit-tested.
 - **`startup_report` Control Panel parity + `summary` format** (the two follow-ups from the
   HiJackThis comparison):
   - Control Panel applets are now also discovered by scanning `System32` / `SysWOW64` for

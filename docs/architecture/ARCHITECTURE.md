@@ -14,7 +14,7 @@ Windows-MCP follows a four-layer architecture built on .NET 9 with dependency in
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Tool Layer                                         │
-│                 (13 [McpServerToolType] classes, 51 tools)                   │
+│                 (14 [McpServerToolType] classes, 52 tools)                   │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ │
 │  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │ │
 │  │  8 tools   │ │  8 tools   │ │  7 tools   │ │  7 tools   │ │  5 tools   │ │
@@ -130,6 +130,7 @@ public sealed class InputTools
 | `NetworkTools` | 2 | `INetworkService` |
 | `ShellTools` | 1 | `IPowerShellService` |
 | `DiskTools` | 1 | `IFileSystemService` |
+| `StorageTools` | 1 | `IStorageService` |
 
 ---
 
@@ -236,7 +237,7 @@ Windows-mcp.sln
 │   ├── WindowsMcp/                        ← Main project
 │   │   ├── WindowsMcp.csproj              (targets net9.0-windows10.0.22621)
 │   │   ├── Program.cs                     (host + DI wiring)
-│   │   ├── Tools/                         (13 tool classes)
+│   │   ├── Tools/                         (14 tool classes)
 │   │   │   ├── InputTools.cs
 │   │   │   ├── UIAutomationTools.cs
 │   │   │   ├── FileTools.cs
@@ -249,8 +250,9 @@ Windows-mcp.sln
 │   │   │   ├── NetworkTools.cs
 │   │   │   ├── WebTools.cs
 │   │   │   ├── DiskTools.cs
+│   │   │   ├── StorageTools.cs
 │   │   │   └── StartupTools.cs
-│   │   └── Services/                      (24 service implementations)
+│   │   └── Services/                      (25 service implementations)
 │   │       ├── InputService.cs
 │   │       ├── UIAutomationService.cs
 │   │       └── ...

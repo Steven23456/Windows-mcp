@@ -2,7 +2,7 @@
 
 An MCP server for Windows desktop automation, written in C# on the official
 [`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol)
-SDK. **51 tools** across input, screen, window, UI automation, process/shell,
+SDK. **52 tools** across input, screen, window, UI automation, process/shell,
 file, disk, system, startup, network, registry, and web categories.
 
 > **History:** Versions 0.x through 0.8.5 were written in Python. v0.2.0 (2026-05-26)
@@ -48,7 +48,7 @@ Run `/reload-plugins`. Tools appear as `mcp__Windows-mcp__*`.
 
 ## Tool reference
 
-51 tools, grouped:
+52 tools, grouped:
 
 | Category | Tools |
 |---|---|
@@ -58,7 +58,7 @@ Run `/reload-plugins`. Tools appear as `mcp__Windows-mcp__*`.
 | UI Automation | `get_state`, `find_element`, `get_element`, `get_text`, `assert_element`, `interact_element`, `get_table`, `wait_for` |
 | Process / Shell | `process`, `start_process`, `powershell`, `service`, `scheduled_task`, `event_log` |
 | File | `file_search`, `file_manage`, `file_dialog`, `file_read`, `file_write`, `file_info`, `archive` |
-| Disk | `disk_inspect` |
+| Disk | `disk_inspect`, `storage_health` |
 | System | `system_info`, `audio`, `notification`, `security_audit`, `wmi_query`, `env`, `power_action` |
 | Startup | `startup_report` |
 | Network | `network`, `firewall` |

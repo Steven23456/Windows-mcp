@@ -66,6 +66,7 @@ public static async Task<int> Main(string[] args)
 | `IProcessService` | `ProcessService` |
 | `IWindowService` | `WindowService` |
 | `IWmiService` | `WmiService` |
+| `IStorageService` | `StorageService` |
 | `IEnvService` | `EnvService` |
 | `IPowerService` | `PowerService` |
 | `INotificationService` | `NotificationService` |
@@ -254,6 +255,17 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 ---
 
+### `StorageTools` — 1 tool
+`src/WindowsMcp/Tools/StorageTools.cs`
+
+**Injected:** `IStorageService`
+
+| Method | Description |
+|--------|-------------|
+| `StorageHealth` | Diagnose disk/drive health (not usage): physical disks (model, bus/media type, SMART `HealthStatus` + reliability counters), per-disk online/offline + health, the volume→disk/partition map (filesystem, label, health), and recent disk-stack Error/Warning events. Metadata-first and hang-safe: free space is only probed when `include_usage:true`, each probe time-boxed in an in-process runspace, with an overall `CancellationToken` budget. `drive_letter` limits the volumes section. |
+
+---
+
 ### `StartupTools` — 1 tool
 `src/WindowsMcp/Tools/StartupTools.cs`
 
@@ -286,6 +298,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IProcessService` | `ListAsync`, `GetAsync`, `KillAsync`, `StartAsync` |
 | `IWindowService` | `ListAsync`, `FocusAsync`, `GetAsync`, `LaunchAsync` |
 | `IWmiService` | `QueryAsync(wql)` |
+| `IStorageService` | `GetHealthAsync(driveLetter?, includeUsage, timeoutSeconds)` → `StorageHealthReport` |
 | `IEnvService` | `GetAsync`, `SetAsync`, `ListAsync` |
 | `IPowerService` | `SleepAsync`, `HibernateAsync`, `LockAsync`, `SignOutAsync` |
 | `INotificationService` | `ShowAsync` |
