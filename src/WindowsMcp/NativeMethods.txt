@@ -18,4 +18,9 @@ PostMessage
 ExitWindowsEx
 LockWorkStation
 SetSuspendState
+OpenProcessToken
+GetCurrentProcess
+LookupPrivilegeValue
+AdjustTokenPrivileges
+CloseHandle
 SetCurrentProcessExplicitAppUserModelID

@@ -13,7 +13,9 @@ public sealed class SystemTools
     private readonly IPowerService _power;
     private readonly INotificationService _notification;
     private readonly IAudioService _audio;
-    private readonly IPowerShellService _ps;
+    private readonly ISecurityService _security;
+    private readonly IReliabilityService _reliability;
+    private readonly IDriverService _drivers;
 
     public SystemTools(
         IWmiService wmi,
@@ -21,14 +23,18 @@ public sealed class SystemTools
         IPowerService power,
         INotificationService notification,
         IAudioService audio,
-        IPowerShellService ps)
+        ISecurityService security,
+        IReliabilityService reliability,
+        IDriverService drivers)
     {
         _wmi = wmi;
         _env = env;
         _power = power;
         _notification = notification;
         _audio = audio;
-        _ps = ps;
+        _security = security;
+        _reliability = reliability;
+        _drivers = drivers;
     }
 
     private static readonly Dictionary<string, string> WmiClassMap = new(StringComparer.OrdinalIgnoreCase)
@@ -96,28 +102,24 @@ public sealed class SystemTools
     [McpServerTool, Description("Run a Windows security audit and return firewall, Defender, UAC, and BitLocker status. Probes that require admin (Get-BitLockerVolume, some firewall profiles) return null when run unelevated; non-null fields are still useful.")]
     public async Task<string> SecurityAudit(CancellationToken ct = default)
     {
-        // Each probe is wrapped in its own try/catch so one missing cmdlet or
-        // permission failure doesn't blank out the whole report. ConvertTo-Json
-        // -Compress keeps the response small, and we always return JSON (even
-        // if all probes return null) so callers get a parseable shape.
-        var script = @"
-$result = [ordered]@{
-  firewall_enabled = $null
-  defender_running = $null
-  uac_level        = $null
-  bitlocker_status = $null
-}
-try { $result.firewall_enabled = [bool]((Get-NetFirewallProfile -ErrorAction Stop | Where-Object Enabled).Count -gt 0) } catch {}
-try { $result.defender_running = ((Get-Service WinDefend -ErrorAction Stop).Status -eq 'Running') } catch {}
-try { $result.uac_level = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -ErrorAction Stop).ConsentPromptBehaviorAdmin } catch {}
-try { $result.bitlocker_status = (Get-BitLockerVolume -MountPoint C: -ErrorAction Stop).ProtectionStatus.ToString() } catch {}
-$result | ConvertTo-Json -Compress
-";
-        var result = await _ps.RunAsync(script, ct);
-        var stdout = result.Stdout.Trim();
-        return string.IsNullOrEmpty(stdout)
-            ? "{\"firewall_enabled\":null,\"defender_running\":null,\"uac_level\":null,\"bitlocker_status\":null,\"_note\":\"all probes failed; likely no admin\"}"
-            : stdout;
+        var audit = await _security.AuditAsync(ct);
+        return JsonSerializer.Serialize(audit);
+    }
+
+    [McpServerTool, Description("Report system stability: crash minidumps in C:\\Windows\\Minidump (name, size, time) plus recent reliability failure records (app/OS/hardware failures). Useful for investigating BSODs and instability.")]
+    public async Task<string> Reliability(
+        [Description("Max reliability failure records to return (default 50)")] int max_records = 50,
+        CancellationToken ct = default)
+    {
+        var report = await _reliability.GetAsync(max_records, ct);
+        return JsonSerializer.Serialize(report);
+    }
+
+    [McpServerTool, Description("List installed PnP device drivers with version, date, manufacturer, signed-state, and INF name. Old or unsigned drivers are a real attack surface (BYOVD - bring-your-own-vulnerable-driver).")]
+    public async Task<string> DriverList(CancellationToken ct = default)
+    {
+        var drivers = await _drivers.ListAsync(ct);
+        return JsonSerializer.Serialize(drivers);
     }
 
     [McpServerTool, Description("Run a raw WMI query. class_name: WMI class, e.g. Win32_OperatingSystem.")]

@@ -71,6 +71,14 @@ internal static class Program
         builder.Services.AddSingleton<IProcessService, ProcessService>();
         builder.Services.AddSingleton<IWindowService, WindowService>();
         builder.Services.AddSingleton<IWmiService, WmiService>();
+        builder.Services.AddSingleton<IStorageService, StorageService>();
+        builder.Services.AddSingleton<IDiskService, DiskService>();
+        builder.Services.AddSingleton<ISecurityService, SecurityService>();
+        builder.Services.AddSingleton<IFirewallService, FirewallService>();
+        builder.Services.AddSingleton<ICertStoreService, CertStoreService>();
+        builder.Services.AddSingleton<IReliabilityService, ReliabilityService>();
+        builder.Services.AddSingleton<IDriverService, DriverService>();
+        builder.Services.AddSingleton<IFileStreamService, FileStreamService>();
         builder.Services.AddSingleton<IEnvService, EnvService>();
         builder.Services.AddSingleton<IPowerService, PowerService>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
@@ -84,7 +92,7 @@ internal static class Program
         builder.Services
             .AddMcpServer(o =>
             {
-                o.ServerInfo = new() { Name = "Windows-mcp", Version = "0.2.0" };
+                o.ServerInfo = new() { Name = "Windows-mcp", Version = "0.4.1" };
             })
             .WithStdioServerTransport()
             .WithToolsFromAssembly();   // source generator discovers [McpServerTool] methods

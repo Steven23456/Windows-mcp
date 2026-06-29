@@ -2,8 +2,8 @@
 
 An MCP server for Windows desktop automation, written in C# on the official
 [`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol)
-SDK. **51 tools** across input, screen, window, UI automation, process/shell,
-file, disk, system, startup, network, registry, and web categories.
+SDK. **60 tools** across input, screen, window, UI automation, process/shell,
+file, disk, system, security, startup, network, registry, and web categories.
 
 > **History:** Versions 0.x through 0.8.5 were written in Python. v0.2.0 (2026-05-26)
 > is a complete C# rewrite — see [CHANGELOG.md](CHANGELOG.md) for the migration
@@ -48,7 +48,7 @@ Run `/reload-plugins`. Tools appear as `mcp__Windows-mcp__*`.
 
 ## Tool reference
 
-51 tools, grouped:
+60 tools, grouped:
 
 | Category | Tools |
 |---|---|
@@ -57,9 +57,10 @@ Run `/reload-plugins`. Tools appear as `mcp__Windows-mcp__*`.
 | Window | `window`, `switch_to_window`, `launch`, `focus`, `multi_monitor` |
 | UI Automation | `get_state`, `find_element`, `get_element`, `get_text`, `assert_element`, `interact_element`, `get_table`, `wait_for` |
 | Process / Shell | `process`, `start_process`, `powershell`, `service`, `scheduled_task`, `event_log` |
-| File | `file_search`, `file_manage`, `file_dialog`, `file_read`, `file_write`, `file_info`, `archive` |
-| Disk | `disk_inspect` |
-| System | `system_info`, `audio`, `notification`, `security_audit`, `wmi_query`, `env`, `power_action` |
+| File | `file_search`, `file_manage`, `file_dialog`, `file_read`, `file_write`, `file_info`, `file_hash`, `file_streams`, `archive` |
+| Disk | `disk_inspect`, `storage_health` |
+| System | `system_info`, `audio`, `notification`, `security_audit`, `reliability`, `driver_list`, `wmi_query`, `env`, `power_action` |
+| Security | `verify_signature`, `defender_status`, `cert_store` |
 | Startup | `startup_report` |
 | Network | `network`, `firewall` |
 | Registry | `registry_get`, `registry_set` |

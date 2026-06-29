@@ -14,3 +14,44 @@ public record AuthenticodeInfo(bool Trusted, string? Signer);
 /// and the backing provider DLL path (environment variables expanded), if resolvable.
 /// </summary>
 public record LspProviderDto(int CatalogEntryId, string ProtocolName, string? ProviderPath);
+
+/// <summary>
+/// Windows security posture snapshot. Fields are null when their probe failed — typically
+/// because it needs admin (BitLocker, some firewall profiles) and the server runs unelevated;
+/// non-null fields are still meaningful. <see cref="Note"/> is set when the whole audit produced
+/// no output (e.g. all probes failed).
+/// </summary>
+public record SecurityAuditDto(
+    bool? FirewallEnabled,
+    bool? DefenderRunning,
+    int? UacLevel,
+    string? BitlockerStatus,
+    string? Note = null);
+
+/// <summary>
+/// A certificate from a Windows certificate store. <see cref="SelfSigned"/> (Subject == Issuer) in a
+/// root store is normal for legitimate CAs but is also how a MITM/rogue root persists — review
+/// unfamiliar self-signed roots.
+/// </summary>
+public record CertInfoDto(
+    string Subject,
+    string Issuer,
+    string Thumbprint,
+    DateTime NotAfter,
+    bool SelfSigned,
+    bool Expired);
+
+/// <summary>
+/// Microsoft Defender posture from Get-MpComputerStatus. Null fields / a set <see cref="Note"/>
+/// indicate Defender is absent or its cmdlets are unavailable (e.g. a third-party AV is active).
+/// </summary>
+public record DefenderStatusDto(
+    bool? RealTimeProtectionEnabled,
+    bool? AntivirusEnabled,
+    bool? IsTamperProtected,
+    bool? BehaviorMonitorEnabled,
+    string? AntivirusSignatureVersion,
+    DateTime? AntivirusSignatureLastUpdated,
+    DateTime? QuickScanEndTime,
+    DateTime? FullScanEndTime,
+    string? Note = null);

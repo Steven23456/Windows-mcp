@@ -18,7 +18,7 @@ public class NetworkToolsTests
             .Setup(s => s.PingAsync("example.com", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PingResult("example.com", true, 12L));
 
-        var tools = new NetworkTools(mockNetwork.Object, new Mock<IPowerShellService>().Object);
+        var tools = new NetworkTools(mockNetwork.Object, new Mock<IFirewallService>().Object);
         var result = await tools.Network("ping", host: "example.com");
 
         result.Should().Contain("example.com");
@@ -28,8 +28,8 @@ public class NetworkToolsTests
     [Fact]
     public async Task Firewall_add_requires_confirm()
     {
-        var mockPs = new Mock<IPowerShellService>();
-        var tools = new NetworkTools(new Mock<INetworkService>().Object, mockPs.Object);
+        var mockFirewall = new Mock<IFirewallService>();
+        var tools = new NetworkTools(new Mock<INetworkService>().Object, mockFirewall.Object);
 
         Func<Task> act = () => tools.Firewall(
             action: "add",
@@ -40,6 +40,8 @@ public class NetworkToolsTests
             confirm: false);
 
         await act.Should().ThrowAsync<ArgumentException>().WithMessage("*confirm*");
-        mockPs.Verify(s => s.RunAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        mockFirewall.Verify(s => s.AddAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }

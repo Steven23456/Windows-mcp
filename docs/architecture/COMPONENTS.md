@@ -66,6 +66,14 @@ public static async Task<int> Main(string[] args)
 | `IProcessService` | `ProcessService` |
 | `IWindowService` | `WindowService` |
 | `IWmiService` | `WmiService` |
+| `IStorageService` | `StorageService` |
+| `IDiskService` | `DiskService` |
+| `ISecurityService` | `SecurityService` |
+| `IFirewallService` | `FirewallService` |
+| `ICertStoreService` | `CertStoreService` |
+| `IReliabilityService` | `ReliabilityService` |
+| `IDriverService` | `DriverService` |
+| `IFileStreamService` | `FileStreamService` |
 | `IEnvService` | `EnvService` |
 | `IPowerService` | `PowerService` |
 | `INotificationService` | `NotificationService` |
@@ -135,10 +143,10 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 ---
 
-### `FileTools` — 7 tools
+### `FileTools` — 9 tools
 `src/WindowsMcp/Tools/FileTools.cs`
 
-**Injected:** `IFileSystemService`
+**Injected:** `IFileSystemService`, `IInputService`, `IFileStreamService`
 
 | Method | Description |
 |--------|-------------|
@@ -147,40 +155,58 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 | `FileManage` | Copy, move, delete, or create files/directories |
 | `FileInfo` | Get file or directory metadata |
 | `FileSearch` | Search for files by glob pattern |
+| `FileHash` | Compute a file's SHA256/SHA1/MD5 hex digest |
+| `FileStreams` | NTFS alternate data streams + reparse (symlink/junction) target |
 | `FileDialog` | Interact with a native open/save dialog |
 | `Archive` | Create, extract, or list zip/tar archives |
 
 ---
 
-### `SystemTools` — 7 tools
-`src/WindowsMcp/Tools/SystemTools.cs`
+### `SecurityTools` — 3 tools
+`src/WindowsMcp/Tools/SecurityTools.cs`
 
-**Injected:** `IServiceControlService`, `IEventLogService`, `ITaskSchedulerService`, `IWmiService`, `IEnvService`, `IPowerService`
+**Injected:** `IAuthenticodeInspector`, `ISecurityService`, `ICertStoreService`
 
 | Method | Description |
 |--------|-------------|
-| `SystemInfo` | CPU, RAM, OS version, hostname |
-| `Service` | List, start, stop, restart Windows services |
-| `ScheduledTask` | Create/read/update/delete scheduled tasks |
-| `EventLog` | Query Windows Event Log by source/level/count |
-| `WmiQuery` | Execute arbitrary WMI queries |
-| `Env` | Get or set environment variables |
-| `PowerAction` | Sleep, hibernate, lock workstation, sign out |
+| `VerifySignature` | Catalog-aware Authenticode trust verdict for a file |
+| `DefenderStatus` | Microsoft Defender posture (real-time/tamper protection, signature age, last scans) |
+| `CertStore` | Enumerate a certificate store; flags self-signed (rogue-root) and expired certs |
 
 ---
 
-### `ProcessTools` — 5 tools
+### `SystemTools` — 9 tools
+`src/WindowsMcp/Tools/SystemTools.cs`
+
+**Injected:** `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService`
+
+| Method | Description |
+|--------|-------------|
+| `SystemInfo` | WMI system info by category (os/memory/disk/gpu/battery) |
+| `Audio` | Get/set volume or mute/unmute |
+| `Notification` | Show a Windows toast notification |
+| `SecurityAudit` | Firewall/Defender/UAC/BitLocker posture snapshot |
+| `Reliability` | Crash minidumps + recent reliability failure records |
+| `DriverList` | Installed PnP drivers with version/date/signer/signed-state (BYOVD surface) |
+| `WmiQuery` | Execute arbitrary WMI queries |
+| `Env` | Get, set, or list environment variables (secret-name redaction) |
+| `PowerAction` | Shutdown, reboot, logoff, lock, sleep, hibernate |
+
+---
+
+### `ProcessTools` — 6 tools
 `src/WindowsMcp/Tools/ProcessTools.cs`
 
-**Injected:** `IProcessService`, `INetworkService`
+**Injected:** `IProcessService`, `IServiceControlService`, `ITaskSchedulerService`, `IEventLogService`
 
 | Method | Description |
 |--------|-------------|
 | `Process` | List processes or kill by PID/name |
-| `GetProcess` | Detailed info for a specific process |
-| `Network` | List active connections per process |
-| `SecurityAudit` | Audit process security posture |
-| `FirewallRules` | List/manage Windows Firewall rules |
+| `ProcessInspect` | Deep per-process detail: parent PID, command line, start time, loaded modules |
+| `StartProcess` | Start a detached process; returns the PID |
+| `Service` | List/status/start/stop/restart Windows services |
+| `ScheduledTask` | List/get/run/create/delete scheduled tasks |
+| `EventLog` | Query the Windows Event Log |
 
 ---
 
@@ -222,7 +248,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 ### `NetworkTools` — 2 tools
 `src/WindowsMcp/Tools/NetworkTools.cs`
 
-**Injected:** `INetworkService`
+**Injected:** `INetworkService`, `IFirewallService`
 
 | Method | Description |
 |--------|-------------|
@@ -246,11 +272,22 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 ### `DiskTools` — 1 tool
 `src/WindowsMcp/Tools/DiskTools.cs`
 
-**Injected:** `IFileSystemService`
+**Injected:** `IDiskService`
 
 | Method | Description |
 |--------|-------------|
-| `DiskInspect` | List drives with size, free space, file system |
+| `DiskInspect` | Disk usage analysis: usage (top dirs), reclaimable, file_types, stale |
+
+---
+
+### `StorageTools` — 1 tool
+`src/WindowsMcp/Tools/StorageTools.cs`
+
+**Injected:** `IStorageService`
+
+| Method | Description |
+|--------|-------------|
+| `StorageHealth` | Diagnose disk/drive health (not usage): physical disks (model, bus/media type, SMART `HealthStatus` + reliability counters), per-disk online/offline + health, the volume→disk/partition map (filesystem, label, health), and recent disk-stack Error/Warning events. Metadata-first and hang-safe: free space is only probed when `include_usage:true`, each probe time-boxed in an in-process runspace, with an overall `CancellationToken` budget. `drive_letter` limits the volumes section. |
 
 ---
 
@@ -286,6 +323,10 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IProcessService` | `ListAsync`, `GetAsync`, `KillAsync`, `StartAsync` |
 | `IWindowService` | `ListAsync`, `FocusAsync`, `GetAsync`, `LaunchAsync` |
 | `IWmiService` | `QueryAsync(wql)` |
+| `IStorageService` | `GetHealthAsync(driveLetter?, includeUsage, timeoutSeconds)` → `StorageHealthReport` |
+| `IDiskService` | `GetUsageAsync`, `GetFileTypesAsync`, `GetStaleAsync`, `GetReclaimableAsync` |
+| `ISecurityService` | `AuditAsync()` → `SecurityAuditDto` |
+| `IFirewallService` | `ListAsync`, `AddAsync`, `RemoveAsync` |
 | `IEnvService` | `GetAsync`, `SetAsync`, `ListAsync` |
 | `IPowerService` | `SleepAsync`, `HibernateAsync`, `LockAsync`, `SignOutAsync` |
 | `INotificationService` | `ShowAsync` |

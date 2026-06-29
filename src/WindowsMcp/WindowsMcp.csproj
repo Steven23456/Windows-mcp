@@ -27,4 +27,9 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <!-- Expose internal helpers (e.g. StorageService.BuildScript) to the test project for white-box unit tests. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="WindowsMcp.Tests" />
+  </ItemGroup>
+
 </Project>

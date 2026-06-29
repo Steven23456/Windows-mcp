@@ -70,7 +70,8 @@ public sealed class WindowService : IWindowService
             UseShellExecute = true
         };
 
-        var process = Process.Start(psi)
+        // Dispose our wrapper handle; the launched app keeps running independently.
+        using var process = Process.Start(psi)
             ?? throw new InvalidOperationException($"Failed to launch '{appName}'");
 
         return Task.FromResult(process.Id);

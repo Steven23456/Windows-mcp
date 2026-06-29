@@ -1,6 +1,6 @@
 # unknown - Dependency Graph
 
-**Version**: 0.0.0 | **Last Updated**: 2026-05-28
+**Version**: 0.0.0 | **Last Updated**: 2026-06-26
 
 This document provides a comprehensive dependency graph of all files, components, imports, functions, and variables in the codebase.
 
@@ -25,11 +25,11 @@ This document provides a comprehensive dependency graph of all files, components
 
 The codebase is organized into the following modules:
 
-- **entry**: 1 file
-- **services**: 20 files
-- **tools**: 12 files
-- **abstractions**: 20 files
-- **models**: 10 files
+- **entry**: 4 files
+- **services**: 32 files
+- **tools**: 15 files
+- **abstractions**: 32 files
+- **models**: 17 files
 
 ---
 
@@ -59,6 +59,37 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp/Startup/CommandTarget.cs` - <summary>
+
+**Exports:**
+- Classes: `CommandTarget`
+
+---
+
+### `src/WindowsMcp/Startup/StartupApproval.cs` - <summary>
+
+**Exports:**
+- Classes: `StartupApproval`
+
+---
+
+### `src/WindowsMcp/Startup/StartupReportRenderer.cs` - <summary>
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `StartupReportRenderer`
+
+---
+
 ## Services Dependencies
 
 ### `src/WindowsMcp/Services/AudioService.cs` - TODO(v0.3.0): swap to NAudio/AudioDeviceCmdlets for accurate get/set
@@ -74,6 +105,42 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp/Services/AuthenticodeInspector.cs` - <summary>
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `AuthenticodeInspector`
+
+---
+
+### `src/WindowsMcp/Services/CertStoreService.cs` - CertStoreService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `CertStoreService`
+
+---
+
 ### `src/WindowsMcp/Services/ClipboardService.cs` - ClipboardService.cs module
 
 **Internal Dependencies:**
@@ -83,6 +150,42 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `ClipboardService`
+
+---
+
+### `src/WindowsMcp/Services/DiskService.cs` - DiskService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `DiskService`
+
+---
+
+### `src/WindowsMcp/Services/DriverService.cs` - DriverService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `DriverService`
 
 ---
 
@@ -116,6 +219,24 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp/Services/FileStreamService.cs` - FileStreamService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `FileStreamService`
+
+---
+
 ### `src/WindowsMcp/Services/FileSystemService.cs` - FileSystemService.cs module
 
 **Node.js Built-in Dependencies:**
@@ -131,6 +252,24 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `FileSystemService`
+
+---
+
+### `src/WindowsMcp/Services/FirewallService.cs` - FirewallService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `FirewallService`
 
 ---
 
@@ -154,6 +293,24 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `InputService`
+
+---
+
+### `src/WindowsMcp/Services/LspEnumerator.cs` - <summary>
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `LspEnumerator`
 
 ---
 
@@ -216,6 +373,7 @@ The codebase is organized into the following modules:
 **Node.js Built-in Dependencies:**
 | Module | Import |
 |--------|--------|
+| `System` | `System` |
 | `Windows` | `Windows` |
 
 **Internal Dependencies:**
@@ -287,6 +445,24 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp/Services/ReliabilityService.cs` - ReliabilityService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `ReliabilityService`
+
+---
+
 ### `src/WindowsMcp/Services/ScreenshotService.cs` - ScreenshotService.cs module
 
 **External Dependencies:**
@@ -311,6 +487,24 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp/Services/SecurityService.cs` - SecurityService.cs module
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `SecurityService`
+
+---
+
 ### `src/WindowsMcp/Services/ServiceControlService.cs` - ServiceControlService.cs module
 
 **Node.js Built-in Dependencies:**
@@ -326,6 +520,60 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `ServiceControlService`
+
+---
+
+### `src/WindowsMcp/Services/ShortcutResolver.cs` - <summary>
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+
+**Exports:**
+- Classes: `ShortcutResolver`
+
+---
+
+### `src/WindowsMcp/Services/StartupReportService.cs` - <summary>
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+| `WindowsMcp.Startup` | `WindowsMcp.Startup` | Import |
+
+**Exports:**
+- Classes: `StartupReportService`
+
+---
+
+### `src/WindowsMcp/Services/StorageService.cs` - <summary>
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `StorageService`
 
 ---
 
@@ -473,7 +721,7 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `FileTools`
-- Functions: `FileSearch`, `FileManage`, `FileDialog`, `FileRead`, `FileWrite`, `FileInfo`, `Archive`
+- Functions: `FileSearch`, `FileManage`, `FileDialog`, `FileRead`, `FileWrite`, `FileHash`, `FileStreams`, `FileInfo`, `Archive`
 
 ---
 
@@ -543,7 +791,7 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `ProcessTools`
-- Functions: `Process`, `StartProcess`, `Service`, `ScheduledTask`, `EventLog`
+- Functions: `Process`, `ProcessInspect`, `StartProcess`, `Service`, `ScheduledTask`, `EventLog`
 
 ---
 
@@ -594,6 +842,29 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp/Tools/SecurityTools.cs` - SecurityTools.cs module
+
+**External Dependencies:**
+| Package | Import |
+|---------|--------|
+| `ModelContextProtocol` | `ModelContextProtocol.Server` |
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+
+**Exports:**
+- Classes: `SecurityTools`
+- Functions: `VerifySignature`, `DefenderStatus`, `CertStore`
+
+---
+
 ### `src/WindowsMcp/Tools/ShellTools.cs` - ShellTools.cs module
 
 **External Dependencies:**
@@ -617,6 +888,53 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp/Tools/StartupTools.cs` - StartupTools.cs module
+
+**External Dependencies:**
+| Package | Import |
+|---------|--------|
+| `ModelContextProtocol` | `ModelContextProtocol.Server` |
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+| `WindowsMcp.Startup` | `WindowsMcp.Startup` | Import |
+
+**Exports:**
+- Classes: `StartupTools`
+- Functions: `StartupReport`
+
+---
+
+### `src/WindowsMcp/Tools/StorageTools.cs` - StorageTools.cs module
+
+**External Dependencies:**
+| Package | Import |
+|---------|--------|
+| `ModelContextProtocol` | `ModelContextProtocol.Server` |
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions` | `WindowsMcp.Abstractions` | Import |
+
+**Exports:**
+- Classes: `StorageTools`
+- Functions: `StorageHealth`
+
+---
+
 ### `src/WindowsMcp/Tools/SystemTools.cs` - SystemTools.cs module
 
 **External Dependencies:**
@@ -636,7 +954,7 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `SystemTools`
-- Functions: `SystemInfo`, `Audio`, `Notification`, `SecurityAudit`, `WmiQuery`, `Env`, `PowerAction`
+- Functions: `SystemInfo`, `Audio`, `Notification`, `SecurityAudit`, `Reliability`, `DriverList`, `WmiQuery`, `Env`, `PowerAction`
 
 ---
 
@@ -720,10 +1038,58 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp.Abstractions/IAuthenticodeInspector.cs` - <summary>
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IAuthenticodeInspector`
+
+---
+
+### `src/WindowsMcp.Abstractions/ICertStoreService.cs` - ICertStoreService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `ICertStoreService`
+
+---
+
 ### `src/WindowsMcp.Abstractions/IClipboardService.cs` - IClipboardService.cs module
 
 **Exports:**
 - Interfaces: `IClipboardService`
+
+---
+
+### `src/WindowsMcp.Abstractions/IDiskService.cs` - IDiskService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IDiskService`
+
+---
+
+### `src/WindowsMcp.Abstractions/IDriverService.cs` - IDriverService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IDriverService`
 
 ---
 
@@ -746,6 +1112,18 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp.Abstractions/IFileStreamService.cs` - IFileStreamService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IFileStreamService`
+
+---
+
 ### `src/WindowsMcp.Abstractions/IFileSystemService.cs` - IFileSystemService.cs module
 
 **Internal Dependencies:**
@@ -758,6 +1136,18 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp.Abstractions/IFirewallService.cs` - IFirewallService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IFirewallService`
+
+---
+
 ### `src/WindowsMcp.Abstractions/IInputService.cs` - IInputService.cs module
 
 **Internal Dependencies:**
@@ -767,6 +1157,18 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Interfaces: `IInputService`
+
+---
+
+### `src/WindowsMcp.Abstractions/ILspEnumerator.cs` - <summary>
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `ILspEnumerator`
 
 ---
 
@@ -844,6 +1246,18 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp.Abstractions/IReliabilityService.cs` - IReliabilityService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IReliabilityService`
+
+---
+
 ### `src/WindowsMcp.Abstractions/IScreenshotService.cs` - IScreenshotService.cs module
 
 **Internal Dependencies:**
@@ -856,6 +1270,18 @@ The codebase is organized into the following modules:
 
 ---
 
+### `src/WindowsMcp.Abstractions/ISecurityService.cs` - ISecurityService.cs module
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `ISecurityService`
+
+---
+
 ### `src/WindowsMcp.Abstractions/IServiceControlService.cs` - IServiceControlService.cs module
 
 **Internal Dependencies:**
@@ -865,6 +1291,37 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Interfaces: `IServiceControlService`
+
+---
+
+### `src/WindowsMcp.Abstractions/IShortcutResolver.cs` - <summary>
+
+**Exports:**
+- Interfaces: `IShortcutResolver`
+
+---
+
+### `src/WindowsMcp.Abstractions/IStartupReportService.cs` - <summary>
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IStartupReportService`
+
+---
+
+### `src/WindowsMcp.Abstractions/IStorageService.cs` - Diagnose disk/volume health from the storage stack (metadata-first, hang-safe).
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Interfaces: `IStorageService`
 
 ---
 
@@ -925,10 +1382,31 @@ The codebase is organized into the following modules:
 
 ## Models Dependencies
 
-### `src/WindowsMcp.Abstractions/Models/FileSystemDtos.cs` - FileSystemDtos.cs module
+### `src/WindowsMcp.Abstractions/Models/DiskDtos.cs` - DiskDtos.cs module
 
 **Exports:**
-- Classes: `FileInfoDto`, `FileSearchHit`, `RegistryValueDto`, `ServiceDto`, `EventLogEntryDto`, `ScheduledTaskDto`
+- Classes: `DiskUsageEntry`, `FileTypeEntry`, `StaleFileEntry`, `ReclaimableSpace`
+
+---
+
+### `src/WindowsMcp.Abstractions/Models/DriverDtos.cs` - <summary>
+
+**Exports:**
+- Classes: `DriverInfo`
+
+---
+
+### `src/WindowsMcp.Abstractions/Models/FileSystemDtos.cs` - <summary>An NTFS alternate data stream (e.g. <c>:Zone.Identifier:$DATA</c>).</summary>
+
+**Exports:**
+- Classes: `AlternateStreamInfo`, `FileStreamsDto`, `FileInfoDto`, `FileSearchHit`, `RegistryValueDto`, `ServiceDto`, `EventLogEntryDto`, `ScheduledTaskDto`, `ScheduledTaskDetailDto`
+
+---
+
+### `src/WindowsMcp.Abstractions/Models/FirewallDtos.cs` - <summary>A Windows Firewall rule (enabled-state, direction, and action rendered as strings).</summary>
+
+**Exports:**
+- Classes: `FirewallRuleDto`
 
 ---
 
@@ -954,10 +1432,17 @@ The codebase is organized into the following modules:
 
 ---
 
-### `src/WindowsMcp.Abstractions/Models/ProcessDtos.cs` - ProcessDtos.cs module
+### `src/WindowsMcp.Abstractions/Models/ProcessDtos.cs` - <summary>A DLL/module loaded into a process.</summary>
 
 **Exports:**
-- Classes: `ProcessDto`
+- Classes: `ProcessDto`, `ModuleInfo`, `ProcessDetailDto`
+
+---
+
+### `src/WindowsMcp.Abstractions/Models/ReliabilityDtos.cs` - <summary>A crash minidump file in C:\Windows\Minidump.</summary>
+
+**Exports:**
+- Classes: `MinidumpInfo`, `ReliabilityRecord`, `ReliabilityReport`
 
 ---
 
@@ -966,6 +1451,27 @@ The codebase is organized into the following modules:
 **Exports:**
 - Classes: `ScreenRegion`, `ScreenshotResult`
 - Enums: `ImageFormat`
+
+---
+
+### `src/WindowsMcp.Abstractions/Models/SecurityDtos.cs` - <summary>
+
+**Exports:**
+- Classes: `AuthenticodeInfo`, `LspProviderDto`, `SecurityAuditDto`, `CertInfoDto`, `DefenderStatusDto`
+
+---
+
+### `src/WindowsMcp.Abstractions/Models/StartupReportDtos.cs` - <summary>Aggregated boot/persistence report (the HiJackThis-style snapshot).</summary>
+
+**Exports:**
+- Classes: `StartupReportDto`, `StartupHeader`, `ProcessEntry`, `RunEntry`, `StartupFolderEntry`, `StartupTaskEntry`, `StartupServiceEntry`, `HostsEntry`, `DnsEntry`, `LspProviderEntry`, `ShellExtensionEntry`, `ControlPanelAppletEntry`, `AccessibilityToolEntry`, `IfeoEntry`, `WinlogonHookEntry`, `AppInitDllEntry`, `ActiveSetupEntry`, `BrowserProxyEntry`, `TrustedZoneEntry`
+
+---
+
+### `src/WindowsMcp.Abstractions/Models/StorageDtos.cs` - <summary>Top-level storage-health report. Empty arrays + a Notes entry signal a degraded probe.</summary>
+
+**Exports:**
+- Classes: `StorageHealthReport`, `PhysicalDiskInfo`, `ReliabilityInfo`, `DiskInfo`, `VolumeInfo`, `DiskEventInfo`
 
 ---
 
@@ -1006,11 +1512,18 @@ The codebase is organized into the following modules:
 |------|--------------|------------|
 | `Program.cs` | 2 files | 0 files |
 | `AudioService.cs` | 2 files | 1 files |
+| `AuthenticodeInspector.cs` | 2 files | 1 files |
+| `CertStoreService.cs` | 2 files | 1 files |
 | `ClipboardService.cs` | 1 files | 1 files |
+| `DiskService.cs` | 2 files | 1 files |
+| `DriverService.cs` | 2 files | 1 files |
 | `EnvService.cs` | 1 files | 1 files |
 | `EventLogService.cs` | 2 files | 1 files |
+| `FileStreamService.cs` | 2 files | 1 files |
 | `FileSystemService.cs` | 2 files | 1 files |
+| `FirewallService.cs` | 2 files | 1 files |
 | `InputService.cs` | 2 files | 1 files |
+| `LspEnumerator.cs` | 2 files | 1 files |
 | `NetworkService.cs` | 2 files | 1 files |
 | `NotificationService.cs` | 1 files | 1 files |
 | `OcrService.cs` | 2 files | 1 files |
@@ -1018,22 +1531,15 @@ The codebase is organized into the following modules:
 | `PowerShellService.cs` | 2 files | 1 files |
 | `ProcessService.cs` | 2 files | 1 files |
 | `RegistryService.cs` | 2 files | 1 files |
+| `ReliabilityService.cs` | 2 files | 1 files |
 | `ScreenshotService.cs` | 2 files | 1 files |
+| `SecurityService.cs` | 2 files | 1 files |
 | `ServiceControlService.cs` | 2 files | 1 files |
+| `ShortcutResolver.cs` | 1 files | 1 files |
+| `StartupReportService.cs` | 3 files | 1 files |
+| `StorageService.cs` | 2 files | 1 files |
 | `TaskSchedulerService.cs` | 2 files | 1 files |
 | `UIAutomationService.cs` | 2 files | 1 files |
-| `WebService.cs` | 2 files | 1 files |
-| `WindowService.cs` | 2 files | 1 files |
-| `WmiService.cs` | 1 files | 1 files |
-| `DiskTools.cs` | 1 files | 0 files |
-| `FileTools.cs` | 1 files | 0 files |
-| `InputTools.cs` | 2 files | 0 files |
-| `NetworkTools.cs` | 1 files | 0 files |
-| `ProcessTools.cs` | 1 files | 0 files |
-| `RegistryTools.cs` | 1 files | 0 files |
-| `ScreenTools.cs` | 2 files | 0 files |
-| `ShellTools.cs` | 1 files | 0 files |
-| `SystemTools.cs` | 1 files | 0 files |
 
 ---
 
@@ -1048,42 +1554,45 @@ The codebase is organized into the following modules:
 graph TD
     subgraph Entry
         N0[Program.cs]
+        N1[CommandTarget.cs]
+        N2[StartupApproval.cs]
+        N3[StartupReportRenderer.cs]
     end
 
     subgraph Services
-        N1[AudioService.cs]
-        N2[ClipboardService.cs]
-        N3[EnvService.cs]
-        N4[EventLogService.cs]
-        N5[FileSystemService.cs]
-        N6[...15 more]
+        N4[AudioService.cs]
+        N5[AuthenticodeInspector.cs]
+        N6[CertStoreService.cs]
+        N7[ClipboardService.cs]
+        N8[DiskService.cs]
+        N9[...27 more]
     end
 
     subgraph Tools
-        N7[DiskTools.cs]
-        N8[FileTools.cs]
-        N9[InputTools.cs]
-        N10[NetworkTools.cs]
-        N11[ProcessTools.cs]
-        N12[...7 more]
+        N10[DiskTools.cs]
+        N11[FileTools.cs]
+        N12[InputTools.cs]
+        N13[NetworkTools.cs]
+        N14[ProcessTools.cs]
+        N15[...10 more]
     end
 
     subgraph Abstractions
-        N13[IAudioService.cs]
-        N14[IClipboardService.cs]
-        N15[IEnvService.cs]
-        N16[IEventLogService.cs]
-        N17[IFileSystemService.cs]
-        N18[...15 more]
+        N16[IAudioService.cs]
+        N17[IAuthenticodeInspector.cs]
+        N18[ICertStoreService.cs]
+        N19[IClipboardService.cs]
+        N20[IDiskService.cs]
+        N21[...27 more]
     end
 
     subgraph Models
-        N19[FileSystemDtos.cs]
-        N20[InputDtos.cs]
-        N21[NetworkDtos.cs]
-        N22[PowerShellDtos.cs]
-        N23[ProcessDtos.cs]
-        N24[...5 more]
+        N22[DiskDtos.cs]
+        N23[DriverDtos.cs]
+        N24[FileSystemDtos.cs]
+        N25[FirewallDtos.cs]
+        N26[InputDtos.cs]
+        N27[...12 more]
     end
 
 ```
@@ -1094,14 +1603,14 @@ graph TD
 
 | Category | Count |
 |----------|-------|
-| Total Source Files | 63 |
+| Total Source Files | 100 |
 | Total Modules | 5 |
-| Total Lines of Code | 3331 |
-| Total Exports | 133 |
+| Total Lines of Code | 6128 |
+| Total Exports | 217 |
 | Total Re-exports | 0 |
-| Total Classes | 60 |
-| Total Interfaces | 20 |
-| Total Functions | 50 |
+| Total Classes | 122 |
+| Total Interfaces | 32 |
+| Total Functions | 60 |
 | Total Type Guards | 0 |
 | Total Enums | 3 |
 | Type-only Imports | 0 |
@@ -1110,5 +1619,5 @@ graph TD
 
 ---
 
-*Last Updated*: 2026-05-28
+*Last Updated*: 2026-06-26
 *Version*: 0.0.0

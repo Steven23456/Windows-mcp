@@ -7,6 +7,7 @@ namespace WindowsMcp.Services;
 
 public sealed class FileSystemService : IFileSystemService
 {
+
     public async Task<string> ReadTextAsync(string path, long maxBytes, string encoding, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -102,7 +103,12 @@ public sealed class FileSystemService : IFileSystemService
             foreach (var group in grouped)
             {
                 ct.ThrowIfCancellationRequested();
-                var byHash = group.GroupBy(h => HashFile(h.Path));
+                // Files that can't be hashed (locked/denied) return null and are skipped —
+                // one unreadable file must not abort the whole duplicate search.
+                var byHash = group
+                    .Select(h => (Hit: h, Hash: HashFile(h.Path)))
+                    .Where(x => x.Hash is not null)
+                    .GroupBy(x => x.Hash!, x => x.Hit);
                 foreach (var hg in byHash.Where(g => g.Count() > 1))
                     dups.AddRange(hg);
             }
@@ -111,11 +117,33 @@ public sealed class FileSystemService : IFileSystemService
         return Task.FromResult(hits.ToArray());
     }
 
-    private static string HashFile(string path)
+    public async Task<string> HashFileAsync(string path, string algorithm = "sha256", CancellationToken ct = default)
     {
-        using var stream = File.OpenRead(path);
-        using var md5 = System.Security.Cryptography.MD5.Create();
-        return Convert.ToHexString(md5.ComputeHash(stream));
+        using System.Security.Cryptography.HashAlgorithm hasher = algorithm.ToLowerInvariant() switch
+        {
+            "sha256" => System.Security.Cryptography.SHA256.Create(),
+            "sha1"   => System.Security.Cryptography.SHA1.Create(),
+            "md5"    => System.Security.Cryptography.MD5.Create(),
+            _ => throw new ArgumentException($"Unknown algorithm '{algorithm}'; expected sha256|sha1|md5")
+        };
+        await using var stream = File.OpenRead(path);
+        var hash = await hasher.ComputeHashAsync(stream, ct);
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static string? HashFile(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var md5 = System.Security.Cryptography.MD5.Create();
+            return Convert.ToHexString(md5.ComputeHash(stream));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Locked or access-denied file: skip it from dedup rather than fail the search.
+            return null;
+        }
     }
 
     public Task CopyAsync(string src, string dst, CancellationToken ct = default)

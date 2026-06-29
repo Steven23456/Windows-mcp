@@ -9,40 +9,41 @@ namespace WindowsMcp.Tools;
 public sealed class NetworkTools
 {
     private readonly INetworkService _network;
-    private readonly IPowerShellService _ps;
+    private readonly IFirewallService _firewall;
 
-    public NetworkTools(INetworkService network, IPowerShellService ps)
+    public NetworkTools(INetworkService network, IFirewallService firewall)
     {
         _network = network;
-        _ps = ps;
+        _firewall = firewall;
     }
 
     [McpServerTool, Description("Query network info. action: adapters (list NICs), ports (active TCP listeners/connections), ping (ICMP ping), dns (DNS lookup), wifi (WiFi status).")]
     public async Task<string> Network(
         [Description("Action: adapters, ports, ping, dns, wifi")] string action,
         [Description("Hostname or IP (required for ping and dns)")] string? host = null,
-        [Description("Port number (reserved for future use)")] int? port = null)
+        [Description("Port number (reserved for future use)")] int? port = null,
+        CancellationToken ct = default)
     {
         switch (action.ToLowerInvariant())
         {
             case "adapters":
-                return JsonSerializer.Serialize(await _network.ListAdaptersAsync());
+                return JsonSerializer.Serialize(await _network.ListAdaptersAsync(ct));
 
             case "ports":
-                return JsonSerializer.Serialize(await _network.ListPortsAsync());
+                return JsonSerializer.Serialize(await _network.ListPortsAsync(ct));
 
             case "ping":
                 if (string.IsNullOrWhiteSpace(host))
                     throw new ArgumentException("'host' is required for ping action");
-                return JsonSerializer.Serialize(await _network.PingAsync(host));
+                return JsonSerializer.Serialize(await _network.PingAsync(host, ct));
 
             case "dns":
                 if (string.IsNullOrWhiteSpace(host))
                     throw new ArgumentException("'host' is required for dns action");
-                return JsonSerializer.Serialize(await _network.DnsLookupAsync(host));
+                return JsonSerializer.Serialize(await _network.DnsLookupAsync(host, ct));
 
             case "wifi":
-                return JsonSerializer.Serialize(await _network.GetWifiAsync());
+                return JsonSerializer.Serialize(await _network.GetWifiAsync(ct));
 
             default:
                 throw new ArgumentException($"Unknown action '{action}'; expected adapters|ports|ping|dns|wifi");
@@ -58,26 +59,15 @@ public sealed class NetworkTools
         [Description("Local port number (required for add)")] int? port = null,
         [Description("Must be true to confirm add or remove operations")] bool confirm = false,
         [Description("For list: substring filter on DisplayName (case-insensitive). Default null returns enabled rules only.")] string? name_like = null,
-        [Description("For list: maximum rules returned. Default 100; the full system list can be thousands.")] int max = 100)
+        [Description("For list: maximum rules returned. Default 100; the full system list can be thousands.")] int max = 100,
+        CancellationToken ct = default)
     {
         switch (action.ToLowerInvariant())
         {
             case "list":
-            {
-                // Default to enabled-only + max cap because Get-NetFirewallRule
-                // returns 5000+ rules on most Windows boxes; the full dump is
-                // multi-MB and overflows LLM token limits. name_like is a
-                // -like '*pattern*' contains-match (case-insensitive).
-                var filter = string.IsNullOrWhiteSpace(name_like)
-                    ? "Where-Object Enabled -eq 'True'"
-                    : $"Where-Object {{ $_.Enabled -eq 'True' -and $_.DisplayName -like '*{name_like.Replace("'", "''")}*' }}";
-                var script = $"Get-NetFirewallRule | {filter} | Select-Object -First {max} Name,DisplayName,Enabled,Direction,Action | ConvertTo-Json -Depth 2 -Compress";
-                var result = await _ps.RunAsync(script);
-                return result.Stdout;
-            }
+                return JsonSerializer.Serialize(await _firewall.ListAsync(name_like, max, ct));
 
             case "add":
-            {
                 if (!confirm)
                     throw new ArgumentException("'confirm: true' is required for firewall add");
                 if (string.IsNullOrWhiteSpace(name))
@@ -88,32 +78,16 @@ public sealed class NetworkTools
                     throw new ArgumentException("'action_type' is required for firewall add");
                 if (port is null)
                     throw new ArgumentException("'port' is required for firewall add");
-
-                // Use single-quoted PowerShell strings and escape any single-quotes in name
-                var safeName = name.Replace("'", "''");
-                var safeDirection = direction.Replace("'", "''");
-                var safeActionType = action_type.Replace("'", "''");
-                var script = $"New-NetFirewallRule -DisplayName '{safeName}' -Direction '{safeDirection}' -Action '{safeActionType}' -LocalPort {port} -Protocol TCP";
-                var result = await _ps.RunAsync(script);
-                if (!result.Success)
-                    throw new InvalidOperationException($"Firewall add failed: {result.Stderr}");
+                await _firewall.AddAsync(name, direction, action_type, port.Value, ct);
                 return $"Added firewall rule '{name}'";
-            }
 
             case "remove":
-            {
                 if (!confirm)
                     throw new ArgumentException("'confirm: true' is required for firewall remove");
                 if (string.IsNullOrWhiteSpace(name))
                     throw new ArgumentException("'name' is required for firewall remove");
-
-                var safeName = name.Replace("'", "''");
-                var script = $"Remove-NetFirewallRule -DisplayName '{safeName}'";
-                var result = await _ps.RunAsync(script);
-                if (!result.Success)
-                    throw new InvalidOperationException($"Firewall remove failed: {result.Stderr}");
+                await _firewall.RemoveAsync(name, ct);
                 return $"Removed firewall rule '{name}'";
-            }
 
             default:
                 throw new ArgumentException($"Unknown action '{action}'; expected list|add|remove");

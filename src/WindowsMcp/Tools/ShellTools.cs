@@ -17,9 +17,10 @@ public sealed class ShellTools
 
     [McpServerTool, Description("Execute a PowerShell command and return the result including stdout, stderr, and exit code.")]
     public async Task<string> Powershell(
-        [Description("PowerShell command or script to execute")] string command)
+        [Description("PowerShell command or script to execute")] string command,
+        CancellationToken ct = default)
     {
-        var result = await _ps.RunAsync(command);
+        var result = await _ps.RunAsync(command, ct);
         return JsonSerializer.Serialize(result);
     }
 }

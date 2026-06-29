@@ -30,12 +30,13 @@ public sealed class ProcessTools
         [Description("Action: list or kill")] string action,
         [Description("Process name to kill (kills all matching)")] string? name = null,
         [Description("Process ID to kill")] int? pid = null,
-        [Description("Must be true to confirm destructive kill action")] bool confirm = false)
+        [Description("Must be true to confirm destructive kill action")] bool confirm = false,
+        CancellationToken ct = default)
     {
         switch (action.ToLowerInvariant())
         {
             case "list":
-                var procs = await _process.ListAsync();
+                var procs = await _process.ListAsync(ct);
                 return JsonSerializer.Serialize(procs);
 
             case "kill":
@@ -43,15 +44,15 @@ public sealed class ProcessTools
                     throw new ArgumentException("'confirm: true' is required for kill");
                 if (pid.HasValue)
                 {
-                    await _process.KillAsync(pid.Value);
+                    await _process.KillAsync(pid.Value, ct);
                     return $"killed pid {pid.Value}";
                 }
                 if (!string.IsNullOrWhiteSpace(name))
                 {
-                    var all = await _process.ListAsync();
+                    var all = await _process.ListAsync(ct);
                     var targets = all.Where(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
                     foreach (var t in targets)
-                        await _process.KillAsync(t.Pid);
+                        await _process.KillAsync(t.Pid, ct);
                     return $"killed {targets.Length} process(es) named '{name}'";
                 }
                 throw new ArgumentException("'kill' requires either name or pid");
@@ -61,11 +62,21 @@ public sealed class ProcessTools
         }
     }
 
+    [McpServerTool, Description("Deep-inspect a process by PID: parent PID, command line, start time, and the loaded-module (DLL) inventory. Use to spot injected/sideloaded DLLs or trace a process's lineage. The module list may be unavailable (ModulesError set) for protected or higher-integrity processes.")]
+    public async Task<string> ProcessInspect(
+        [Description("Process ID to inspect")] int pid,
+        CancellationToken ct = default)
+    {
+        var detail = await _process.InspectAsync(pid, ct);
+        return JsonSerializer.Serialize(detail);
+    }
+
     [McpServerTool, Description("Start a process detached from the MCP server. Returns the PID.")]
     public async Task<string> StartProcess(
-        [Description("Command line to execute (exe + args)")] string command)
+        [Description("Command line to execute (exe + args)")] string command,
+        CancellationToken ct = default)
     {
-        int pid = await _process.StartDetachedAsync(command);
+        int pid = await _process.StartDetachedAsync(command, ct);
         return $"started (pid={pid})";
     }
 
@@ -73,24 +84,25 @@ public sealed class ProcessTools
     public async Task<string> Service(
         [Description("Action: list, status, start, stop, restart")] string action,
         [Description("Service name (required for status/start/stop/restart)")] string? name = null,
-        [Description("Must be true to confirm stop or restart")] bool confirm = false)
+        [Description("Must be true to confirm stop or restart")] bool confirm = false,
+        CancellationToken ct = default)
     {
         switch (action.ToLowerInvariant())
         {
             case "list":
-                var services = await _service.ListAsync();
+                var services = await _service.ListAsync(ct);
                 return JsonSerializer.Serialize(services);
 
             case "status":
                 if (string.IsNullOrWhiteSpace(name))
                     throw new ArgumentException("'status' requires name");
-                var status = await _service.GetStatusAsync(name);
+                var status = await _service.GetStatusAsync(name, ct);
                 return JsonSerializer.Serialize(status);
 
             case "start":
                 if (string.IsNullOrWhiteSpace(name))
                     throw new ArgumentException("'start' requires name");
-                await _service.StartAsync(name);
+                await _service.StartAsync(name, ct);
                 return $"started '{name}'";
 
             case "stop":
@@ -98,7 +110,7 @@ public sealed class ProcessTools
                     throw new ArgumentException("'confirm: true' is required for stop/restart actions");
                 if (string.IsNullOrWhiteSpace(name))
                     throw new ArgumentException("'stop' requires name");
-                await _service.StopAsync(name);
+                await _service.StopAsync(name, ct);
                 return $"stopped '{name}'";
 
             case "restart":
@@ -106,7 +118,7 @@ public sealed class ProcessTools
                     throw new ArgumentException("'confirm: true' is required for stop/restart actions");
                 if (string.IsNullOrWhiteSpace(name))
                     throw new ArgumentException("'restart' requires name");
-                await _service.RestartAsync(name);
+                await _service.RestartAsync(name, ct);
                 return $"restarted '{name}'";
 
             default:
@@ -120,30 +132,31 @@ public sealed class ProcessTools
         [Description("Task name (required for get/run/create/delete)")] string? name = null,
         [Description("Command for create action")] string? command = null,
         [Description("Trigger for create action (e.g. 'daily', 'onlogon')")] string? trigger = null,
-        [Description("Must be true to confirm destructive delete action")] bool confirm = false)
+        [Description("Must be true to confirm destructive delete action")] bool confirm = false,
+        CancellationToken ct = default)
     {
         switch (action.ToLowerInvariant())
         {
             case "list":
-                var tasks = await _scheduler.ListAsync();
+                var tasks = await _scheduler.ListAsync(ct);
                 return JsonSerializer.Serialize(tasks);
 
             case "get":
                 if (string.IsNullOrWhiteSpace(name))
                     throw new ArgumentException("'get' requires name");
-                var task = await _scheduler.GetAsync(name);
+                var task = await _scheduler.GetAsync(name, ct);
                 return JsonSerializer.Serialize(task);
 
             case "run":
                 if (string.IsNullOrWhiteSpace(name))
                     throw new ArgumentException("'run' requires name");
-                await _scheduler.RunAsync(name);
+                await _scheduler.RunAsync(name, ct);
                 return $"ran task '{name}'";
 
             case "create":
                 if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(command) || string.IsNullOrWhiteSpace(trigger))
                     throw new ArgumentException("'create' requires name, command, and trigger");
-                await _scheduler.CreateAsync(name, command, trigger);
+                await _scheduler.CreateAsync(name, command, trigger, ct);
                 return $"created task '{name}'";
 
             case "delete":
@@ -151,7 +164,7 @@ public sealed class ProcessTools
                     throw new ArgumentException("'confirm: true' is required for delete");
                 if (string.IsNullOrWhiteSpace(name))
                     throw new ArgumentException("'delete' requires name");
-                await _scheduler.DeleteAsync(name);
+                await _scheduler.DeleteAsync(name, ct);
                 return $"deleted task '{name}'";
 
             default:
@@ -165,7 +178,8 @@ public sealed class ProcessTools
         [Description("Filter by level: error, warning, information")] string? level = null,
         [Description("Filter by source name")] string? source = null,
         [Description("Filter events since this datetime (ISO 8601 format)")] string? since = null,
-        [Description("Maximum number of entries to return")] int max = 100)
+        [Description("Maximum number of entries to return")] int max = 100,
+        CancellationToken ct = default)
     {
         DateTime? sinceDate = null;
         if (!string.IsNullOrWhiteSpace(since))
@@ -175,7 +189,7 @@ public sealed class ProcessTools
             sinceDate = parsed;
         }
 
-        var entries = await _eventLog.QueryAsync(log, level, source, sinceDate, max);
+        var entries = await _eventLog.QueryAsync(log, level, source, sinceDate, max, ct);
         return JsonSerializer.Serialize(entries);
     }
 }

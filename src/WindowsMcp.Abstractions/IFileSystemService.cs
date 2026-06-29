@@ -9,6 +9,8 @@ public interface IFileSystemService
     Task WriteTextAsync(string path, string content, string encoding, CancellationToken ct = default);
     Task<FileInfoDto> GetInfoAsync(string path, CancellationToken ct = default);
     Task<FileSearchHit[]> SearchAsync(string root, string? pattern, long? minSize, DateTime? modifiedSince, bool findDuplicates, CancellationToken ct = default);
+    /// <summary>Hex digest of a file. <paramref name="algorithm"/>: sha256 (default), sha1, or md5.</summary>
+    Task<string> HashFileAsync(string path, string algorithm = "sha256", CancellationToken ct = default);
     Task CopyAsync(string src, string dst, CancellationToken ct = default);
     Task MoveAsync(string src, string dst, CancellationToken ct = default);
     Task DeleteAsync(string path, CancellationToken ct = default);

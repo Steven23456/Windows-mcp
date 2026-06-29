@@ -100,7 +100,8 @@ public sealed class WebService : IWebService
         }
     }
 
-    private static bool IsPrivateAddress(IPAddress addr)
+    // internal for white-box testing of the SSRF range logic (InternalsVisibleTo).
+    internal static bool IsPrivateAddress(IPAddress addr)
     {
         // Normalize IPv4-mapped IPv6 addresses (e.g. ::ffff:127.0.0.1)
         if (addr.IsIPv4MappedToIPv6)

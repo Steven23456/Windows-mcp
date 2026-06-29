@@ -1,10 +1,10 @@
 metadata:
   name: unknown
   version: 0.0.0
-  lastUpdated: "2026-05-28"
-  totalFiles: 63
+  lastUpdated: "2026-06-26"
+  totalFiles: 100
   totalModules: 5
-  totalExports: 133
+  totalExports: 217
 entryPoints: []
 modules:
   entry:
@@ -34,6 +34,39 @@ modules:
         - Program
       classes:
         - Program
+    src/WindowsMcp/Startup/CommandTarget.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies: []
+      exports:
+        - CommandTarget
+      classes:
+        - CommandTarget
+    src/WindowsMcp/Startup/StartupApproval.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies: []
+      exports:
+        - StartupApproval
+      classes:
+        - StartupApproval
+    src/WindowsMcp/Startup/StartupReportRenderer.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - StartupReportRenderer
+      classes:
+        - StartupReportRenderer
   services:
     src/WindowsMcp/Services/AudioService.cs:
       description: "TODO(v0.3.0): swap to NAudio/AudioDeviceCmdlets for accurate get/set"
@@ -50,6 +83,42 @@ modules:
         - AudioService
       classes:
         - AudioService
+    src/WindowsMcp/Services/AuthenticodeInspector.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - AuthenticodeInspector
+      classes:
+        - AuthenticodeInspector
+    src/WindowsMcp/Services/CertStoreService.cs:
+      description: CertStoreService module
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - CertStoreService
+      classes:
+        - CertStoreService
     src/WindowsMcp/Services/ClipboardService.cs:
       description: ClipboardService module
       externalDependencies: []
@@ -62,6 +131,42 @@ modules:
         - ClipboardService
       classes:
         - ClipboardService
+    src/WindowsMcp/Services/DiskService.cs:
+      description: DiskService module
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - DiskService
+      classes:
+        - DiskService
+    src/WindowsMcp/Services/DriverService.cs:
+      description: DriverService module
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - DriverService
+      classes:
+        - DriverService
     src/WindowsMcp/Services/EnvService.cs:
       description: EnvService module
       externalDependencies: []
@@ -92,6 +197,24 @@ modules:
         - EventLogService
       classes:
         - EventLogService
+    src/WindowsMcp/Services/FileStreamService.cs:
+      description: FileStreamService module
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - FileStreamService
+      classes:
+        - FileStreamService
     src/WindowsMcp/Services/FileSystemService.cs:
       description: FileSystemService module
       externalDependencies: []
@@ -110,6 +233,24 @@ modules:
         - FileSystemService
       classes:
         - FileSystemService
+    src/WindowsMcp/Services/FirewallService.cs:
+      description: FirewallService module
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - FirewallService
+      classes:
+        - FirewallService
     src/WindowsMcp/Services/InputService.cs:
       description: "Disambiguate: H.InputSimulator also exposes a WindowsInput.MouseButton enum."
       externalDependencies:
@@ -131,6 +272,24 @@ modules:
         - InputService
       classes:
         - InputService
+    src/WindowsMcp/Services/LspEnumerator.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - LspEnumerator
+      classes:
+        - LspEnumerator
     src/WindowsMcp/Services/NetworkService.cs:
       description: NetworkService module
       externalDependencies:
@@ -189,6 +348,9 @@ modules:
       description: PowerService module
       externalDependencies: []
       nodeDependencies:
+        - module: System
+          imports:
+            - System
         - module: Windows
           imports:
             - Windows
@@ -257,6 +419,24 @@ modules:
         - RegistryService
       classes:
         - RegistryService
+    src/WindowsMcp/Services/ReliabilityService.cs:
+      description: ReliabilityService module
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - ReliabilityService
+      classes:
+        - ReliabilityService
     src/WindowsMcp/Services/ScreenshotService.cs:
       description: ScreenshotService module
       externalDependencies:
@@ -281,6 +461,24 @@ modules:
         - ScreenshotService
       classes:
         - ScreenshotService
+    src/WindowsMcp/Services/SecurityService.cs:
+      description: SecurityService module
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - SecurityService
+      classes:
+        - SecurityService
     src/WindowsMcp/Services/ServiceControlService.cs:
       description: ServiceControlService module
       externalDependencies: []
@@ -299,6 +497,60 @@ modules:
         - ServiceControlService
       classes:
         - ServiceControlService
+    src/WindowsMcp/Services/ShortcutResolver.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+      exports:
+        - ShortcutResolver
+      classes:
+        - ShortcutResolver
+    src/WindowsMcp/Services/StartupReportService.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+        - file: WindowsMcp.Startup
+          imports:
+            - WindowsMcp.Startup
+      exports:
+        - StartupReportService
+      classes:
+        - StartupReportService
+    src/WindowsMcp/Services/StorageService.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - StorageService
+      classes:
+        - StorageService
     src/WindowsMcp/Services/TaskSchedulerService.cs:
       description: "Suppress ambiguous-reference: TaskScheduler library exports 'Task' which clashes with"
       externalDependencies:
@@ -440,6 +692,8 @@ modules:
         - FileDialog
         - FileRead
         - FileWrite
+        - FileHash
+        - FileStreams
         - FileInfo
         - Archive
       classes:
@@ -450,6 +704,8 @@ modules:
         - FileDialog
         - FileRead
         - FileWrite
+        - FileHash
+        - FileStreams
         - FileInfo
         - Archive
     src/WindowsMcp/Tools/InputTools.cs:
@@ -530,6 +786,7 @@ modules:
       exports:
         - ProcessTools
         - Process
+        - ProcessInspect
         - StartProcess
         - Service
         - ScheduledTask
@@ -538,6 +795,7 @@ modules:
         - ProcessTools
       functions:
         - Process
+        - ProcessInspect
         - StartProcess
         - Service
         - ScheduledTask
@@ -591,6 +849,31 @@ modules:
       functions:
         - Screenshot
         - Ocr
+    src/WindowsMcp/Tools/SecurityTools.cs:
+      description: SecurityTools module
+      externalDependencies:
+        - package: ModelContextProtocol
+          imports:
+            - ModelContextProtocol.Server
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+      exports:
+        - SecurityTools
+        - VerifySignature
+        - DefenderStatus
+        - CertStore
+      classes:
+        - SecurityTools
+      functions:
+        - VerifySignature
+        - DefenderStatus
+        - CertStore
     src/WindowsMcp/Tools/ShellTools.cs:
       description: ShellTools module
       externalDependencies:
@@ -612,6 +895,51 @@ modules:
         - ShellTools
       functions:
         - Powershell
+    src/WindowsMcp/Tools/StartupTools.cs:
+      description: StartupTools module
+      externalDependencies:
+        - package: ModelContextProtocol
+          imports:
+            - ModelContextProtocol.Server
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+        - file: WindowsMcp.Startup
+          imports:
+            - WindowsMcp.Startup
+      exports:
+        - StartupTools
+        - StartupReport
+      classes:
+        - StartupTools
+      functions:
+        - StartupReport
+    src/WindowsMcp/Tools/StorageTools.cs:
+      description: StorageTools module
+      externalDependencies:
+        - package: ModelContextProtocol
+          imports:
+            - ModelContextProtocol.Server
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions
+          imports:
+            - WindowsMcp.Abstractions
+      exports:
+        - StorageTools
+        - StorageHealth
+      classes:
+        - StorageTools
+      functions:
+        - StorageHealth
     src/WindowsMcp/Tools/SystemTools.cs:
       description: SystemTools module
       externalDependencies:
@@ -632,6 +960,8 @@ modules:
         - Audio
         - Notification
         - SecurityAudit
+        - Reliability
+        - DriverList
         - WmiQuery
         - Env
         - PowerAction
@@ -642,6 +972,8 @@ modules:
         - Audio
         - Notification
         - SecurityAudit
+        - Reliability
+        - DriverList
         - WmiQuery
         - Env
         - PowerAction
@@ -748,6 +1080,30 @@ modules:
         - AudioState
       interfaces:
         - IAudioService
+    src/WindowsMcp.Abstractions/IAuthenticodeInspector.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - IAuthenticodeInspector
+      interfaces:
+        - IAuthenticodeInspector
+    src/WindowsMcp.Abstractions/ICertStoreService.cs:
+      description: ICertStoreService module
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - ICertStoreService
+      interfaces:
+        - ICertStoreService
     src/WindowsMcp.Abstractions/IClipboardService.cs:
       description: IClipboardService module
       externalDependencies: []
@@ -757,6 +1113,30 @@ modules:
         - IClipboardService
       interfaces:
         - IClipboardService
+    src/WindowsMcp.Abstractions/IDiskService.cs:
+      description: IDiskService module
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - IDiskService
+      interfaces:
+        - IDiskService
+    src/WindowsMcp.Abstractions/IDriverService.cs:
+      description: IDriverService module
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - IDriverService
+      interfaces:
+        - IDriverService
     src/WindowsMcp.Abstractions/IEnvService.cs:
       description: IEnvService module
       externalDependencies: []
@@ -778,6 +1158,18 @@ modules:
         - IEventLogService
       interfaces:
         - IEventLogService
+    src/WindowsMcp.Abstractions/IFileStreamService.cs:
+      description: IFileStreamService module
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - IFileStreamService
+      interfaces:
+        - IFileStreamService
     src/WindowsMcp.Abstractions/IFileSystemService.cs:
       description: IFileSystemService module
       externalDependencies: []
@@ -790,6 +1182,18 @@ modules:
         - IFileSystemService
       interfaces:
         - IFileSystemService
+    src/WindowsMcp.Abstractions/IFirewallService.cs:
+      description: IFirewallService module
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - IFirewallService
+      interfaces:
+        - IFirewallService
     src/WindowsMcp.Abstractions/IInputService.cs:
       description: IInputService module
       externalDependencies: []
@@ -802,6 +1206,18 @@ modules:
         - IInputService
       interfaces:
         - IInputService
+    src/WindowsMcp.Abstractions/ILspEnumerator.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - ILspEnumerator
+      interfaces:
+        - ILspEnumerator
     src/WindowsMcp.Abstractions/INetworkService.cs:
       description: INetworkService module
       externalDependencies: []
@@ -880,6 +1296,18 @@ modules:
         - IRegistryService
       interfaces:
         - IRegistryService
+    src/WindowsMcp.Abstractions/IReliabilityService.cs:
+      description: IReliabilityService module
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - IReliabilityService
+      interfaces:
+        - IReliabilityService
     src/WindowsMcp.Abstractions/IScreenshotService.cs:
       description: IScreenshotService module
       externalDependencies: []
@@ -892,6 +1320,18 @@ modules:
         - IScreenshotService
       interfaces:
         - IScreenshotService
+    src/WindowsMcp.Abstractions/ISecurityService.cs:
+      description: ISecurityService module
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - ISecurityService
+      interfaces:
+        - ISecurityService
     src/WindowsMcp.Abstractions/IServiceControlService.cs:
       description: IServiceControlService module
       externalDependencies: []
@@ -904,6 +1344,39 @@ modules:
         - IServiceControlService
       interfaces:
         - IServiceControlService
+    src/WindowsMcp.Abstractions/IShortcutResolver.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies: []
+      exports:
+        - IShortcutResolver
+      interfaces:
+        - IShortcutResolver
+    src/WindowsMcp.Abstractions/IStartupReportService.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - IStartupReportService
+      interfaces:
+        - IStartupReportService
+    src/WindowsMcp.Abstractions/IStorageService.cs:
+      description: Diagnose disk/volume health from the storage stack (metadata-first, hang-safe).
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - IStorageService
+      interfaces:
+        - IStorageService
     src/WindowsMcp.Abstractions/ITaskSchedulerService.cs:
       description: ITaskSchedulerService module
       externalDependencies: []
@@ -962,25 +1435,64 @@ modules:
       interfaces:
         - IWmiService
   models:
-    src/WindowsMcp.Abstractions/Models/FileSystemDtos.cs:
-      description: FileSystemDtos module
+    src/WindowsMcp.Abstractions/Models/DiskDtos.cs:
+      description: DiskDtos module
       externalDependencies: []
       nodeDependencies: []
       internalDependencies: []
       exports:
-        - FileInfoDto
-        - FileSearchHit
-        - RegistryValueDto
-        - ServiceDto
-        - EventLogEntryDto
-        - ScheduledTaskDto
+        - DiskUsageEntry
+        - FileTypeEntry
+        - StaleFileEntry
+        - ReclaimableSpace
       classes:
+        - DiskUsageEntry
+        - FileTypeEntry
+        - StaleFileEntry
+        - ReclaimableSpace
+    src/WindowsMcp.Abstractions/Models/DriverDtos.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies: []
+      exports:
+        - DriverInfo
+      classes:
+        - DriverInfo
+    src/WindowsMcp.Abstractions/Models/FileSystemDtos.cs:
+      description: <summary>An NTFS alternate data stream (e.g. <c>:Zone.Identifier:$DATA</c>).</summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies: []
+      exports:
+        - AlternateStreamInfo
+        - FileStreamsDto
         - FileInfoDto
         - FileSearchHit
         - RegistryValueDto
         - ServiceDto
         - EventLogEntryDto
         - ScheduledTaskDto
+        - ScheduledTaskDetailDto
+      classes:
+        - AlternateStreamInfo
+        - FileStreamsDto
+        - FileInfoDto
+        - FileSearchHit
+        - RegistryValueDto
+        - ServiceDto
+        - EventLogEntryDto
+        - ScheduledTaskDto
+        - ScheduledTaskDetailDto
+    src/WindowsMcp.Abstractions/Models/FirewallDtos.cs:
+      description: <summary>A Windows Firewall rule (enabled-state, direction, and action rendered as strings).</summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies: []
+      exports:
+        - FirewallRuleDto
+      classes:
+        - FirewallRuleDto
     src/WindowsMcp.Abstractions/Models/InputDtos.cs:
       description: InputDtos module
       externalDependencies: []
@@ -1022,14 +1534,31 @@ modules:
       classes:
         - PSResult
     src/WindowsMcp.Abstractions/Models/ProcessDtos.cs:
-      description: ProcessDtos module
+      description: <summary>A DLL/module loaded into a process.</summary>
       externalDependencies: []
       nodeDependencies: []
       internalDependencies: []
       exports:
         - ProcessDto
+        - ModuleInfo
+        - ProcessDetailDto
       classes:
         - ProcessDto
+        - ModuleInfo
+        - ProcessDetailDto
+    src/WindowsMcp.Abstractions/Models/ReliabilityDtos.cs:
+      description: <summary>A crash minidump file in C:\Windows\Minidump.</summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies: []
+      exports:
+        - MinidumpInfo
+        - ReliabilityRecord
+        - ReliabilityReport
+      classes:
+        - MinidumpInfo
+        - ReliabilityRecord
+        - ReliabilityReport
     src/WindowsMcp.Abstractions/Models/ScreenDtos.cs:
       description: ScreenDtos module
       externalDependencies: []
@@ -1044,6 +1573,87 @@ modules:
         - ScreenshotResult
       enums:
         - ImageFormat
+    src/WindowsMcp.Abstractions/Models/SecurityDtos.cs:
+      description: <summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies: []
+      exports:
+        - AuthenticodeInfo
+        - LspProviderDto
+        - SecurityAuditDto
+        - CertInfoDto
+        - DefenderStatusDto
+      classes:
+        - AuthenticodeInfo
+        - LspProviderDto
+        - SecurityAuditDto
+        - CertInfoDto
+        - DefenderStatusDto
+    src/WindowsMcp.Abstractions/Models/StartupReportDtos.cs:
+      description: <summary>Aggregated boot/persistence report (the HiJackThis-style snapshot).</summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies: []
+      exports:
+        - StartupReportDto
+        - StartupHeader
+        - ProcessEntry
+        - RunEntry
+        - StartupFolderEntry
+        - StartupTaskEntry
+        - StartupServiceEntry
+        - HostsEntry
+        - DnsEntry
+        - LspProviderEntry
+        - ShellExtensionEntry
+        - ControlPanelAppletEntry
+        - AccessibilityToolEntry
+        - IfeoEntry
+        - WinlogonHookEntry
+        - AppInitDllEntry
+        - ActiveSetupEntry
+        - BrowserProxyEntry
+        - TrustedZoneEntry
+      classes:
+        - StartupReportDto
+        - StartupHeader
+        - ProcessEntry
+        - RunEntry
+        - StartupFolderEntry
+        - StartupTaskEntry
+        - StartupServiceEntry
+        - HostsEntry
+        - DnsEntry
+        - LspProviderEntry
+        - ShellExtensionEntry
+        - ControlPanelAppletEntry
+        - AccessibilityToolEntry
+        - IfeoEntry
+        - WinlogonHookEntry
+        - AppInitDllEntry
+        - ActiveSetupEntry
+        - BrowserProxyEntry
+        - TrustedZoneEntry
+    src/WindowsMcp.Abstractions/Models/StorageDtos.cs:
+      description: <summary>Top-level storage-health report. Empty arrays + a Notes entry signal a degraded probe.</summary>
+      externalDependencies: []
+      nodeDependencies: []
+      internalDependencies: []
+      exports:
+        - StorageHealthReport
+        - PhysicalDiskInfo
+        - ReliabilityInfo
+        - DiskInfo
+        - VolumeInfo
+        - DiskEventInfo
+      classes:
+        - StorageHealthReport
+        - PhysicalDiskInfo
+        - ReliabilityInfo
+        - DiskInfo
+        - VolumeInfo
+        - DiskEventInfo
     src/WindowsMcp.Abstractions/Models/SystemDtos.cs:
       description: SystemDtos module
       externalDependencies: []
@@ -1104,14 +1714,24 @@ dependencyGraph:
     - name: Entry
       files:
         - src/WindowsMcp/Program.cs
+        - src/WindowsMcp/Startup/CommandTarget.cs
+        - src/WindowsMcp/Startup/StartupApproval.cs
+        - src/WindowsMcp/Startup/StartupReportRenderer.cs
     - name: Services
       files:
         - src/WindowsMcp/Services/AudioService.cs
+        - src/WindowsMcp/Services/AuthenticodeInspector.cs
+        - src/WindowsMcp/Services/CertStoreService.cs
         - src/WindowsMcp/Services/ClipboardService.cs
+        - src/WindowsMcp/Services/DiskService.cs
+        - src/WindowsMcp/Services/DriverService.cs
         - src/WindowsMcp/Services/EnvService.cs
         - src/WindowsMcp/Services/EventLogService.cs
+        - src/WindowsMcp/Services/FileStreamService.cs
         - src/WindowsMcp/Services/FileSystemService.cs
+        - src/WindowsMcp/Services/FirewallService.cs
         - src/WindowsMcp/Services/InputService.cs
+        - src/WindowsMcp/Services/LspEnumerator.cs
         - src/WindowsMcp/Services/NetworkService.cs
         - src/WindowsMcp/Services/NotificationService.cs
         - src/WindowsMcp/Services/OcrService.cs
@@ -1119,8 +1739,13 @@ dependencyGraph:
         - src/WindowsMcp/Services/PowerShellService.cs
         - src/WindowsMcp/Services/ProcessService.cs
         - src/WindowsMcp/Services/RegistryService.cs
+        - src/WindowsMcp/Services/ReliabilityService.cs
         - src/WindowsMcp/Services/ScreenshotService.cs
+        - src/WindowsMcp/Services/SecurityService.cs
         - src/WindowsMcp/Services/ServiceControlService.cs
+        - src/WindowsMcp/Services/ShortcutResolver.cs
+        - src/WindowsMcp/Services/StartupReportService.cs
+        - src/WindowsMcp/Services/StorageService.cs
         - src/WindowsMcp/Services/TaskSchedulerService.cs
         - src/WindowsMcp/Services/UIAutomationService.cs
         - src/WindowsMcp/Services/WebService.cs
@@ -1135,7 +1760,10 @@ dependencyGraph:
         - src/WindowsMcp/Tools/ProcessTools.cs
         - src/WindowsMcp/Tools/RegistryTools.cs
         - src/WindowsMcp/Tools/ScreenTools.cs
+        - src/WindowsMcp/Tools/SecurityTools.cs
         - src/WindowsMcp/Tools/ShellTools.cs
+        - src/WindowsMcp/Tools/StartupTools.cs
+        - src/WindowsMcp/Tools/StorageTools.cs
         - src/WindowsMcp/Tools/SystemTools.cs
         - src/WindowsMcp/Tools/UIAutomationTools.cs
         - src/WindowsMcp/Tools/WebTools.cs
@@ -1143,11 +1771,18 @@ dependencyGraph:
     - name: Abstractions
       files:
         - src/WindowsMcp.Abstractions/IAudioService.cs
+        - src/WindowsMcp.Abstractions/IAuthenticodeInspector.cs
+        - src/WindowsMcp.Abstractions/ICertStoreService.cs
         - src/WindowsMcp.Abstractions/IClipboardService.cs
+        - src/WindowsMcp.Abstractions/IDiskService.cs
+        - src/WindowsMcp.Abstractions/IDriverService.cs
         - src/WindowsMcp.Abstractions/IEnvService.cs
         - src/WindowsMcp.Abstractions/IEventLogService.cs
+        - src/WindowsMcp.Abstractions/IFileStreamService.cs
         - src/WindowsMcp.Abstractions/IFileSystemService.cs
+        - src/WindowsMcp.Abstractions/IFirewallService.cs
         - src/WindowsMcp.Abstractions/IInputService.cs
+        - src/WindowsMcp.Abstractions/ILspEnumerator.cs
         - src/WindowsMcp.Abstractions/INetworkService.cs
         - src/WindowsMcp.Abstractions/INotificationService.cs
         - src/WindowsMcp.Abstractions/IOcrService.cs
@@ -1155,8 +1790,13 @@ dependencyGraph:
         - src/WindowsMcp.Abstractions/IPowerShellService.cs
         - src/WindowsMcp.Abstractions/IProcessService.cs
         - src/WindowsMcp.Abstractions/IRegistryService.cs
+        - src/WindowsMcp.Abstractions/IReliabilityService.cs
         - src/WindowsMcp.Abstractions/IScreenshotService.cs
+        - src/WindowsMcp.Abstractions/ISecurityService.cs
         - src/WindowsMcp.Abstractions/IServiceControlService.cs
+        - src/WindowsMcp.Abstractions/IShortcutResolver.cs
+        - src/WindowsMcp.Abstractions/IStartupReportService.cs
+        - src/WindowsMcp.Abstractions/IStorageService.cs
         - src/WindowsMcp.Abstractions/ITaskSchedulerService.cs
         - src/WindowsMcp.Abstractions/IUIAutomationService.cs
         - src/WindowsMcp.Abstractions/IWebService.cs
@@ -1164,24 +1804,31 @@ dependencyGraph:
         - src/WindowsMcp.Abstractions/IWmiService.cs
     - name: Models
       files:
+        - src/WindowsMcp.Abstractions/Models/DiskDtos.cs
+        - src/WindowsMcp.Abstractions/Models/DriverDtos.cs
         - src/WindowsMcp.Abstractions/Models/FileSystemDtos.cs
+        - src/WindowsMcp.Abstractions/Models/FirewallDtos.cs
         - src/WindowsMcp.Abstractions/Models/InputDtos.cs
         - src/WindowsMcp.Abstractions/Models/NetworkDtos.cs
         - src/WindowsMcp.Abstractions/Models/PowerShellDtos.cs
         - src/WindowsMcp.Abstractions/Models/ProcessDtos.cs
+        - src/WindowsMcp.Abstractions/Models/ReliabilityDtos.cs
         - src/WindowsMcp.Abstractions/Models/ScreenDtos.cs
+        - src/WindowsMcp.Abstractions/Models/SecurityDtos.cs
+        - src/WindowsMcp.Abstractions/Models/StartupReportDtos.cs
+        - src/WindowsMcp.Abstractions/Models/StorageDtos.cs
         - src/WindowsMcp.Abstractions/Models/SystemDtos.cs
         - src/WindowsMcp.Abstractions/Models/UIAutomationDtos.cs
         - src/WindowsMcp.Abstractions/Models/WebDtos.cs
         - src/WindowsMcp.Abstractions/Models/WindowDtos.cs
 statistics:
-  totalSourceFiles: 63
+  totalSourceFiles: 100
   totalModules: 5
-  totalLinesOfCode: 3331
-  totalExports: 133
-  totalClasses: 60
-  totalInterfaces: 20
-  totalFunctions: 50
+  totalLinesOfCode: 6128
+  totalExports: 217
+  totalClasses: 122
+  totalInterfaces: 32
+  totalFunctions: 60
   totalTypeGuards: 0
   totalEnums: 3
   totalConstants: 0
