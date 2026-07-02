@@ -1,21 +1,11 @@
 {
   "mcpServers": {
-    "Filesystem": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "C:\\"
-      ]
-    },
-    "memory": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-memory"
-      ],
+    "Windows-mcp": {
+      "type": "stdio",
+      "command": "${CLAUDE_PLUGIN_ROOT}/bundle/WindowsMcp.exe",
+      "args": [],
       "env": {
-        "MEMORY_FILE_PATH": "C:\\Users\\danie\\.claude\\memory.jsonl"
+        "_RETRY": "2026-06-26-v0.4.1-defender-datefix"
       }
     }
   }
