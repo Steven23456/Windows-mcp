@@ -1,8 +1,19 @@
+## [Unreleased]
+
 ### Changed
 - **`Screenshot` tool defaults to `output="file"` instead of inline base64** — saves image to
   `%TEMP%\WindowsMcp\screenshot_<timestamp>.<ext>` and returns the file path. A full-screen
   1080p PNG was embedding ~240k tokens of base64 directly in the conversation history; the file
   path response is ~4 tokens. Pass `output="base64"` to restore the previous inline behavior.
+
+## [0.5.0] - 2026-07-04
+
+### Added
+- **Companion `windows` skill** (`skills/windows/`, loads as `windows-mcp:windows`, slash
+  `/windows`) — a guidance/playbook over the server's 60 tools: tool selection (prefer the MCP
+  over raw PowerShell), a 60-tool domain map, five workflow playbooks (startup/boot triage,
+  process cleanup, security sweep, UI-automation loop, file forensics), and safety rails for
+  destructive tools. No new tools; the server binary is unchanged (still reports 0.4.1).
 
 ## [0.4.1] - 2026-06-26
 

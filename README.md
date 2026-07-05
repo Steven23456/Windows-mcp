@@ -46,6 +46,13 @@ Add to your MCP host config (e.g.,
 
 Run `/reload-plugins`. Tools appear as `mcp__Windows-mcp__*`.
 
+## Companion skill
+
+The plugin also ships a `windows` skill (`windows-mcp:windows`, `/windows`) —
+a playbook that steers Claude toward these tools over raw PowerShell, with
+composed workflows for common tasks and safety rails for destructive
+operations. See [`skills/windows/SKILL.md`](skills/windows/SKILL.md).
+
 ## Tool reference
 
 60 tools, grouped:
