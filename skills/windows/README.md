@@ -22,7 +22,7 @@ Supports five core workflows:
 
 ## Triggers
 
-Explicit slash trigger: `/windows`.
+Loads as `windows-mcp:windows`; explicit slash trigger: `/windows`.
 
 Auto-loads on queries mentioning desktop automation, Windows diagnostics, or system inspection (e.g., "click this", "automate this app", "why is my PC slow", "audit startup", "check Defender").
 
