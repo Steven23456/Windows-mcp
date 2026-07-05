@@ -172,3 +172,6 @@ src/WindowsMcp/Properties/launchSettings.json
 
 # Local MCP config backups (never commit; may contain user-specific paths/env)
 .mcp.json.bak*
+
+# subagent-driven-development scratch/ledger
+.superpowers/
