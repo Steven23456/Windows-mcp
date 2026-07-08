@@ -20,7 +20,9 @@ public class ScreenToolsTests
             .ReturnsAsync(new ScreenshotResult(pngBytes, 100, 100, ImageFormat.Png));
 
         var tools = new ScreenTools(shotMock.Object, new Mock<IOcrService>().Object);
-        var result = await tools.Screenshot(null, "png");
+        // output:"base64" required — the tool now defaults to output:"file" (returns a saved path,
+        // no inline data), so this base64-intent test must opt into base64 mode explicitly.
+        var result = await tools.Screenshot(null, "png", "base64");
 
         result.Should().Contain(Convert.ToBase64String(pngBytes));
         result.Should().Contain("100");
