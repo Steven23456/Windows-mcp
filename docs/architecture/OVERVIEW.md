@@ -152,7 +152,7 @@ Windows-MCP exposes **60 MCP tools** across 15 tool classes:
 ### Process Tools (`ProcessTools` — 6 tools)
 | Tool | Purpose |
 |------|---------|
-| `Process` | List processes or kill by PID/name |
+| `Process` | List/inspect/kill processes: plain list, recycle-aware lineage + orphan detection (`orphans`), root-grouping, name/cmdline filtering, and recycle-safe kill by PID/name or whole tree |
 | `ProcessInspect` | Deep per-process detail: parent PID, command line, start time, loaded modules |
 | `StartProcess` | Start a detached process; returns the PID |
 | `Service` | List/status/start/stop/restart Windows services |

@@ -25,6 +25,10 @@ public record ProcessLineageDto(
     DateTime? StartTimeUtc, int? AgeMinutes, bool Orphaned, string RuntimeKind,
     bool IsSystemAdjacent, int RootPid, long MemoryMb);
 
-/// <summary>Processes collapsed under their nearest-live root ancestor.</summary>
+/// <summary>
+/// Processes collapsed under their nearest-live root ancestor. <see cref="DescendantCount"/> and
+/// <see cref="ChildPids"/> are inclusive of the root itself (the full group membership) — e.g. a
+/// root with two children reports count 3 and pids {root, c1, c2}.
+/// </summary>
 public record ProcessGroupDto(
     int RootPid, string RootName, DateTime? RootStartTimeUtc, int DescendantCount, int[] ChildPids);

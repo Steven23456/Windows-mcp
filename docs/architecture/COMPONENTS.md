@@ -320,7 +320,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IServiceControlService` | `ListAsync`, `StartAsync`, `StopAsync`, `RestartAsync` |
 | `IEventLogService` | `QueryAsync` |
 | `ITaskSchedulerService` | `ListAsync`, `ListDetailedAsync`, `GetAsync`, `CreateAsync`, `DeleteAsync`, `RunAsync` |
-| `IProcessService` | `ListAsync`, `GetAsync`, `KillAsync`, `StartAsync` |
+| `IProcessService` | `ListAsync`, `InspectAsync`, `StartDetachedAsync`, `KillAsync`, `ListLineageAsync`, `GroupByRootAsync`, `KillGuardedAsync`, `KillTreeAsync` |
 | `IWindowService` | `ListAsync`, `FocusAsync`, `GetAsync`, `LaunchAsync` |
 | `IWmiService` | `QueryAsync(wql)` |
 | `IStorageService` | `GetHealthAsync(driveLetter?, includeUsage, timeoutSeconds)` → `StorageHealthReport` |

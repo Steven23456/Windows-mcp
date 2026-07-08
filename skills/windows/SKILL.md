@@ -86,12 +86,12 @@ startup_report
 ### 2. Process cleanup (whitelist — never kill-all)
 
 ```
-process (action: list)
-  → process_inspect (candidates: parent PID, command line, loaded modules)
-  → process (action: kill, confirm: true)   — whitelisted orphans only
+process (action: orphans)                     — recycle-aware orphans + signals, one call
+  → (or) process (action: list, groupByRoot: true)   — see which root spawned a pile
+  → process (action: kill, pid, confirm: true[, tree: true][, startTime])
 ```
 
-List first, then inspect each candidate's identity and parentage before touching anything — `process_inspect` surfaces the parent PID and command line that distinguish a genuine orphan from a normal child process. **Hard rail:** never terminate `csrss`, `wininit`, `winlogon`, `services`, `lsass`, `explorer`, or any user-facing application — these are critical Windows processes or the user's active work, not orphans. Confirm the kill list with the user before calling `process` with `action: kill, confirm: true`.
+Prefer `action: orphans` (or `list` with `includeLineage: true`) over the old `list → process_inspect` dance — it returns parent lineage, command line, `ageMinutes`, `runtimeKind`, `orphaned`, and `isSystemAdjacent` for every process in a single call, so you can rank candidates without inspecting each one. `groupByRoot: true` collapses processes under their root ancestor — the fast way to see, e.g., five stale sessions each holding a server fleet. **Read the signals, don't trust the label:** `orphaned` is COMMON and by-design on Windows (`explorer.exe` and anything launched from a since-closed shell are orphaned) — it is NOT a leak signal; `isSystemAdjacent: true` flags the boot/session processes to leave alone. **Hard rail:** never terminate `csrss`, `wininit`, `winlogon`, `services`, `lsass`, `explorer`, or any user-facing application. To reap a stale session and its whole fleet in one guarded call, use `kill` with `tree: true` (kills the pid + its descendants, each re-validated before killing) and pass `startTime` to guard against PID reuse. Always confirm the kill list with the user; `confirm: true` is required.
 
 ### 3. Security audit sweep
 

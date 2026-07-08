@@ -186,9 +186,15 @@ public sealed class ProcessService : IProcessService
         var byId = rows.ToDictionary(r => r.Pid);
         if (!byId.TryGetValue(pid, out var root))
             throw new ArgumentException($"pid {pid} not found");
-        if (expectedStartUtc is DateTime exp && root.CreationUtc is DateTime rc
-            && Math.Abs((rc - exp).TotalSeconds) > 1.5)
-            throw new InvalidOperationException($"pid {pid} start time mismatch; aborting");
+        if (expectedStartUtc is DateTime exp)
+        {
+            // Caller asked for a start-time guard — honor it or refuse; never silently proceed.
+            if (root.CreationUtc is not DateTime rc)
+                throw new InvalidOperationException(
+                    $"pid {pid} start time unavailable; cannot honor the requested startTime guard, aborting");
+            if (Math.Abs((rc - exp).TotalSeconds) > 1.5)
+                throw new InvalidOperationException($"pid {pid} start time mismatch; aborting");
+        }
 
         var childrenOf = new Dictionary<int, List<int>>();
         foreach (var r in rows)
