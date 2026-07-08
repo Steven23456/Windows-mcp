@@ -41,14 +41,18 @@ public sealed class PowerShellService : IPowerShellService
         if (_disposed) throw new ObjectDisposedException(nameof(PowerShellService));
         ct.ThrowIfCancellationRequested();
 
-        // Combine the caller's token with the backstop so the gate is never held indefinitely.
-        using var timeoutCts = new CancellationTokenSource(_backstop);
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-        var token = linkedCts.Token;
-
-        await _gate.WaitAsync(token);
+        // Acquire the gate under the CALLER's token only. The backstop must bound this call's
+        // *execution*, not the time it spends queued behind other callers — otherwise a caller
+        // deep in the queue can burn its entire "runaway-script" budget just waiting, and get
+        // cancelled before its own (perfectly fine) command ever runs.
+        await _gate.WaitAsync(ct);
         try
         {
+            // Now that we hold the gate, start the execution backstop and link the caller's token.
+            using var timeoutCts = new CancellationTokenSource(_backstop);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            var token = linkedCts.Token;
+
             // -NoProfile: skip user profile load (faster, deterministic)
             // -NonInteractive: never prompt
             // -ExecutionPolicy Bypass: allow scripts

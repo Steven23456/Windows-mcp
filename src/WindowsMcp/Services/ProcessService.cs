@@ -145,6 +145,7 @@ public sealed class ProcessService : IProcessService
 
     private async Task<List<Win32ProcRow>> SnapshotAsync(CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested(); // entry check for every lineage/group/kill-tree caller
         var raw = await _wmi.QueryAsync("Win32_Process", null, null, ct);
         return raw.OfType<IDictionary<string, object>>()
             .Select(ProcessLineage.From)
