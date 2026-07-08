@@ -50,6 +50,12 @@ dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained `
   when another app holds the clipboard) — a lone clipboard failure under `Category!=UIAutomation`
   is environmental, not a regression.
 - Other tests are unit (`Category=Unit`, mocked) or read-only integration (`Category=Integration`).
+- **`PowerShellServiceTests` are real-process integration tests** — each `RunAsync` spawns a full
+  `powershell.exe` cold-start, which under Defender scanning on a loaded box is ~15–75 s *each*, so
+  the serialized-calls test can take many minutes. That slowness is environmental (excluding system
+  PowerShell from Defender would be a bad security trade), not a regression. The service's backstop
+  starts **after** the serialization gate is acquired so it bounds execution, not queue-wait time
+  (a queued caller must not burn its runaway-script budget waiting) — do not move it back.
 
 ### Testing a change against the LIVE MCP server (Claude Code)
 
