@@ -29,28 +29,42 @@ what is reapable — mirroring the existing `confirm:true` kill-guard philosophy
 - `Models/ProcessDtos.cs`: `ProcessDto(Pid, Name, Path, MemoryMb)` and
   `ProcessDetailDto(Pid, Name, ParentPid, CommandLine, StartTimeUtc, ModulesError, Modules[])`.
 - `IProcessService`: `ListAsync`, `KillAsync`, `StartDetachedAsync`, `InspectAsync`.
+- **`WmiService.QueryAsync`** builds `SELECT * FROM <class>` (null WHERE ⇒ bulk enumeration,
+  all columns) and returns each row as `Dictionary<string, object>` of raw `PropertyData.Value`.
+  **Critical:** `Win32_Process.CreationDate` comes back as a raw **CIM_DATETIME string**
+  (`yyyyMMddHHmmss.ffffff±ooo`, e.g. `20260708070935.590000-300`) — *not* a parsed `DateTime`
+  (confirmed: the `system_info` OS query returns `InstallDate` in this exact form). Numeric
+  columns like `WorkingSetSize` box as `ulong`/`string`. This is precisely why the existing
+  `InspectAsync` reads `Process.StartTime` instead of the WMI date — a per-PID luxury the bulk
+  path cannot afford (484 live `Process` objects = handle cost), so the bulk path **must parse
+  CIM_DATETIME itself**.
 - Tests: `IWmiService` is mockable (Moq); `WmiService` used real for lineage. Conventions:
   DTOs are `record`s, services `sealed`, tools `async Task<string>` returning JSON,
   `TreatWarningsAsErrors=true`.
 
 ## The orphan algorithm (recycle-aware) — the core primitive
 
-One bulk `Win32_Process` WMI enumeration (no WHERE) → build `map: pid → { ParentProcessId,
-Name, CreationDate, CommandLine, WorkingSetSize }`. With an injected `nowUtc`, for each
-process **P** with parent id **Q**:
+One bulk `Win32_Process` WMI enumeration (no WHERE). The service first **parses each raw WMI
+dictionary into a typed row** `Win32ProcRow(int Pid, int ParentPid, string Name,
+DateTime? CreationUtc, string? CommandLine, long MemoryMb)` — this is the I/O boundary where the
+messy coercions live: `CreationUtc` = parse the **CIM_DATETIME** string via
+`ManagementDateTimeConverter.ToDateTime(...).ToUniversalTime()` (null on missing/unparseable —
+e.g. System PID 4 / Idle PID 0 expose none); `MemoryMb` = `Convert.ToInt64(WorkingSetSize)/1MiB`
+tolerating `ulong`/`string`. The pure classifier then operates on `Win32ProcRow[]` + an injected
+`nowUtc` only — **no string dates, no WMI types** — so tests feed real `DateTime`s. For each
+process **P** (typed row) with parent id **Q**:
 
-- **`parentAlive`** = `map.ContainsKey(Q)` **AND** `map[Q].CreationDate <= P.CreationDate`.
-  The second clause is the recycle guard: if the live "parent" started *after* the child, its
-  PID was reused and the true parent is gone.
+- **`parentAlive`** = `map.ContainsKey(Q)` **AND** *not provably recycled*, where "provably
+  recycled" = both `CreationUtc` values are non-null **and** `parent.CreationUtc > P.CreationUtc`
+  (the live "parent" started *after* the child ⇒ its PID was reused, true parent gone). If
+  either date is null we **cannot prove** recycling, so treat the parent as alive (avoids
+  spuriously orphaning boot processes whose parent has no CIM date).
 - **`Orphaned`** = `!parentAlive`.
 - **`ParentName`** = `parentAlive ? map[Q].Name : null` (null when orphaned — the real parent
   is gone, so we don't report a misleading recycled name).
 - **`RootPid`** = walk `P → parent → …` while `parentAlive`, with a visited-set cycle guard and
   a 64-hop depth cap; the top of the chain is the root. An orphaned process is its own root.
-
-**Null `CreationDate`** (System PID 4 / Idle PID 0 and some protected procs expose none):
-`AgeMinutes` = null; treat a null-dated parent as *alive* for the recycle comparison (cannot
-prove recycling), so we do not spuriously mark boot processes orphaned.
+- **`AgeMinutes`** = `(nowUtc − P.CreationUtc)` whole minutes, or null when `CreationUtc` is null.
 
 **Realism, documented in the tool description:** orphaned is **common and by-design** on
 Windows — `userinit.exe` spawns `explorer.exe` then exits, so the shell and most user apps are
@@ -79,19 +93,22 @@ orphaned. Orphaned ≠ leak. The signals below let a caller rank without the too
   int DescendantCount, int[] ChildPids)`.
 - `ProcessDto` unchanged (plain `list` fast path must not regress).
 
-### Part B — Classifier (pure, testable)
-- A pure static (e.g. `ProcessLineage.Classify(IReadOnlyDictionary<int, Win32ProcRow> rows,
-  DateTime nowUtc)`) that produces `ProcessLineageDto[]` implementing the algorithm above.
-  No I/O — fed the parsed WMI rows and a clock. This is where the unit tests live.
+### Part B — Row parsing + classifier (pure, testable)
+- `Win32ProcRow(int Pid, int ParentPid, string Name, DateTime? CreationUtc, string? CommandLine,
+  long MemoryMb)` record + a pure `Win32ProcRow.From(IDictionary<string,object> wmiRow)` that does
+  the CIM_DATETIME parse and numeric coercions (returns null/skips rows missing `ProcessId`).
+- Pure static `ProcessLineage.Classify(IReadOnlyList<Win32ProcRow> rows, DateTime nowUtc)` →
+  `ProcessLineageDto[]` implementing the algorithm above. No I/O, no WMI/string-date types.
 - Grouping helper `ProcessLineage.GroupByRoot(ProcessLineageDto[])` → `ProcessGroupDto[]`.
 
 ### Part C — Service (`ProcessService`, `IProcessService`)
 - `Task<ProcessLineageDto[]> ListLineageAsync(bool orphansOnly, string? nameFilter,
-  CancellationToken ct)` — one bulk WMI query → parse rows → `Classify(rows, DateTime.UtcNow)`
-  → filter (`orphansOnly` ⇒ `Orphaned==true`; `nameFilter` ⇒ case-insensitive substring match
-  on `Name` **or** `CommandLine`) → return.
+  CancellationToken ct)` — one bulk WMI query → `Win32ProcRow.From` each row →
+  `Classify(rows, DateTime.UtcNow)` → filter (`orphansOnly` ⇒ `Orphaned==true`; `nameFilter` ⇒
+  case-insensitive substring on `Name` **or** `CommandLine`) → return. The filter is applied
+  **after** classification so `RootPid` still points at the true (possibly filtered-out) root.
 - `Task<ProcessGroupDto[]> GroupByRootAsync(CancellationToken ct)` — same enumeration →
-  `Classify` → `GroupByRoot`.
+  `From` → `Classify` → `GroupByRoot`.
 - **Recycle-safe kill + tree:**
   - Extend `KillAsync(int pid, DateTime? expectedStartUtc = null, CancellationToken ct = default)`:
     when `expectedStartUtc` is supplied, verify the live process's `StartTime` matches (within a
@@ -162,10 +179,14 @@ server `StartTime` is later than publish. Then verify live (below).
 
 ## Verification (tests + live)
 
-- **Unit (pure classifier, mocked `IWmiService`):** dead-parent orphan; recycled-parent orphan
-  (alive-but-younger); normal child not orphan; multi-level `RootPid` walk; cycle guard;
-  null-`CreationDate` boot process (age null, not spuriously orphaned); each `RuntimeKind`
-  mapping; `IsSystemAdjacent`; `GroupByRoot` counts/children; `nameFilter` on name and cmdline;
+- **Unit — `Win32ProcRow.From`:** parses a real CIM_DATETIME string (`20260708070935.590000-300`)
+  to the correct UTC instant; missing/garbage `CreationDate` → null (not throw); `WorkingSetSize`
+  as `ulong` and as `string` both coerce; row missing `ProcessId` is skipped.
+- **Unit (pure classifier over `Win32ProcRow[]`):** dead-parent orphan; recycled-parent orphan
+  (alive-but-younger `CreationUtc`); normal child not orphan; **null-dated parent NOT marked
+  recycled**; multi-level `RootPid` walk; cycle guard; null-`CreationUtc` boot process (age null,
+  not spuriously orphaned); each `RuntimeKind` mapping; `IsSystemAdjacent`; `GroupByRoot`
+  counts/children; `nameFilter` on name and cmdline **preserves `RootPid` of a filtered-out root**;
   kill-tree descendant-set computation (pure) + start-time guard mismatch.
 - **Integration:** `ListLineageAsync` includes the current process with a real parent;
   kill-tree against a spawned `cmd.exe` that launches a child, asserting both die.
