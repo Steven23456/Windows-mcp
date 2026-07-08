@@ -28,7 +28,11 @@ what is reapable — mirroring the existing `confirm:true` kill-guard philosophy
   "ProcessId={pid}", ct)` returning rows as `IDictionary<string,object>`.
 - `Models/ProcessDtos.cs`: `ProcessDto(Pid, Name, Path, MemoryMb)` and
   `ProcessDetailDto(Pid, Name, ParentPid, CommandLine, StartTimeUtc, ModulesError, Modules[])`.
-- `IProcessService`: `ListAsync`, `KillAsync`, `StartDetachedAsync`, `InspectAsync`.
+- `IProcessService`: `ListAsync`, `KillAsync`, `StartDetachedAsync`, `InspectAsync`. **Consumers
+  (dependency-graph + grep):** injected by `ProcessTools` **and `StartupReportService`**;
+  implemented only by `ProcessService` (sealed); doubled only by Moq mocks (`ProcessToolsTests`,
+  `StartupReportServiceTests`) — so interface *additions* are safe, but existing *signatures*
+  must stay byte-stable. `IWmiService` is shared by five services → do not modify it.
 - **`WmiService.QueryAsync`** builds `SELECT * FROM <class>` (null WHERE ⇒ bulk enumeration,
   all columns) and returns each row as `Dictionary<string, object>` of raw `PropertyData.Value`.
   **Critical:** `Win32_Process.CreationDate` comes back as a raw **CIM_DATETIME string**
@@ -109,16 +113,21 @@ orphaned. Orphaned ≠ leak. The signals below let a caller rank without the too
   **after** classification so `RootPid` still points at the true (possibly filtered-out) root.
 - `Task<ProcessGroupDto[]> GroupByRootAsync(CancellationToken ct)` — same enumeration →
   `From` → `Classify` → `GroupByRoot`.
-- **Recycle-safe kill + tree:**
-  - Extend `KillAsync(int pid, DateTime? expectedStartUtc = null, CancellationToken ct = default)`:
-    when `expectedStartUtc` is supplied, verify the live process's `StartTime` matches (within a
-    small tolerance) before killing; abort with a clear error on mismatch (guards against a
-    recycled PID from stale list data). Existing callers pass nothing → unchanged behavior.
+- **Recycle-safe kill + tree — additive only (blast-radius constraint).** `IProcessService` is
+  consumed by **both `ProcessTools` and `StartupReportService`**, implemented only by
+  `ProcessService`, and doubled exclusively by Moq mocks (`ProcessToolsTests`,
+  `StartupReportServiceTests`). Adding interface members is therefore safe (Moq auto-defaults),
+  but **changing the existing `KillAsync(int, CancellationToken)` signature is not** — it would
+  ripple into every `.Setup`/`.Verify` and alter a contract `StartupReportService` relies on. So:
+  - **Do not touch `KillAsync`.** Add `Task KillGuardedAsync(int pid, DateTime expectedStartUtc,
+    CancellationToken ct)`: verify the live process's `StartTime` matches `expectedStartUtc`
+    (≈1 s tolerance — CIM_DATETIME resolves to the second) before killing; abort with a clear
+    error on mismatch (guards a recycled PID from stale list data).
   - Add `Task<int> KillTreeAsync(int pid, DateTime? expectedStartUtc, CancellationToken ct)`:
-    take a fresh WMI snapshot, compute the recycle-aware descendant set of `pid`
-    (only following parent links validated by the same start-time rule, so we never chase a
-    recycled PID into unrelated processes), then kill **leaves-first** and finally the root;
-    return the count killed. Verifies the root's `expectedStartUtc` first when supplied.
+    take a fresh WMI snapshot, compute the recycle-aware descendant set of `pid` (only following
+    parent links validated by the same start-time rule, so we never chase a recycled PID into
+    unrelated processes), then kill **leaves-first** and finally the root; return the count killed.
+    Verifies the root's `expectedStartUtc` first when supplied.
 
 ### Part D — Tool surface (`ProcessTools.Process`)
 - New params: `bool includeLineage = false`, `bool groupByRoot = false`, `bool tree = false`,
@@ -131,8 +140,8 @@ orphaned. Orphaned ≠ leak. The signals below let a caller rank without the too
   - `action=orphans` → `ListLineageAsync(true, name)`.
   - `action=list` (plain) → `ListAsync` (unchanged).
   - `action=kill`: parse `startTime` (if given) to `DateTime?`; `tree=true` →
-    `KillTreeAsync(pid, start)`; else `KillAsync(pid, start)` / existing name-loop. `confirm:true`
-    still required.
+    `KillTreeAsync(pid, start)`; else if `start` given → `KillGuardedAsync(pid, start.Value)`;
+    else the existing `KillAsync(pid)` / name-loop (unchanged). `confirm:true` still required.
 - Rewrite the `[Description]` to document actions, the recycle-aware orphan definition, the
   "orphaned is common/by-design" caveat, and the signal fields.
 
