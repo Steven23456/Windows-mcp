@@ -117,4 +117,20 @@ public class ProcessLineageTests
         ProcessLineage.IsSystemAdjacent(Row(9, 0, "explorer.exe", Now)).Should().BeTrue();
         ProcessLineage.IsSystemAdjacent(Row(9, 100, "node.exe", Now)).Should().BeFalse();
     }
+
+    [Fact]
+    public void Classify_depth_cap_stops_a_chain_deeper_than_64_hops()
+    {
+        // Non-cyclic ancestor chain of 200 (pid i's parent is the older pid i-1; pid 1's parent 0
+        // is absent). Exercises the 64-hop depth cap directly — the seen-set guard never fires here
+        // because there is no cycle, so only the hop counter can terminate the walk.
+        var rows = new List<Win32ProcRow>();
+        for (int i = 1; i <= 200; i++)
+            rows.Add(Row(i, i - 1, $"p{i}.exe", Now.AddMinutes(-(300 - i))));
+
+        var map = ProcessLineage.Classify(rows, Now).ToDictionary(d => d.Pid);
+
+        map.Should().HaveCount(200);                // terminated — no hang / stack overflow
+        map[200].RootPid.Should().BeGreaterThan(1); // cap cut the walk short of the true root (pid 1)
+    }
 }
