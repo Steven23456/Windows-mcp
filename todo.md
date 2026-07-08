@@ -3,6 +3,27 @@
 Cross-session task tracker. Done items kept briefly for context; see `CHANGELOG.md` for the
 full record.
 
+## 🆕 Discovered 2026-07-08 (during process-lineage work — not process-lineage scope)
+
+- [ ] **`PowerShellServiceTests.RunAsync_50_serialized_calls` fails deterministically (~15 min).**
+  Verified in isolation (not test contention): the service serializes 50 calls through a
+  `SemaphoreSlim`, each spawning a full **Windows PowerShell 5.1 cold-start**
+  (`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`). At ~18 s/cold-start under Defender
+  scanning × 50 serial ≈ 15 min, which exceeds the later-queued calls' 10-min backstop.
+  Two causes: **(env, dominant)** `powershell.exe`'s path is not in the machine's Defender
+  exclusions (CLAUDE.md documents this cold-start slowness as a setup requirement);
+  **(latent code)** `PowerShellService.RunAsync` creates the backstop CTS at line 45 *before*
+  `_gate.WaitAsync` (line 49), so a queued call's "runaway-script" budget is consumed by queue-wait,
+  not just execution. **Root-cause fix:** move the backstop CTS to *after* gate acquisition so it
+  bounds execution only (matches its documented intent), and consider marking this stress test with
+  a longer timeout or excluding it from the fast gate. Unrelated to the process-lineage feature;
+  it was failing before that work.
+- [ ] **Minor (deferred from process-lineage Task 2 review):** `ProcessService` cancellation-check
+  style is inconsistent across the 4 new methods — `KillGuardedAsync` calls
+  `ct.ThrowIfCancellationRequested()` at entry (matching `KillAsync`); `ListLineageAsync`,
+  `GroupByRootAsync`, `KillTreeAsync` rely on the token propagating into `_wmi.QueryAsync`.
+  Functionally fine; normalize for consistency.
+
 ## ✅ Recently done
 
 - [x] **`startup_report` + `storage_health` released.** `v0.3.0` (`ecafe9d`) shipped both;
