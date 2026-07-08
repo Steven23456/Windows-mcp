@@ -93,10 +93,15 @@ public class ProcessServiceTests
     public async Task ListLineageAsync_name_filter_matches_name_or_commandline()
     {
         var svc = Make(new WmiService());
-        var filtered = await svc.ListLineageAsync(false, "dotnet");
+        // Filter by the current test process's own name — guaranteed present — so the assertion is
+        // non-vacuous (OnlyContain passes trivially on an empty set): it must return at least our
+        // process, and every returned row must actually match the filter on name or command line.
+        var selfName = System.Diagnostics.Process.GetCurrentProcess().ProcessName;
+        var filtered = await svc.ListLineageAsync(false, selfName);
+        filtered.Should().NotBeEmpty();
         filtered.Should().OnlyContain(r =>
-            r.Name.Contains("dotnet", System.StringComparison.OrdinalIgnoreCase) ||
-            (r.CommandLine ?? "").Contains("dotnet", System.StringComparison.OrdinalIgnoreCase));
+            r.Name.Contains(selfName, System.StringComparison.OrdinalIgnoreCase) ||
+            (r.CommandLine ?? "").Contains(selfName, System.StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

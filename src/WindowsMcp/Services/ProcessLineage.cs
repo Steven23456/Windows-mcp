@@ -40,11 +40,7 @@ public static class ProcessLineage
         foreach (var r in rows) byId[r.Pid] = r;
 
         bool ParentAlive(Win32ProcRow p)
-        {
-            if (!byId.TryGetValue(p.ParentPid, out var par)) return false;
-            if (p.CreationUtc is DateTime c && par.CreationUtc is DateTime pc && pc > c) return false; // recycled
-            return true;
-        }
+            => byId.TryGetValue(p.ParentPid, out var par) && !IsRecycledParent(p, par);
 
         int RootOf(Win32ProcRow p)
         {
@@ -109,4 +105,14 @@ public static class ProcessLineage
 
     public static bool IsSystemAdjacent(Win32ProcRow p)
         => SystemNames.Contains(p.Name) || p.ParentPid is 0 or 4;
+
+    /// <summary>
+    /// True when <paramref name="parent"/> is provably a recycled PID rather than the real parent
+    /// of <paramref name="child"/> — i.e. both creation times are known and the "parent" started
+    /// AFTER the child. A null date on either side cannot prove recycling, so returns false.
+    /// Single source of truth for the recycle rule (used by both lineage classification and the
+    /// kill-tree descendant walk).
+    /// </summary>
+    public static bool IsRecycledParent(Win32ProcRow child, Win32ProcRow parent)
+        => child.CreationUtc is DateTime c && parent.CreationUtc is DateTime pc && pc > c;
 }

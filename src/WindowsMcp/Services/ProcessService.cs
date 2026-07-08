@@ -190,12 +190,9 @@ public sealed class ProcessService : IProcessService
             && Math.Abs((rc - exp).TotalSeconds) > 1.5)
             throw new InvalidOperationException($"pid {pid} start time mismatch; aborting");
 
-        static bool ValidParent(Win32ProcRow child, Win32ProcRow parent)
-            => !(child.CreationUtc is DateTime c && parent.CreationUtc is DateTime pc && pc > c);
-
         var childrenOf = new Dictionary<int, List<int>>();
         foreach (var r in rows)
-            if (byId.TryGetValue(r.ParentPid, out var par) && ValidParent(r, par))
+            if (byId.TryGetValue(r.ParentPid, out var par) && !ProcessLineage.IsRecycledParent(r, par))
             {
                 if (!childrenOf.TryGetValue(r.ParentPid, out var list))
                     childrenOf[r.ParentPid] = list = new List<int>();
