@@ -2,9 +2,9 @@ metadata:
   name: unknown
   version: 0.0.0
   lastUpdated: "2026-07-08"
-  totalFiles: 100
+  totalFiles: 101
   totalModules: 5
-  totalExports: 217
+  totalExports: 220
 entryPoints: []
 modules:
   entry:
@@ -383,6 +383,21 @@ modules:
         - PowerShellService
       classes:
         - PowerShellService
+    src/WindowsMcp/Services/ProcessLineage.cs:
+      description: <summary>Typed projection of a Win32_Process row (parse boundary handles CIM_DATETIME).</summary>
+      externalDependencies: []
+      nodeDependencies:
+        - module: System
+          imports:
+            - System
+      internalDependencies:
+        - file: WindowsMcp.Abstractions.Models
+          imports:
+            - WindowsMcp.Abstractions.Models
+      exports:
+        - ProcessLineage
+      classes:
+        - ProcessLineage
     src/WindowsMcp/Services/ProcessService.cs:
       description: ProcessService module
       externalDependencies: []
@@ -1542,10 +1557,14 @@ modules:
         - ProcessDto
         - ModuleInfo
         - ProcessDetailDto
+        - ProcessLineageDto
+        - ProcessGroupDto
       classes:
         - ProcessDto
         - ModuleInfo
         - ProcessDetailDto
+        - ProcessLineageDto
+        - ProcessGroupDto
     src/WindowsMcp.Abstractions/Models/ReliabilityDtos.cs:
       description: <summary>A crash minidump file in C:\Windows\Minidump.</summary>
       externalDependencies: []
@@ -1737,6 +1756,7 @@ dependencyGraph:
         - src/WindowsMcp/Services/OcrService.cs
         - src/WindowsMcp/Services/PowerService.cs
         - src/WindowsMcp/Services/PowerShellService.cs
+        - src/WindowsMcp/Services/ProcessLineage.cs
         - src/WindowsMcp/Services/ProcessService.cs
         - src/WindowsMcp/Services/RegistryService.cs
         - src/WindowsMcp/Services/ReliabilityService.cs
@@ -1822,11 +1842,11 @@ dependencyGraph:
         - src/WindowsMcp.Abstractions/Models/WebDtos.cs
         - src/WindowsMcp.Abstractions/Models/WindowDtos.cs
 statistics:
-  totalSourceFiles: 100
+  totalSourceFiles: 101
   totalModules: 5
-  totalLinesOfCode: 6162
-  totalExports: 217
-  totalClasses: 122
+  totalLinesOfCode: 6448
+  totalExports: 220
+  totalClasses: 125
   totalInterfaces: 32
   totalFunctions: 60
   totalTypeGuards: 0

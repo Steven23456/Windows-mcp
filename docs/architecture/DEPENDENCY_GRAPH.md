@@ -26,7 +26,7 @@ This document provides a comprehensive dependency graph of all files, components
 The codebase is organized into the following modules:
 
 - **entry**: 4 files
-- **services**: 32 files
+- **services**: 33 files
 - **tools**: 15 files
 - **abstractions**: 32 files
 - **models**: 17 files
@@ -406,6 +406,23 @@ The codebase is organized into the following modules:
 
 **Exports:**
 - Classes: `PowerShellService`
+
+---
+
+### `src/WindowsMcp/Services/ProcessLineage.cs` - <summary>Typed projection of a Win32_Process row (parse boundary handles CIM_DATETIME).</summary>
+
+**Node.js Built-in Dependencies:**
+| Module | Import |
+|--------|--------|
+| `System` | `System` |
+
+**Internal Dependencies:**
+| File | Imports | Type |
+|------|---------|------|
+| `WindowsMcp.Abstractions.Models` | `WindowsMcp.Abstractions.Models` | Import |
+
+**Exports:**
+- Classes: `ProcessLineage`
 
 ---
 
@@ -1435,7 +1452,7 @@ The codebase is organized into the following modules:
 ### `src/WindowsMcp.Abstractions/Models/ProcessDtos.cs` - <summary>A DLL/module loaded into a process.</summary>
 
 **Exports:**
-- Classes: `ProcessDto`, `ModuleInfo`, `ProcessDetailDto`
+- Classes: `ProcessDto`, `ModuleInfo`, `ProcessDetailDto`, `ProcessLineageDto`, `ProcessGroupDto`
 
 ---
 
@@ -1529,6 +1546,7 @@ The codebase is organized into the following modules:
 | `OcrService.cs` | 2 files | 1 files |
 | `PowerService.cs` | 1 files | 1 files |
 | `PowerShellService.cs` | 2 files | 1 files |
+| `ProcessLineage.cs` | 1 files | 1 files |
 | `ProcessService.cs` | 2 files | 1 files |
 | `RegistryService.cs` | 2 files | 1 files |
 | `ReliabilityService.cs` | 2 files | 1 files |
@@ -1539,7 +1557,6 @@ The codebase is organized into the following modules:
 | `StartupReportService.cs` | 3 files | 1 files |
 | `StorageService.cs` | 2 files | 1 files |
 | `TaskSchedulerService.cs` | 2 files | 1 files |
-| `UIAutomationService.cs` | 2 files | 1 files |
 
 ---
 
@@ -1565,7 +1582,7 @@ graph TD
         N6[CertStoreService.cs]
         N7[ClipboardService.cs]
         N8[DiskService.cs]
-        N9[...27 more]
+        N9[...28 more]
     end
 
     subgraph Tools
@@ -1603,12 +1620,12 @@ graph TD
 
 | Category | Count |
 |----------|-------|
-| Total Source Files | 100 |
+| Total Source Files | 101 |
 | Total Modules | 5 |
-| Total Lines of Code | 6162 |
-| Total Exports | 217 |
+| Total Lines of Code | 6448 |
+| Total Exports | 220 |
 | Total Re-exports | 0 |
-| Total Classes | 122 |
+| Total Classes | 125 |
 | Total Interfaces | 32 |
 | Total Functions | 60 |
 | Total Type Guards | 0 |
