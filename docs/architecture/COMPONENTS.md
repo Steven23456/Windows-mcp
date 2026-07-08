@@ -201,7 +201,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 | Method | Description |
 |--------|-------------|
-| `Process` | List processes or kill by PID/name |
+| `Process` | actions `list\|orphans\|kill`. `list` is plain by default; `includeLineage:true` adds recycle-aware parent lineage + signals (age, runtime kind, system-adjacency, root PID); `groupByRoot:true` collapses processes under their nearest-live root ancestor. `orphans` lists lineage rows whose parent is gone (recycle-aware). `kill` by PID or name (`confirm:true` required); `tree:true` kills descendants leaves-first; `startTime` guards against PID reuse. Data path: WMI bulk query → CIM datetime parse → pure lineage classifier. |
 | `ProcessInspect` | Deep per-process detail: parent PID, command line, start time, loaded modules |
 | `StartProcess` | Start a detached process; returns the PID |
 | `Service` | List/status/start/stop/restart Windows services |

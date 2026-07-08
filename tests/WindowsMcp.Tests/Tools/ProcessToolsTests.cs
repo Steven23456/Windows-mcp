@@ -23,6 +23,8 @@ public class ProcessToolsTests
             eventLog  ?? new Mock<IEventLogService>().Object);
     }
 
+    private static ProcessTools Make(IProcessService process) => MakeTools(process: process);
+
     [Fact]
     public async Task Process_kill_requires_confirm_true()
     {
@@ -57,5 +59,52 @@ public class ProcessToolsTests
 
         await act.Should().ThrowAsync<ArgumentException>().WithMessage("*confirm*");
         mock.Verify(s => s.DeleteAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Process_orphans_calls_ListLineageAsync_with_orphansOnly_true()
+    {
+        var mock = new Mock<IProcessService>();
+        mock.Setup(m => m.ListLineageAsync(true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(System.Array.Empty<ProcessLineageDto>());
+        var tools = Make(mock.Object);
+        var json = await tools.Process("orphans");
+        mock.Verify(m => m.ListLineageAsync(true, null, It.IsAny<CancellationToken>()), Times.Once);
+        json.Should().Be("[]");
+    }
+
+    [Fact]
+    public async Task Process_list_includeLineage_calls_ListLineageAsync_false()
+    {
+        var mock = new Mock<IProcessService>();
+        mock.Setup(m => m.ListLineageAsync(false, "node", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(System.Array.Empty<ProcessLineageDto>());
+        var tools = Make(mock.Object);
+        await tools.Process("list", name: "node", includeLineage: true);
+        mock.Verify(m => m.ListLineageAsync(false, "node", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Process_list_groupByRoot_calls_GroupByRootAsync()
+    {
+        var mock = new Mock<IProcessService>();
+        mock.Setup(m => m.GroupByRootAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(System.Array.Empty<ProcessGroupDto>());
+        var tools = Make(mock.Object);
+        await tools.Process("list", groupByRoot: true);
+        mock.Verify(m => m.GroupByRootAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Process_kill_tree_requires_confirm_and_calls_KillTreeAsync()
+    {
+        var mock = new Mock<IProcessService>();
+        mock.Setup(m => m.KillTreeAsync(1234, null, It.IsAny<CancellationToken>())).ReturnsAsync(3);
+        var tools = Make(mock.Object);
+        var noConfirm = () => tools.Process("kill", pid: 1234, tree: true);
+        await noConfirm.Should().ThrowAsync<System.ArgumentException>();
+        var json = await tools.Process("kill", pid: 1234, tree: true, confirm: true);
+        mock.Verify(m => m.KillTreeAsync(1234, null, It.IsAny<CancellationToken>()), Times.Once);
+        json.Should().Contain("3");
     }
 }

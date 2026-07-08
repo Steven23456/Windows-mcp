@@ -1,5 +1,11 @@
 ## [Unreleased]
 
+### Added
+- Process tool: recycle-aware lineage (`list includeLineage:true`), orphan enumeration
+  (`orphans`) with `ageMinutes`/`runtimeKind`/`isSystemAdjacent` signals, root-grouping
+  (`list groupByRoot:true`), name/command-line filtering, and a recycle-safe fleet kill
+  (`kill tree:true`, `startTime` PID-reuse guard).
+
 ### Changed
 - **`Screenshot` tool defaults to `output="file"` instead of inline base64** — saves image to
   `%TEMP%\WindowsMcp\screenshot_<timestamp>.<ext>` and returns the file path. A full-screen

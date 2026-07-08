@@ -210,6 +210,70 @@ Output: PowerShellResult { Stdout="[{...}]", Stderr="", ExitCode=0 }
 
 ---
 
+## Process Lineage / Orphan Data Flow
+
+`Process` (actions `list|orphans|kill`) exposes recycle-aware parent lineage, orphan detection,
+and root-grouping on top of the plain process list.
+
+```
+┌──────────┐   ┌─────────────┐   ┌────────────────┐   ┌────────────┐   ┌────────────┐
+│ AI Agent │   │ ProcessTools│   │ ProcessService  │   │ IWmiService│   │ Classifier │
+└────┬─────┘   └──────┬──────┘   └────────┬────────┘   └─────┬──────┘   └─────┬──────┘
+     │                │                   │                   │                │
+     │ Process        │                   │                   │                │
+     │ (orphans /     │                   │                   │                │
+     │  list+lineage/ │                   │                   │                │
+     │  groupByRoot)  │                   │                   │                │
+     ├───────────────►│                   │                   │                │
+     │                │ ListLineageAsync/ │                   │                │
+     │                │ GroupByRootAsync  │                   │                │
+     │                ├──────────────────►│                   │                │
+     │                │                   │ QueryAsync         │                │
+     │                │                   │ (Win32_Process)     │                │
+     │                │                   ├──────────────────►│                │
+     │                │                   │◄──────────────────┤                │
+     │                │                   │ Win32ProcRow[]     │                │
+     │                │                   │ (raw CIM_DATETIME  │                │
+     │                │                   │  CreationDate)     │                │
+     │                │                   │ parse: ManagementDateTimeConverter  │
+     │                │                   │  .ToDateTime(s).ToUniversalTime()   │
+     │                │                   ├─────────────────────────────────────►│
+     │                │                   │                   │  classify (pure,│
+     │                │                   │                   │  nowUtc-injected│
+     │                │                   │                   │  recycle-aware) │
+     │                │                   │◄─────────────────────────────────────┤
+     │                │                   │  ProcessLineageDto[]/ProcessGroupDto[]│
+     │                │                   │  [name/cmdline filter applied AFTER  │
+     │                │                   │   classification]                    │
+     │                │◄──────────────────┤                   │                │
+     │ JSON            │                   │                   │                │
+     │◄───────────────┤                   │                   │                │
+```
+
+### Data
+
+```
+Input:  orphans (name=null)  →  ListLineageAsync(orphansOnly:true, nameFilter:null)
+
+Processing:
+  1. QueryAsync("Win32_Process", null, null, ct) — single bulk WMI enumeration
+  2. Parse each row's CreationDate (CIM_DATETIME string) at the seam only, to UTC DateTime
+  3. Pure classifier over Win32ProcRow[] + nowUtc: for each process, resolve RootPid by walking
+     parent links; orphaned = parent id absent, OR not provably recycled (a null CreationUtc on
+     either side cannot prove recycling, so the parent is treated as alive); attach ageMinutes,
+     runtimeKind, isSystemAdjacent
+  4. Filter (orphansOnly / name substring on name-or-command-line) applied AFTER classification,
+     so a filtered-out root PID still resolves correctly for surviving children
+
+Output: ProcessLineageDto[] → JSON array (recycle-aware lineage + signals per process)
+        or ProcessGroupDto[] → JSON array (processes collapsed under nearest-live root)
+
+Kill-tree: KillTreeAsync(pid, expectedStartUtc?) walks descendants leaves-first, re-validating
+each PID's live start time against the lineage snapshot before killing (guards PID reuse mid-walk).
+```
+
+---
+
 ## Screenshot + OCR Data Flow
 
 ```

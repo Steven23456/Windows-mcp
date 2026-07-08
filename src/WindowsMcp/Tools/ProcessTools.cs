@@ -25,25 +25,64 @@ public sealed class ProcessTools
         _eventLog = eventLog;
     }
 
-    [McpServerTool, Description("List or kill processes. action: list|kill. 'kill' requires confirm:true and either name or pid.")]
+    [McpServerTool, Description(
+        "List/inspect/kill processes. actions: list|orphans|kill. " +
+        "list: plain (Pid,Name,Path,MemoryMb); with includeLineage:true adds parent lineage, " +
+        "startTime, ageMinutes, orphaned, runtimeKind, isSystemAdjacent, rootPid; with " +
+        "groupByRoot:true returns processes collapsed under their nearest-live root ancestor. " +
+        "orphans: lineage rows where the parent is gone (recycle-aware: parent absent, or a live " +
+        "same-PID process started AFTER the child). NOTE orphaned is COMMON and by-design on Windows " +
+        "(explorer.exe and apps from a closed shell are orphaned) — it is NOT a leak signal; use the " +
+        "signals to rank, the tool does not judge. name filters list/orphans by substring on name OR " +
+        "command line. kill: by pid or name (kills all matching), confirm:true required; tree:true " +
+        "kills the pid AND its descendants (leaves-first); startTime (ISO-8601) guards against PID " +
+        "reuse — the kill aborts unless the live process's start time matches.")]
     public async Task<string> Process(
-        [Description("Action: list or kill")] string action,
-        [Description("Process name to kill (kills all matching)")] string? name = null,
-        [Description("Process ID to kill")] int? pid = null,
-        [Description("Must be true to confirm destructive kill action")] bool confirm = false,
+        [Description("Action: list, orphans, or kill")] string action,
+        [Description("Process name; kill target, or substring filter for list/orphans")] string? name = null,
+        [Description("Process ID (kill target)")] int? pid = null,
+        [Description("Must be true to confirm a kill")] bool confirm = false,
+        [Description("list: include parent lineage + signals")] bool includeLineage = false,
+        [Description("list: group processes under their root ancestor")] bool groupByRoot = false,
+        [Description("kill: also kill the target's descendants")] bool tree = false,
+        [Description("kill: ISO-8601 start time guard against PID reuse")] string? startTime = null,
         CancellationToken ct = default)
     {
         switch (action.ToLowerInvariant())
         {
             case "list":
-                var procs = await _process.ListAsync(ct);
-                return JsonSerializer.Serialize(procs);
+                if (groupByRoot)
+                    return JsonSerializer.Serialize(await _process.GroupByRootAsync(ct));
+                if (includeLineage)
+                    return JsonSerializer.Serialize(await _process.ListLineageAsync(false, name, ct));
+                return JsonSerializer.Serialize(await _process.ListAsync(ct));
+
+            case "orphans":
+                return JsonSerializer.Serialize(await _process.ListLineageAsync(true, name, ct));
 
             case "kill":
                 if (!confirm)
                     throw new ArgumentException("'confirm: true' is required for kill");
+                DateTime? start = null;
+                if (!string.IsNullOrWhiteSpace(startTime))
+                {
+                    if (!DateTime.TryParse(startTime, null,
+                            System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
+                        throw new ArgumentException($"'startTime' must be ISO-8601, got: '{startTime}'");
+                    start = parsed.ToUniversalTime();
+                }
                 if (pid.HasValue)
                 {
+                    if (tree)
+                    {
+                        int n = await _process.KillTreeAsync(pid.Value, start, ct);
+                        return $"killed {n} process(es) in tree of pid {pid.Value}";
+                    }
+                    if (start is DateTime s)
+                    {
+                        await _process.KillGuardedAsync(pid.Value, s, ct);
+                        return $"killed pid {pid.Value} (start-time verified)";
+                    }
                     await _process.KillAsync(pid.Value, ct);
                     return $"killed pid {pid.Value}";
                 }
@@ -58,7 +97,7 @@ public sealed class ProcessTools
                 throw new ArgumentException("'kill' requires either name or pid");
 
             default:
-                throw new ArgumentException($"Unknown action '{action}'; expected list|kill");
+                throw new ArgumentException($"Unknown action '{action}'; expected list|orphans|kill");
         }
     }
 
