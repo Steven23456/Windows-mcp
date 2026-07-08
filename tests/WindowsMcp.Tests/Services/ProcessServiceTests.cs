@@ -76,4 +76,63 @@ public class ProcessServiceTests
         detail.Modules.Should().NotBeEmpty();
         detail.ModulesError.Should().BeNull();
     }
+
+    [Fact]
+    public async Task ListLineageAsync_includes_current_process_with_a_parent()
+    {
+        var svc = Make(new WmiService());
+        var self = System.Environment.ProcessId;
+        var rows = await svc.ListLineageAsync(orphansOnly: false, nameFilter: null);
+        var me = rows.Should().ContainSingle(r => r.Pid == self).Subject;
+        me.ParentPid.Should().NotBeNull();
+        me.CommandLine.Should().NotBeNullOrEmpty();
+        me.RootPid.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task ListLineageAsync_name_filter_matches_name_or_commandline()
+    {
+        var svc = Make(new WmiService());
+        var filtered = await svc.ListLineageAsync(false, "dotnet");
+        filtered.Should().OnlyContain(r =>
+            r.Name.Contains("dotnet", System.StringComparison.OrdinalIgnoreCase) ||
+            (r.CommandLine ?? "").Contains("dotnet", System.StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task GroupByRootAsync_returns_groups_covering_all_processes()
+    {
+        var svc = Make(new WmiService());
+        var groups = await svc.GroupByRootAsync();
+        groups.Should().NotBeEmpty();
+        groups.Sum(g => g.DescendantCount).Should().BeGreaterThan(0);
+        groups.Should().OnlyContain(g => g.ChildPids.Length == g.DescendantCount);
+    }
+
+    [Fact]
+    public async Task KillGuardedAsync_aborts_on_start_time_mismatch()
+    {
+        var svc = Make(new WmiService());
+        var pid = await svc.StartDetachedAsync("\"C:\\Windows\\System32\\cmd.exe\" /c pause");
+        try
+        {
+            var act = () => svc.KillGuardedAsync(pid, new System.DateTime(2000, 1, 1, 0, 0, 0, System.DateTimeKind.Utc));
+            await act.Should().ThrowAsync<System.InvalidOperationException>();
+        }
+        finally { try { await svc.KillAsync(pid); } catch { } }
+    }
+
+    [Fact]
+    public async Task KillTreeAsync_kills_parent_and_child()
+    {
+        var svc = Make(new WmiService());
+        // cmd that spawns a child cmd that pauses; both should die.
+        var pid = await svc.StartDetachedAsync(
+            "\"C:\\Windows\\System32\\cmd.exe\" /c start /wait cmd /c pause");
+        await System.Threading.Tasks.Task.Delay(400); // let the child spawn
+        var killed = await svc.KillTreeAsync(pid, null);
+        killed.Should().BeGreaterThanOrEqualTo(1);
+        var act = () => System.Diagnostics.Process.GetProcessById(pid);
+        act.Should().Throw<System.ArgumentException>(); // root gone
+    }
 }

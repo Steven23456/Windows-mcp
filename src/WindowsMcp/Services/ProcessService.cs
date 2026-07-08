@@ -142,4 +142,83 @@ public sealed class ProcessService : IProcessService
 
         return new ProcessDetailDto(pid, name, parentPid, commandLine, startUtc, modulesError, modules.ToArray());
     }
+
+    private async Task<List<Win32ProcRow>> SnapshotAsync(CancellationToken ct)
+    {
+        var raw = await _wmi.QueryAsync("Win32_Process", null, null, ct);
+        return raw.OfType<IDictionary<string, object>>()
+            .Select(ProcessLineage.From)
+            .Where(r => r.HasValue).Select(r => r!.Value).ToList();
+    }
+
+    public async Task<ProcessLineageDto[]> ListLineageAsync(bool orphansOnly, string? nameFilter, CancellationToken ct = default)
+    {
+        var all = ProcessLineage.Classify(await SnapshotAsync(ct), DateTime.UtcNow);
+        IEnumerable<ProcessLineageDto> q = all;
+        if (orphansOnly) q = q.Where(p => p.Orphaned);
+        if (!string.IsNullOrWhiteSpace(nameFilter))
+            q = q.Where(p =>
+                p.Name.Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ||
+                (p.CommandLine?.Contains(nameFilter, StringComparison.OrdinalIgnoreCase) ?? false));
+        return q.ToArray();
+    }
+
+    public async Task<ProcessGroupDto[]> GroupByRootAsync(CancellationToken ct = default)
+        => ProcessLineage.GroupByRoot(ProcessLineage.Classify(await SnapshotAsync(ct), DateTime.UtcNow));
+
+    public Task KillGuardedAsync(int pid, DateTime expectedStartUtc, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        using var proc = Process.GetProcessById(pid); // ArgumentException if gone
+        DateTime actual;
+        try { actual = proc.StartTime.ToUniversalTime(); }
+        catch { throw new InvalidOperationException($"cannot read start time of pid {pid} to verify"); }
+        if (Math.Abs((actual - expectedStartUtc).TotalSeconds) > 1.5)
+            throw new InvalidOperationException(
+                $"pid {pid} start time {actual:o} != expected {expectedStartUtc:o}; aborting (possible PID reuse)");
+        proc.Kill();
+        return Task.CompletedTask;
+    }
+
+    public async Task<int> KillTreeAsync(int pid, DateTime? expectedStartUtc, CancellationToken ct = default)
+    {
+        var rows = await SnapshotAsync(ct);
+        var byId = rows.ToDictionary(r => r.Pid);
+        if (!byId.TryGetValue(pid, out var root))
+            throw new ArgumentException($"pid {pid} not found");
+        if (expectedStartUtc is DateTime exp && root.CreationUtc is DateTime rc
+            && Math.Abs((rc - exp).TotalSeconds) > 1.5)
+            throw new InvalidOperationException($"pid {pid} start time mismatch; aborting");
+
+        static bool ValidParent(Win32ProcRow child, Win32ProcRow parent)
+            => !(child.CreationUtc is DateTime c && parent.CreationUtc is DateTime pc && pc > c);
+
+        var childrenOf = new Dictionary<int, List<int>>();
+        foreach (var r in rows)
+            if (byId.TryGetValue(r.ParentPid, out var par) && ValidParent(r, par))
+            {
+                if (!childrenOf.TryGetValue(r.ParentPid, out var list))
+                    childrenOf[r.ParentPid] = list = new List<int>();
+                list.Add(r.Pid);
+            }
+
+        var order = new List<int>();
+        var seen = new HashSet<int>();
+        void Visit(int id)
+        {
+            if (!seen.Add(id)) return;
+            if (childrenOf.TryGetValue(id, out var kids))
+                foreach (var k in kids) Visit(k);
+            order.Add(id); // post-order => leaves first
+        }
+        Visit(pid);
+
+        int killed = 0;
+        foreach (var id in order)
+        {
+            try { using var p = Process.GetProcessById(id); p.Kill(); killed++; }
+            catch { /* already exited */ }
+        }
+        return killed;
+    }
 }
