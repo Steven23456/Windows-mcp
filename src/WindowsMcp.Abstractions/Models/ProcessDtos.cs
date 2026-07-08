@@ -18,3 +18,13 @@ public record ProcessDetailDto(
     DateTime? StartTimeUtc,
     string? ModulesError,
     ModuleInfo[] Modules);
+
+/// <summary>One process with parent lineage, orphan status, and descriptive signals.</summary>
+public record ProcessLineageDto(
+    int Pid, string Name, int? ParentPid, string? ParentName, string? CommandLine,
+    DateTime? StartTimeUtc, int? AgeMinutes, bool Orphaned, string RuntimeKind,
+    bool IsSystemAdjacent, int RootPid, long MemoryMb);
+
+/// <summary>Processes collapsed under their nearest-live root ancestor.</summary>
+public record ProcessGroupDto(
+    int RootPid, string RootName, DateTime? RootStartTimeUtc, int DescendantCount, int[] ChildPids);
