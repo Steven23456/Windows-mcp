@@ -27,15 +27,17 @@ public sealed class ProcessTools
 
     [McpServerTool, Description(
         "List/inspect/kill processes. actions: list|orphans|kill. " +
-        "list: plain (Pid,Name,Path,MemoryMb); with includeLineage:true adds parent lineage, " +
-        "startTime, ageMinutes, orphaned, runtimeKind, isSystemAdjacent, rootPid; with " +
-        "groupByRoot:true returns processes collapsed under their nearest-live root ancestor. " +
-        "orphans: lineage rows where the parent is gone (recycle-aware: parent absent, or a live " +
-        "same-PID process started AFTER the child). NOTE orphaned is COMMON and by-design on Windows " +
-        "(explorer.exe and apps from a closed shell are orphaned) — it is NOT a leak signal; use the " +
-        "signals to rank, the tool does not judge. name filters list/orphans by substring on name OR " +
-        "command line. kill: by pid or name (kills all matching), confirm:true required; tree:true " +
-        "kills the pid AND its descendants (leaves-first); startTime (ISO-8601) guards against PID " +
+        "list: plain (Pid,Name,Path,MemoryMb); with includeLineage:true adds parentPid, parentName, " +
+        "commandLine, startTime, ageMinutes, orphaned, runtimeKind, isSystemAdjacent, rootPid, " +
+        "memoryMb; with groupByRoot:true returns processes collapsed under their nearest-live root " +
+        "ancestor. orphans: lineage rows where the parent is gone (recycle-aware: parent absent, or " +
+        "a live same-PID process started AFTER the child). NOTE orphaned is COMMON and by-design on " +
+        "Windows (explorer.exe and apps from a closed shell are orphaned) — it is NOT a leak signal; " +
+        "use the signals to rank, the tool does not judge. name filters list/orphans by substring on " +
+        "name OR command line. kill: by pid or name (kills all matching), confirm:true required. " +
+        "tree:true and startTime apply to pid-based kills ONLY (an error is raised if given with " +
+        "name and no pid). tree:true kills the pid AND its descendants (leaves-first, each " +
+        "re-validated against the snapshot before killing). startTime (ISO-8601) guards against PID " +
         "reuse — the kill aborts unless the live process's start time matches.")]
     public async Task<string> Process(
         [Description("Action: list, orphans, or kill")] string action,
@@ -88,6 +90,10 @@ public sealed class ProcessTools
                 }
                 if (!string.IsNullOrWhiteSpace(name))
                 {
+                    // tree/startTime are pid-only — refuse rather than silently ignore them on a
+                    // name-based kill (a caller expecting tree semantics must not get a plain kill).
+                    if (tree || start is not null)
+                        throw new ArgumentException("'tree' and 'startTime' require 'pid' (they do not apply to name-based kills)");
                     var all = await _process.ListAsync(ct);
                     var targets = all.Where(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
                     foreach (var t in targets)

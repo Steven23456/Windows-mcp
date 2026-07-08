@@ -107,4 +107,37 @@ public class ProcessToolsTests
         mock.Verify(m => m.KillTreeAsync(1234, null, It.IsAny<CancellationToken>()), Times.Once);
         json.Should().Contain("3");
     }
+
+    [Fact]
+    public async Task Process_kill_with_startTime_and_no_tree_calls_KillGuardedAsync()
+    {
+        var expected = new DateTime(2026, 7, 8, 12, 0, 0, DateTimeKind.Utc);
+        var mock = new Mock<IProcessService>();
+        mock.Setup(m => m.KillGuardedAsync(1234, expected, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var tools = Make(mock.Object);
+
+        var json = await tools.Process("kill", pid: 1234, confirm: true, startTime: "2026-07-08T12:00:00Z");
+
+        mock.Verify(m => m.KillGuardedAsync(1234, expected, It.IsAny<CancellationToken>()), Times.Once);
+        mock.Verify(m => m.KillAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        mock.Verify(m => m.KillTreeAsync(It.IsAny<int>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Never);
+        json.Should().Contain("verified");
+    }
+
+    [Fact]
+    public async Task Process_kill_by_name_with_tree_or_startTime_is_rejected()
+    {
+        var mock = new Mock<IProcessService>();
+        var tools = Make(mock.Object);
+
+        var withTree = () => tools.Process("kill", name: "foo", tree: true, confirm: true);
+        await withTree.Should().ThrowAsync<ArgumentException>().WithMessage("*require*pid*");
+
+        var withStart = () => tools.Process("kill", name: "foo", confirm: true, startTime: "2026-07-08T12:00:00Z");
+        await withStart.Should().ThrowAsync<ArgumentException>().WithMessage("*require*pid*");
+
+        // Neither branch should have killed anything.
+        mock.Verify(m => m.KillAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
 }

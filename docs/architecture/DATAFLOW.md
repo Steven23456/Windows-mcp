@@ -216,38 +216,15 @@ Output: PowerShellResult { Stdout="[{...}]", Stderr="", ExitCode=0 }
 and root-grouping on top of the plain process list.
 
 ```
-┌──────────┐   ┌─────────────┐   ┌────────────────┐   ┌────────────┐   ┌────────────┐
-│ AI Agent │   │ ProcessTools│   │ ProcessService  │   │ IWmiService│   │ Classifier │
-└────┬─────┘   └──────┬──────┘   └────────┬────────┘   └─────┬──────┘   └─────┬──────┘
-     │                │                   │                   │                │
-     │ Process        │                   │                   │                │
-     │ (orphans /     │                   │                   │                │
-     │  list+lineage/ │                   │                   │                │
-     │  groupByRoot)  │                   │                   │                │
-     ├───────────────►│                   │                   │                │
-     │                │ ListLineageAsync/ │                   │                │
-     │                │ GroupByRootAsync  │                   │                │
-     │                ├──────────────────►│                   │                │
-     │                │                   │ QueryAsync         │                │
-     │                │                   │ (Win32_Process)     │                │
-     │                │                   ├──────────────────►│                │
-     │                │                   │◄──────────────────┤                │
-     │                │                   │ Win32ProcRow[]     │                │
-     │                │                   │ (raw CIM_DATETIME  │                │
-     │                │                   │  CreationDate)     │                │
-     │                │                   │ parse: ManagementDateTimeConverter  │
-     │                │                   │  .ToDateTime(s).ToUniversalTime()   │
-     │                │                   ├─────────────────────────────────────►│
-     │                │                   │                   │  classify (pure,│
-     │                │                   │                   │  nowUtc-injected│
-     │                │                   │                   │  recycle-aware) │
-     │                │                   │◄─────────────────────────────────────┤
-     │                │                   │  ProcessLineageDto[]/ProcessGroupDto[]│
-     │                │                   │  [name/cmdline filter applied AFTER  │
-     │                │                   │   classification]                    │
-     │                │◄──────────────────┤                   │                │
-     │ JSON            │                   │                   │                │
-     │◄───────────────┤                   │                   │                │
+Flow — process action orphans / list includeLineage / list groupByRoot:
+
+  AI Agent          →  ProcessTools.Process(action, name?, includeLineage?, groupByRoot?)
+  ProcessTools      →  ProcessService.ListLineageAsync(...) | GroupByRootAsync(...)
+  ProcessService    →  IWmiService.QueryAsync("Win32_Process", null, null)   [single bulk enumeration]
+  ProcessService    :  Win32ProcRow.From(row) — parse raw CIM_DATETIME CreationDate → UTC at the seam
+  ProcessService    →  ProcessLineage.Classify(rows, nowUtc)                 [pure, recycle-aware]
+  ProcessService    :  apply orphansOnly / name-or-cmdline filter AFTER classification
+  ProcessService    →  ProcessTools  →  AI Agent : JSON (ProcessLineageDto[] | ProcessGroupDto[])
 ```
 
 ### Data
@@ -268,8 +245,11 @@ Processing:
 Output: ProcessLineageDto[] → JSON array (recycle-aware lineage + signals per process)
         or ProcessGroupDto[] → JSON array (processes collapsed under nearest-live root)
 
-Kill-tree: KillTreeAsync(pid, expectedStartUtc?) walks descendants leaves-first, re-validating
-each PID's live start time against the lineage snapshot before killing (guards PID reuse mid-walk).
+Kill-tree: KillTreeAsync(pid, expectedStartUtc?) verifies the root PID's start time once against
+expectedStartUtc when given, then walks descendants leaves-first. Before killing each PID it
+re-reads the live start time and compares it to that PID's snapshot CreationUtc, skipping any
+mismatch — so a PID reused between the snapshot and the kill is not an innocent bystander (guards
+PID reuse mid-walk). A snapshot row with no CIM date cannot be validated and is killed as-is.
 ```
 
 ---

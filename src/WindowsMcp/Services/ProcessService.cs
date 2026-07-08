@@ -213,7 +213,23 @@ public sealed class ProcessService : IProcessService
         int killed = 0;
         foreach (var id in order)
         {
-            try { using var p = Process.GetProcessById(id); p.Kill(); killed++; }
+            try
+            {
+                using var p = Process.GetProcessById(id);
+                // Re-validate before killing: the live process must still be the same one we
+                // snapshotted. A PID reused between the snapshot and here would otherwise be an
+                // innocent bystander. Skip (do not kill) on a start-time mismatch. When the
+                // snapshot had no CIM date (boot/protected proc), we cannot prove reuse, so proceed.
+                if (byId.TryGetValue(id, out var snap) && snap.CreationUtc is DateTime sc)
+                {
+                    DateTime live;
+                    try { live = p.StartTime.ToUniversalTime(); }
+                    catch { continue; } // cannot verify identity -> do not kill
+                    if (Math.Abs((live - sc).TotalSeconds) > 1.5) continue; // PID reused -> skip
+                }
+                p.Kill();
+                killed++;
+            }
             catch { /* already exited */ }
         }
         return killed;
