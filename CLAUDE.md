@@ -53,16 +53,30 @@ dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained `
 
 ### Testing a change against the LIVE MCP server (Claude Code)
 
-The plugin runs `dist/WindowsMcp.exe`. Two gotchas when re-deploying a rebuilt exe:
-1. **The running server locks `dist/WindowsMcp.exe`**, and Claude Code auto-restarts a killed
-   server — so you can't just overwrite it. Windows allows **renaming a running image**: rename
-   `WindowsMcp.exe` aside (e.g. `WindowsMcp.old1.exe`), then `dotnet publish -o dist`.
-2. **`/reload-plugins` does NOT restart a server whose `.mcp.json` is unchanged** — it keeps the
-   existing process (serving the OLD exe). To force a fresh process, bump the `_RETRY` env value
-   in `~/.claude/local-marketplace/windows-mcp/.mcp.json`, then `/reload-plugins`. Confirm via the
-   server process `StartTime` being later than the publish time.
-- Orphaned `WindowsMcp.exe` instances + `dist/WindowsMcp.old*.exe` accumulate across reloads;
-  `/kill-plugins` then `/reload-plugins` clears them.
+**This plugin is url-sourced** (registered in `~/Github/skills/.claude-plugin/marketplace.json`
+as `source: url → github.com/danielsimonjr/Windows-mcp`). Claude Code does **not** run
+`dist/WindowsMcp.exe` from this repo, nor `~/.claude/local-marketplace/windows-mcp/` (a dead
+pre-2026-07-02 location). It runs a **committed bundle from a per-version cache clone**:
+`~/.claude/plugins/cache/local-marketplace/windows-mcp/<version>/bundle/WindowsMcp.exe`. So a
+`dotnet publish -o dist` + `_RETRY` bump deploys **nothing** — verify the running image path
+before believing a deploy landed (`Get-CimInstance Win32_Process -Filter "Name='WindowsMcp.exe'"
+| Select ProcessId, ExecutablePath, CreationDate`).
+
+**Correct redeploy of a rebuilt exe:**
+1. `dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained
+   -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true`.
+2. Copy `dist/WindowsMcp.exe` over the **committed** `bundle/WindowsMcp.exe` (it is git-tracked;
+   a plain `git add bundle/WindowsMcp.exe` works — it is not gitignored).
+3. Bump the version in **both** `.claude-plugin/plugin.json` **and** the `windows-mcp` entry in
+   `~/Github/skills/.claude-plugin/marketplace.json` (an unchanged marketplace version
+   short-circuits `/plugin marketplace update`, so the re-clone never happens).
+4. Commit + push this repo (bundle + plugin.json + CHANGELOG) and `~/Github/skills`
+   (marketplace.json).
+5. User runs **`/plugin marketplace update local-marketplace`** (re-clones into a fresh
+   `<version>/` cache dir with the new bundle) → **`/kill-plugins`** (clears the accumulated
+   stale `WindowsMcp.exe` instances — one per prior session) → **`/reload-plugins`** (binds the
+   new process). Confirm via the running process `ExecutablePath` pointing at the new `<version>`
+   cache dir and `CreationDate` later than the update.
 
 ## Conventions (enforced)
 

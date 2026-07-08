@@ -3,26 +3,23 @@
 Cross-session task tracker. Done items kept briefly for context; see `CHANGELOG.md` for the
 full record.
 
-## 🆕 Discovered 2026-07-08 (during process-lineage work — not process-lineage scope)
+## ✅ Fixed 2026-07-08 (found during process-lineage work; fixed at root, not deferred)
 
-- [ ] **`PowerShellServiceTests.RunAsync_50_serialized_calls` fails deterministically (~15 min).**
-  Verified in isolation (not test contention): the service serializes 50 calls through a
-  `SemaphoreSlim`, each spawning a full **Windows PowerShell 5.1 cold-start**
-  (`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`). At ~18 s/cold-start under Defender
-  scanning × 50 serial ≈ 15 min, which exceeds the later-queued calls' 10-min backstop.
-  Two causes: **(env, dominant)** `powershell.exe`'s path is not in the machine's Defender
-  exclusions (CLAUDE.md documents this cold-start slowness as a setup requirement);
-  **(latent code)** `PowerShellService.RunAsync` creates the backstop CTS at line 45 *before*
-  `_gate.WaitAsync` (line 49), so a queued call's "runaway-script" budget is consumed by queue-wait,
-  not just execution. **Root-cause fix:** move the backstop CTS to *after* gate acquisition so it
-  bounds execution only (matches its documented intent), and consider marking this stress test with
-  a longer timeout or excluding it from the fast gate. Unrelated to the process-lineage feature;
-  it was failing before that work.
-- [ ] **Minor (deferred from process-lineage Task 2 review):** `ProcessService` cancellation-check
-  style is inconsistent across the 4 new methods — `KillGuardedAsync` calls
-  `ct.ThrowIfCancellationRequested()` at entry (matching `KillAsync`); `ListLineageAsync`,
-  `GroupByRootAsync`, `KillTreeAsync` rely on the token propagating into `_wmi.QueryAsync`.
-  Functionally fine; normalize for consistency.
+- [x] **`PowerShellService` backstop consumed by queue-wait** (was surfacing as the
+  `RunAsync_50_serialized_calls` deterministic timeout). Root cause: the per-call backstop CTS was
+  created *before* `_gate.WaitAsync`, so a queued caller burned its runaway-script budget while
+  waiting. **Fixed:** backstop CTS now created *after* the gate is acquired (bounds execution, not
+  queue time). The serialized stress test is right-sized (the property is N-independent; a large N
+  only measured Defender cold-start scan time). 6/6 `PowerShellServiceTests` green. (The remaining
+  ~real-`powershell.exe` cold-start slowness under AV is inherent to these integration tests and
+  not code-fixable — excluding system PowerShell from Defender would be a bad security trade.)
+- [x] **`ProcessService` cancellation-check consistency** (Task 2 review Minor): added an entry
+  `ct.ThrowIfCancellationRequested()` in the shared `SnapshotAsync`, covering `ListLineageAsync`,
+  `GroupByRootAsync`, and `KillTreeAsync` in one place (`KillGuardedAsync` already had its own).
+- [x] **Stale `ScreenToolsTests` base64 assertion** (preexisting, unrelated) after the
+  `Screenshot output="file"` default — test now opts into `output:"base64"`.
+- [x] **Stale redeploy recipe** in this repo's `CLAUDE.md` (described the dead `dist/`+`_RETRY`
+  path) — rewrote to the actual url-sourced `bundle/` + `/plugin marketplace update` flow.
 
 ## ✅ Recently done
 

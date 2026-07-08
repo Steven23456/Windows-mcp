@@ -1,16 +1,31 @@
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-08
+
 ### Added
 - Process tool: recycle-aware lineage (`list includeLineage:true`), orphan enumeration
   (`orphans`) with `ageMinutes`/`runtimeKind`/`isSystemAdjacent` signals, root-grouping
   (`list groupByRoot:true`), name/command-line filtering, and a recycle-safe fleet kill
-  (`kill tree:true`, `startTime` PID-reuse guard).
+  (`kill tree:true`, `startTime` PID-reuse guard). Orphan detection is recycle-aware (a parent
+  whose PID was reused and started after its child counts as gone), and the "orphaned is common
+  and by-design on Windows" caveat is documented — the tool describes, it does not judge.
 
 ### Changed
 - **`Screenshot` tool defaults to `output="file"` instead of inline base64** — saves image to
   `%TEMP%\WindowsMcp\screenshot_<timestamp>.<ext>` and returns the file path. A full-screen
   1080p PNG was embedding ~240k tokens of base64 directly in the conversation history; the file
   path response is ~4 tokens. Pass `output="base64"` to restore the previous inline behavior.
+
+### Fixed
+- **`PowerShellService` backstop was consumed by queue-wait.** The per-call backstop
+  `CancellationTokenSource` was created before acquiring the serialization gate, so a caller
+  queued behind many others could burn its entire runaway-script budget just waiting and be
+  cancelled before its own command ran. The backstop now starts *after* the gate is acquired, so
+  it bounds execution time only (its documented intent). The serialized-calls stress test is
+  right-sized (the property is independent of the call count; a large count only measured
+  antivirus cold-start scan time).
+- **Stale `ScreenToolsTests` base64 assertion** after the `output="file"` default — the test now
+  opts into `output:"base64"` to exercise the mode it asserts.
 
 ## [0.5.0] - 2026-07-04
 
