@@ -1,3 +1,59 @@
+## [0.6.1] - 2026-07-12
+
+### Fixed
+- **`process list` silently ignored the `name` filter on two of its three paths** — found by live
+  e2e testing against the 0.6.0 server. `ProcessTools.Process` forwarded `name` only on the
+  `includeLineage` path; the plain-`list` and `groupByRoot` paths called `ListAsync(ct)` /
+  `GroupByRootAsync(ct)`, which had **no filter parameter at all** on `IProcessService`. A filter
+  matching nothing therefore returned the **entire process table** (~360 rows) instead of an empty
+  result — silent, and the opposite of the safe failure direction: a caller narrowing to
+  `name: "chrome"` to pick a PID to kill was handed the whole machine. Root-caused at the
+  interface (the tool had nowhere to pass the filter), not patched at the call site:
+  - `IProcessService.ListAsync` and `GroupByRootAsync` now take `string? nameFilter = null`.
+  - Plain `list` matches a case-insensitive substring of the **name only** (a `ProcessDto` carries
+    no command line); `orphans` / `includeLineage` / `groupByRoot` match name **or** command line.
+    The tool description previously over-promised command-line matching on every path; corrected.
+  - `groupByRoot` + filter returns the **whole trees that contain a match** — full membership and
+    a true `DescendantCount`. It deliberately does not trim the tree: a trimmed count still reads
+    as "descendants" and would mislead.
+  - The name-based `kill` path stays on **exact** matching (it passes no filter), so
+    `kill --name node` cannot also kill `node-inspector`.
+  - The bug shipped because `Process_list_groupByRoot_calls_GroupByRootAsync` asserted only that
+    the method *was called*, never that the argument arrived. Tests now assert on the forwarded
+    argument. +9 tests (205 pass, 0 fail).
+
+- **The server misreported its own version over MCP** — the handshake returned
+  `serverInfo.version = "0.4.1"`, a hardcoded literal in `Program.cs` that had been stale for
+  **three releases** (0.5.0, 0.6.0 and 0.6.1 all shipped announcing 0.4.1). Surfaced while
+  e2e-testing the rebuilt bundle. Not cosmetic: this plugin is served from a per-version cache
+  clone of the committed `bundle/`, so a stale bundle is otherwise invisible and `serverInfo` is
+  the natural thing to check — a server that lies about its version is what let v0.6.0 sit
+  undeployed for four days while 0.5.0 kept answering. Root cause was three disagreeing sources of
+  truth (the literal, an unset `<Version>` leaving the assembly at 1.0.0, and `plugin.json`). Now
+  `<Version>` in `Directory.Build.props` is the single build-side source, `Program.ServerVersion`
+  reads it off the assembly (no literal to rot), and `ServerInfoTests` pins it to
+  `.claude-plugin/plugin.json` so a bump that misses one of them fails the test gate.
+
+- **Every caller-facing error message in the server was being thrown away** — found by e2e-testing
+  the orphan/kill features. The MCP SDK masks any exception that isn't an `McpException`, returning
+  a bare `"An error occurred invoking '<tool>'."`. Sensible for unexpected faults; actively harmful
+  for our **deliberate refusals**, whose messages are the whole point. The worst case is the
+  PID-reuse start-time guard: it aborts a kill with
+  `"pid N start time … != expected …; aborting (possible PID reuse)"` — and that was flattened to
+  the generic string, making a guard abort **indistinguishable from a crash**. A caller could
+  reasonably "retry" the kill without the guard, causing precisely the kill the guard exists to
+  prevent. This affected all 54 intentional throws across 11 tool classes.
+  Fixed at the boundary with a single `AddCallToolFilter` middleware (`Program.cs` + `ToolErrors`)
+  that surfaces caller-facing refusals (`ArgumentException` / `InvalidOperationException`) verbatim
+  with `isError: true`, while unexpected faults keep the SDK's masking (no internals leak). Services
+  stay MCP-agnostic and no call sites changed. Verified live over stdio — the guard, the missing
+  `confirm`, bad `startTime`, bad param combos, unknown actions, and dead PIDs all now report why.
+
+### Changed
+- `ProcessService.ListAsync` filters by name **before** projecting to DTOs — `MainModule` access
+  opens a native handle and throws on protected processes, so skipping non-matches is cheaper and
+  quieter. Extracted the duplicated name-or-command-line predicate into `ProcessLineage.Matches`.
+
 ## [Unreleased]
 
 ### Added

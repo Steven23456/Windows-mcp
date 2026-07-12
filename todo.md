@@ -3,6 +3,79 @@
 Cross-session task tracker. Done items kept briefly for context; see `CHANGELOG.md` for the
 full record.
 
+## 🧪 Live e2e coverage sweep — ACTIVE (20/60 tools ever exercised against a live server)
+
+**Why this exists:** all prior e2e testing was ad-hoc and unrecorded. A transcript audit
+(2026-07-12) found **no checklist ever existed** — 20 of the 60 tools have been invoked against a
+live server at some point, 40 **never once**. Every e2e-only bug we've shipped a fix for
+(`storage_health` empty/timeout, `defender_status` fault, and now the `process` name-filter) was
+invisible to the unit suite. This table is the resumable record so the sweep survives a session.
+
+**Before trusting ANY live result — verify the running image.** The served exe is the committed
+`bundle/WindowsMcp.exe` cloned into `~/.claude/plugins/cache/local-marketplace/windows-mcp/<version>/`.
+A `dotnet publish -o dist` deploys **nothing**. This trap already cost us once: v0.6.0 was tagged,
+pushed, and believed shipped on 2026-07-08, but the cache never re-cloned it — the live server ran
+**0.5.0 for four days**, and `process orphans` was recorded as "errored" against a binary that
+didn't have it. Check first:
+`Get-CimInstance Win32_Process -Filter "Name='WindowsMcp.exe'" | Select ExecutablePath, CreationDate`
+
+**Hazards — do not walk these blind:**
+- `storage_health include_usage:true` **wakes sleeping USB/external devices and can stall.** The
+  default metadata-only path is safe; the deep path is opt-in for a reason. Don't pass it casually.
+- Destructive: `power_action` (now really does enable `SeShutdownPrivilege` — it will shut down),
+  `registry_set`, `file_write`, `service` (stop/restart), `scheduled_task` (create/delete),
+  `archive`. Exercise against throwaway targets only.
+- The 19 UI-automation tools need an **interactive foreground desktop**; they fail headless.
+
+### ✅ Verified live (v0.6.x)
+- [x] `process` — `list`, `list includeLineage`, `orphans`, `list groupByRoot`. Lineage asserted
+  against independent WMI ground truth (PID/parent/orphan-state all matched). **Found the
+  name-filter bug** (fixed in 0.6.1). Orphan detection verified both directions: no false positive
+  (explorer's dead parent → correctly orphaned) and no false negative (WindowsMcp's live parent →
+  correctly not orphaned).
+- [x] **`process orphans` + the kill guards — fully e2e-verified (2026-07-12).** Cross-checked the
+  tool's orphan set against an independently computed one (recycle-aware rule, raw WMI, 385 procs):
+  **zero false positives, zero false negatives**. All 4 recycled-PID-parent cases caught — incl.
+  `Secure System`/`Registry`, whose parent (PID 4) is *alive*, so a naive alive-check would clear
+  them; catching them proves the recycle rule is really running. Then **manufactured a real orphan**
+  (spawner exits, child survives) — tool reported it with every field exact (pid/ppid/`ParentName:
+  null`/`Orphaned`/`RuntimeKind: shell`/`RootPid: self`/start time to the microsecond), matched via
+  **command line** (the name is just `powershell.exe`). Kill guards: a **wrong** `startTime` aborted
+  the kill and the process survived; the **correct** `startTime` killed it. **Found the error-message
+  masking bug** (fixed in 0.6.1). Gotcha for future sweeps: a WMI `CommandLine -like '*marker*'`
+  query **matches its own process chain** — build the marker from parts at runtime, or you will
+  "find" phantom leftovers and kill your own shell.
+- [x] **MCP handshake / `serverInfo`** — **found it misreporting `0.4.1` for three releases**
+  (fixed in 0.6.1: version now derives from `<Version>` in `Directory.Build.props` and is pinned to
+  `plugin.json` by `ServerInfoTests`). Re-verified over stdio: the rebuilt bundle reports `0.6.1`.
+
+**Reusable harness:** drive any tool against the *rebuilt* `bundle/WindowsMcp.exe` over MCP stdio
+without a marketplace round-trip — spawn the exe, `initialize` → `notifications/initialized` →
+`tools/call`. This is how the 0.6.1 fix was verified before merge (reproduce the original failure,
+then watch it not happen), and it sidesteps the cache-clone deploy lag entirely.
+
+### 🔁 Re-run against 0.6.1 (previously errored, never re-verified after redeploy)
+- [ ] `process orphans` — errored 2026-07-08; almost certainly the stale-0.5.0-binary trap. Now
+  passing on 0.6.0, but re-confirm on the 0.6.1 bundle.
+- [ ] `screenshot format:"png"` — errored 2026-07-08, around the `output="file"` default change.
+  Re-check the param shape.
+
+### 🟡 Exercised incidentally, never deliberately verified (18)
+`powershell` · `storage_health` · `startup_report` · `process_inspect` · `file_read` · `file_info` ·
+`system_info` · `start_process` · `file_search` · `wmi_query` · `file_streams` · `defender_status` ·
+`scheduled_task` · `file_manage` · `event_log` · `verify_signature` · `cert_store` · `driver_list`
+
+### 🔴 Never invoked live (40)
+- **Safe / read-only — sweep these first (11):** `file_hash` · `reliability` · `env` · `network` ·
+  `firewall` · `disk_inspect` · `security_audit` · `registry_get` · `http_request` · `scrape` ·
+  `multi_monitor`
+- **Write / destructive — throwaway targets only (9):** `file_write` · `registry_set` · `archive` ·
+  `service` · `power_action` · `shortcut` · `notification` · `audio` · `clipboard`
+- **UI-automation — needs interactive foreground desktop (19):** `click` · `type` · `key` · `hover` ·
+  `drag` · `scroll` · `focus` · `launch` · `window` · `switch_to_window` · `get_state` ·
+  `get_element` · `find_element` · `interact_element` · `assert_element` · `wait_for` · `get_text` ·
+  `get_table` · `ocr` · `file_dialog`
+
 ## 🚀 Claude-in-Actions (Phase 2) pilot — ACTIVE (blocked on Daniel for 2 setup items)
 
 Human-gated pilot: a doc-drift bot opens PRs, Daniel merges. Design survived two adversarial review

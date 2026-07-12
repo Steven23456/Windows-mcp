@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Windows.Win32;
 using Windows.Win32.UI.HiDpi;
@@ -11,6 +12,15 @@ namespace WindowsMcp;
 
 internal static class Program
 {
+    /// <summary>
+    /// The version this server reports over MCP, taken from &lt;Version&gt; in Directory.Build.props.
+    /// Never hardcode it: the previous literal silently rotted for three releases (stuck at "0.4.1"
+    /// while 0.5.0 and 0.6.0 shipped), and a server that misreports its own version is exactly what
+    /// makes a stale-bundle deploy invisible. Pinned to plugin.json by ServerInfoTests.
+    /// </summary>
+    internal static string ServerVersion { get; } =
+        System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0";
+
     public static async Task<int> Main(string[] args)
     {
         // Register AppUserModelID first so WinRT ToastNotification works.
@@ -92,8 +102,28 @@ internal static class Program
         builder.Services
             .AddMcpServer(o =>
             {
-                o.ServerInfo = new() { Name = "Windows-mcp", Version = "0.4.1" };
+                o.ServerInfo = new() { Name = "Windows-mcp", Version = ServerVersion };
             })
+            // Surface our deliberate refusals verbatim. Without this the SDK flattens every
+            // non-McpException to "An error occurred invoking '<tool>'.", so the PID-reuse guard
+            // aborting a kill looks identical to the tool crashing — and a caller may "retry"
+            // without the guard, causing exactly the kill the guard existed to prevent.
+            // Unexpected faults still fall through to the SDK's masking. See ToolErrors.
+            .WithRequestFilters(f => f.AddCallToolFilter(next => async (ctx, ct) =>
+            {
+                try
+                {
+                    return await next(ctx, ct);
+                }
+                catch (Exception ex) when (ToolErrors.IsCallerFacing(ex))
+                {
+                    return new CallToolResult
+                    {
+                        IsError = true,
+                        Content = [new TextContentBlock { Text = ex.Message }],
+                    };
+                }
+            }))
             .WithStdioServerTransport()
             .WithToolsFromAssembly();   // source generator discovers [McpServerTool] methods
 
