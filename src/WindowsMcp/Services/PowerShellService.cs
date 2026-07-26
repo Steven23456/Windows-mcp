@@ -41,6 +41,8 @@ public sealed class PowerShellService : IPowerShellService
         if (_disposed) throw new ObjectDisposedException(nameof(PowerShellService));
         ct.ThrowIfCancellationRequested();
 
+        string? scriptFileToDelete = null;
+
         // Acquire the gate under the CALLER's token only. The backstop must bound this call's
         // *execution*, not the time it spends queued behind other callers — otherwise a caller
         // deep in the queue can burn its entire "runaway-script" budget just waiting, and get
@@ -53,14 +55,20 @@ public sealed class PowerShellService : IPowerShellService
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
             var token = linkedCts.Token;
 
+            // Build the invocation. See BuildArguments for why stdin is NOT used.
+            var (arguments, tempScript) = await BuildArgumentsAsync(command, token);
+            scriptFileToDelete = tempScript;
+
             // -NoProfile: skip user profile load (faster, deterministic)
             // -NonInteractive: never prompt
             // -ExecutionPolicy Bypass: allow scripts
-            // -Command -: read command from stdin
             var psi = new ProcessStartInfo
             {
                 FileName = PowerShellExe,
-                Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command -",
+                Arguments = arguments,
+                // Still redirect stdin even though we never write to it: this process is an MCP
+                // STDIO server, so our own stdin is the JSON-RPC channel. An un-redirected child
+                // would INHERIT that handle and could consume protocol bytes. Redirect and close.
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -73,16 +81,15 @@ public sealed class PowerShellService : IPowerShellService
             using var proc = new Process { StartInfo = psi };
             proc.Start();
 
-            // Register the kill BEFORE writing stdin: if cancellation (caller or backstop) fires
-            // during the write, the child must still be torn down or it orphans.
+            // Register the kill BEFORE any await: if cancellation (caller or backstop) fires
+            // early, the child must still be torn down or it orphans.
             using var ctReg = token.Register(() =>
             {
                 try { proc.Kill(entireProcessTree: true); } catch { }
             });
 
-            // Write the command then close stdin so PowerShell exits when done.
-            await proc.StandardInput.WriteAsync(command.AsMemory(), token);
-            await proc.StandardInput.FlushAsync(token);
+            // Close stdin immediately — the script is passed via the command line, and leaving
+            // the pipe open would make PowerShell wait for input that never comes.
             proc.StandardInput.Close();
 
             // Read both streams concurrently to avoid pipe deadlock on large output.
@@ -112,8 +119,62 @@ public sealed class PowerShellService : IPowerShellService
         }
         finally
         {
+            if (scriptFileToDelete is not null)
+            {
+                try { File.Delete(scriptFileToDelete); }
+                catch (Exception ex) { _log.LogWarning(ex, "Failed to delete temp script {Path}", scriptFileToDelete); }
+            }
             _gate.Release();
         }
+    }
+
+    // Windows caps a command line at 32767 chars. -EncodedCommand base64s UTF-16LE, so the
+    // encoded form is ~2.67x the script length; stay well clear of the ceiling.
+    private const int MaxEncodedCommandChars = 30_000;
+
+    /// <summary>
+    /// Produces the powershell.exe arguments for <paramref name="command"/>, plus the path of a
+    /// temp script file to delete afterwards (null when none was needed).
+    /// </summary>
+    /// <remarks>
+    /// We deliberately do NOT use <c>-Command -</c> with the script piped to stdin. PowerShell
+    /// reads piped stdin and evaluates it LINE BY LINE as independent statements, so every
+    /// multi-line construct (hashtable literal, try/catch, foreach, function, wrapped assignment)
+    /// is silently mangled — and the process still exits 0 with EMPTY stdout. That is what made
+    /// <c>disk_inspect mode:reclaimable</c> return nothing on exit 0: its script ends in a
+    /// multi-line <c>[PSCustomObject]@{...} | ConvertTo-Json</c>. Piping also left the input
+    /// encoding at the console default, corrupting non-ASCII.
+    ///
+    /// <c>-EncodedCommand</c> passes the script as one base64 UTF-16LE blob: parsed as a single
+    /// unit, encoding explicit, no quoting hazards. Its only limit is the command-line length —
+    /// and since stdin had no such limit, an oversized script falls back to a temp <c>.ps1</c>
+    /// run with <c>-File</c> so large scripts do not regress.
+    /// </remarks>
+    private static async Task<(string Arguments, string? TempScript)> BuildArgumentsAsync(
+        string command, CancellationToken token)
+    {
+        const string CommonFlags = "-NoProfile -NonInteractive -ExecutionPolicy Bypass";
+
+        // We read the child's stdout as UTF-8 (StandardOutputEncoding), but Windows PowerShell 5.1
+        // WRITES stdout in the console OEM codepage, so non-ASCII arrives corrupted (café -> caf?).
+        // Force the writer side to match the reader side. Kept to one line and try/caught so it can
+        // never break a caller's script; `catch {}` deliberately swallows, as failing to set an
+        // encoding must not fail the command.
+        const string EncodingPreamble =
+            "try{[Console]::OutputEncoding=[System.Text.Encoding]::UTF8}catch{}\n";
+
+        var payload = EncodingPreamble + command;
+
+        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(payload));
+        if (encoded.Length <= MaxEncodedCommandChars)
+            return ($"{CommonFlags} -EncodedCommand {encoded}", null);
+
+        // Too long for a command line: write it out and run the file instead.
+        // UTF-8 *with BOM* — Windows PowerShell 5.1 assumes the ANSI codepage for a BOM-less
+        // file and mangles non-ASCII (the em-dash parse trap).
+        var path = Path.Combine(Path.GetTempPath(), $"winmcp-{Guid.NewGuid():N}.ps1");
+        await File.WriteAllTextAsync(path, payload, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), token);
+        return ($"{CommonFlags} -File \"{path}\"", path);
     }
 
     public void Dispose()

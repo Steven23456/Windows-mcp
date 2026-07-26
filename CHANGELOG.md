@@ -1,3 +1,45 @@
+## [0.7.1] - 2026-07-26
+
+### Fixed
+- **`PowerShellService` mangled every multi-line script — silently, on exit 0.** The service ran
+  `powershell.exe -Command -` and wrote the script to **stdin**. PowerShell evaluates piped stdin
+  **line by line as independent statements**, so any multi-line construct (hashtable literal,
+  `try/catch`, `foreach`, `function`, wrapped assignment) was broken apart — producing **empty
+  stdout with exit code 0**. Now passed as a single unit via **`-EncodedCommand`** (base64
+  UTF-16LE).
+  - **Reported symptom:** `disk_inspect mode:reclaimable` returned
+    `"reclaimable-space query returned no output (exit 0)"`. Its script ends in a multi-line
+    `[PSCustomObject]@{...} | ConvertTo-Json`. The service's empty-output guard was working
+    correctly and faithfully reporting a real failure — the defect was one layer below it.
+  - **Blast radius was every PowerShell-backed tool**, not just `disk_inspect`. Any caller whose
+    script contained a multi-line block was affected.
+  - **Root-caused by controlled comparison**, not inspection: the identical script produced 0 bytes
+    via `-Command -`/stdin and 136 bytes of valid JSON via `-File`.
+- **Non-ASCII output was corrupted** (`café` -> `caf?`). Two independent causes, both fixed:
+  stdin was written using the console default encoding (gone — the script no longer travels via
+  stdin), and Windows PowerShell 5.1 **writes** stdout in the OEM codepage while the service
+  **reads** it as UTF-8. A one-line `[Console]::OutputEncoding` preamble now aligns writer with
+  reader. Verified at the byte level: `caf 82 20 fb` (OEM) -> `caf c3 a9 20 e2 9c 93` (UTF-8).
+- **Large scripts no longer regress.** stdin had no length limit but a command line is capped at
+  ~32767 chars, so an oversized script falls back to a temp `.ps1` run with `-File` (written
+  UTF-8 **with BOM**, since PS 5.1 assumes ANSI for a BOM-less file).
+
+### Changed
+- `RedirectStandardInput` is kept (and closed immediately) even though stdin is no longer written.
+  This process is an MCP **stdio** server, so its own stdin is the JSON-RPC channel; an
+  un-redirected child would inherit that handle and could consume protocol bytes.
+
+### Added
+- 7 regression tests. 5 pin the invocation itself (multi-line hashtable / `try-catch` / `foreach`,
+  oversized-script fallback, non-ASCII round-trip); 2 are **integration** tests driving
+  `GetReclaimableAsync` through a **real** `PowerShellService`.
+  **Why the bug shipped:** the existing `DiskServiceTests` mock `IPowerShellService` and feed it a
+  hand-written JSON string, so they only ever exercised the parsing half and stayed green while the
+  real invocation returned nothing. *Mocking the collaborator that is broken hides the bug.*
+  Suite: 237 -> 239 (excluding UIAutomation).
+- Verified in the **shipped single-file exe** over MCP stdio before release, not just in `dotnet
+  test`: `disk_inspect mode:reclaimable` returned real data (3.58 GB reclaimable).
+
 ## [0.7.0] - 2026-07-18
 
 ### Added

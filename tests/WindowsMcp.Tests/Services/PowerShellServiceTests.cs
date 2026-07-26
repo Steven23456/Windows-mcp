@@ -16,6 +16,60 @@ public class PowerShellServiceTests
         result.Stdout.Trim().Should().Be("hello from PS");
     }
 
+    // REGRESSION: `powershell -Command -` with the script piped to stdin evaluates input
+    // LINE BY LINE as separate statements, so any multi-line construct is silently mangled and
+    // the process still exits 0 with EMPTY stdout. This made disk_inspect mode:reclaimable
+    // return nothing on exit 0. The script must be parsed as a single unit.
+    [Fact]
+    public async Task RunAsync_multiline_hashtable_literal_produces_output()
+    {
+        using var svc = new PowerShellService(NullLogger.Instance);
+        var script = "[PSCustomObject]@{\n    Alpha = 1\n    Beta  = 2\n} | ConvertTo-Json";
+        var result = await svc.RunAsync(script);
+        result.Stdout.Should().NotBeNullOrWhiteSpace("a multi-line script must not silently produce nothing");
+        result.Stdout.Should().Contain("Alpha").And.Contain("Beta");
+    }
+
+    [Fact]
+    public async Task RunAsync_multiline_try_catch_executes_as_one_unit()
+    {
+        using var svc = new PowerShellService(NullLogger.Instance);
+        var script = "try {\n    $v = 6 * 7\n    Write-Output $v\n} catch {\n    Write-Output 'failed'\n}";
+        var result = await svc.RunAsync(script);
+        result.Stdout.Trim().Should().Be("42");
+    }
+
+    [Fact]
+    public async Task RunAsync_multiline_foreach_accumulates_across_lines()
+    {
+        using var svc = new PowerShellService(NullLogger.Instance);
+        var script = "$total = 0\nforeach ($i in 1..4) {\n    $total += $i\n}\nWrite-Output $total";
+        var result = await svc.RunAsync(script);
+        result.Stdout.Trim().Should().Be("10");
+    }
+
+    // Guards the temp-file fallback: stdin had no length limit, but a command line does
+    // (~32767 chars), so a large script must still run rather than regress.
+    [Fact]
+    public async Task RunAsync_very_large_script_still_executes()
+    {
+        using var svc = new PowerShellService(NullLogger.Instance);
+        var padding = string.Join("\n", Enumerable.Range(0, 1500).Select(i => $"# filler comment line {i} ----------"));
+        var script = padding + "\n[PSCustomObject]@{\n    Big = 'yes'\n} | ConvertTo-Json";
+        script.Length.Should().BeGreaterThan(12_000, "the test must actually exceed the EncodedCommand budget");
+        var result = await svc.RunAsync(script);
+        result.Stdout.Should().Contain("Big");
+    }
+
+    // UTF-16LE encoding correctness: non-ASCII must survive the round trip.
+    [Fact]
+    public async Task RunAsync_preserves_non_ascii_characters()
+    {
+        using var svc = new PowerShellService(NullLogger.Instance);
+        var result = await svc.RunAsync("Write-Output 'em—dash café ✓'");
+        result.Stdout.Should().Contain("em—dash").And.Contain("café").And.Contain("✓");
+    }
+
     [Fact]
     public async Task RunAsync_returns_error_for_invalid_command()
     {

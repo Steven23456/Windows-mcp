@@ -11,6 +11,18 @@ live server at some point, 40 **never once**. Every e2e-only bug we've shipped a
 (`storage_health` empty/timeout, `defender_status` fault, and now the `process` name-filter) was
 invisible to the unit suite. This table is the resumable record so the sweep survives a session.
 
+> **2026-07-26 — the sharpest example yet, and a lesson beyond "run it live."**
+> `disk_inspect mode:reclaimable` failed live because `PowerShellService` piped scripts to
+> `powershell -Command -`, which evaluates stdin **line by line** and silently broke every
+> multi-line script (exit 0, empty stdout). Fixed in **v0.7.1** via `-EncodedCommand`.
+> **It was not merely "untested live" — it was actively mocked green.** `DiskServiceTests` mocks
+> `IPowerShellService` and feeds `GetReclaimableAsync` a hand-written JSON string, so the suite
+> exercised only the parsing half while the real invocation returned nothing.
+> ⚠ **Audit implication: every service tested solely through a mocked `IPowerShellService` is
+> still unverified.** A green unit test over a mocked collaborator is not evidence the collaborator
+> works. Prefer at least one `Category=Integration` test per PowerShell-backed service (see
+> `DiskServiceReclaimableIntegrationTests`).
+
 **Before trusting ANY live result — verify the running image.** The served exe is the committed
 `bundle/WindowsMcp.exe` cloned into `~/.claude/plugins/cache/local-marketplace/windows-mcp/<version>/`.
 A `dotnet publish -o dist` deploys **nothing**. This trap already cost us once: v0.6.0 was tagged,
