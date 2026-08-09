@@ -324,7 +324,7 @@ gh api -X PUT repos/danielsimonjr/Windows-mcp/branches/main/protection --input -
 EOF
 ```
 Expected: JSON echoes `"contexts":["test","claude-guard"]` and `"require_code_owner_reviews":true`.
-Note: `required_approving_review_count:0` keeps Daniel's own non-Claude PRs frictionless while CODEOWNERS still forces review on protected paths.
+Note: `required_approving_review_count:0` keeps the user's own non-Claude PRs frictionless while CODEOWNERS still forces review on protected paths.
 
 ---
 

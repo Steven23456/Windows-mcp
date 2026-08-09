@@ -48,7 +48,7 @@ allowlist-guarded, time-delayed) — never for arbitrary diffs, and never for de
 
 1. An **`ANTHROPIC_API_KEY`** (an `sk-ant-…` API key), stored as a GitHub secret. This replaces the
    originally-planned subscription OAuth token: an API key is a proper *service* credential (not
-   Daniel's personal identity — fixes the personal-identity blast-radius finding), is metered and
+   The user's personal identity — fixes the personal-identity blast-radius finding), is metered and
    separate from his interactive Claude subscription (fixes the quota-starvation finding), and a
    **Console spend limit on the key is the hard cost cap**. Prefer a **dedicated CI key** minted in
    the Anthropic Console (so a CI leak can't expose or break the local RLM key and can be revoked
@@ -118,7 +118,7 @@ above; and a workflow-enforced attempt limiter (give up after 2 bot commits on a
 2. The `main`-defined allowlist check demonstrably BLOCKS a PR that touches a non-doc path, and the
    capability guard blocks a PR touching a high-risk tool source.
 3. `ANTHROPIC_API_KEY` stays confined to the Claude step; no secret exposure in logs/comments; API
-   spend stays under the Console spend limit; Daniel's interactive Claude subscription is untouched.
+   spend stays under the Console spend limit; the user's interactive Claude subscription is untouched.
 
 Only after all three hold: add the weekly cron, then consider narrow earned auto-merge for
 doc-only PRs, then begin the Phase-2b fix-bot design, then widen to a second repo.
