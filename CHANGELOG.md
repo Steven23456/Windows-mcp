@@ -1,3 +1,30 @@
+## [0.7.2] - 2026-08-16
+
+### Fixed
+
+- **0.7.1 shipped a stale binary.** `Directory.Build.props` and `.claude-plugin/plugin.json`
+  both declared `0.7.1`, but the committed `bundle/WindowsMcp.exe` was built **2026-07-26** and
+  reported itself as `0.7.0`. The version plumbing added in 0.6.1 is correct — `ServerVersion`
+  derives from `<Version>`, and `ServerInfoTests` pins it to the manifest — but **none of that
+  runs against the committed artifact**, so the release bumped the declarations and left the
+  exe behind.
+  - Found by handshaking every deployed MCP server and comparing what each reported against
+    what was installed. `serverInfo.version` is the field used to prove a deploy landed, so
+    while the binary under-reported, a stale deploy and a healthy one were indistinguishable.
+  - Rebuilt and released as **0.7.2** rather than replacing the binary in place: the plugin
+    cache is keyed on version, so a same-version swap is a no-op and would never have deployed.
+  - Verified by **executing** the artifact that ships: real MCP handshake reports
+    `Windows-mcp 0.7.2` and enumerates all 63 tools.
+
+### Known (environmental, pre-existing)
+
+- **Three tests fail without an interactive desktop session** — two `InputServiceTests` (UIPI
+  blocks simulated input), `ScreenshotServiceTests.CaptureAsync…` (invalid screen handle), and
+  intermittently `UIAutomationServiceTests.FindElementAsync…` (UIAutomation COM). **Proven
+  pre-existing**: the same failures occur on the unmodified tree at `9f283a3`. They are *not*
+  skipped — a desktop-automation server failing loudly where there is no desktop is the correct
+  and informative result, the same call `ui-mcp` makes for its window tests. 240 of 243 pass.
+
 ## [0.7.1] - 2026-07-26
 
 ### Fixed
