@@ -19,7 +19,7 @@ public class ServerInfoTests
     {
         // Walk up from the test binary until the repo marker is found — no fragile ../../.. count.
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Windows-mcp.sln")))
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Windows-mcp.slnx")))
             dir = dir.Parent;
         dir.Should().NotBeNull("the test must run from inside the repo to locate plugin.json");
         return dir!.FullName;
