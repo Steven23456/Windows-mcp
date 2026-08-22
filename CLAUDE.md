@@ -4,10 +4,12 @@ Guidance for Claude Code when working in this repository.
 
 ## Overview
 
-Windows-mcp is a **C# / .NET 9** Model Context Protocol (MCP) server for Windows desktop
-automation and system inspection. It exposes 60 tools over the MCP **stdio** transport
-(UI automation, input, screen/OCR, windows, files, disk, processes/shell, services,
-scheduled tasks, registry, network, web, system, and a HiJackThis-style startup report).
+Windows-mcp is a **C# / .NET 10** Model Context Protocol (MCP) server for Windows desktop
+automation and system inspection. It exposes 60 tools over MCP — **stdio** by default, or
+**Streamable HTTP/HTTPS** with `--transport http` for clients on other machines (README: "Run
+over HTTP/HTTPS") — covering UI automation, input, screen/OCR, windows, files, disk,
+processes/shell, services, scheduled tasks, registry, network, web, system, and a
+HiJackThis-style startup report.
 
 > History: v0.x–0.8.5 were Python; **v0.2.0 (2026-05-26) is a full C# rewrite**. The Python
 > tree is archived in `legacy/`. Do not edit `legacy/`. See `CHANGELOG.md` for versions.
@@ -16,12 +18,14 @@ scheduled tasks, registry, network, web, system, and a HiJackThis-style startup 
 
 ```
 MCP protocol  →  Tool classes  →  Service abstractions  →  Service implementations
-(stdio SDK)      Tools/*.cs        WindowsMcp.Abstractions   Services/*.cs
+(stdio/HTTP)     Tools/*.cs        WindowsMcp.Abstractions   Services/*.cs
 ```
 
-- **`src/WindowsMcp/`** — the server exe. `Program.cs` configures the Generic Host, registers
-  every service as a singleton, and starts the MCP server. `Tools/*.cs` are the tool surface;
-  `Services/*.cs` are the implementations.
+- **`src/WindowsMcp/`** — the server exe. `Program.cs` parses `Hosting/ServerOptions` and starts
+  the MCP server over stdio (default) or HTTP. `Hosting/WindowsMcpHost.cs` registers every
+  service as a singleton and holds the MCP wiring both transports share (`AddWindowsMcp`) plus
+  the Kestrel host factory (`BuildHttpApp`); `Hosting/CertificateLocator.cs` resolves
+  `--cert-thumbprint`. `Tools/*.cs` are the tool surface; `Services/*.cs` are the implementations.
 - **`src/WindowsMcp.Abstractions/`** — `IXxxService` interfaces (one per file) and DTO records
   under `Models/`. Tools and services depend on these interfaces (testability).
 - **`tests/WindowsMcp.Tests/`** — xUnit + Moq + FluentAssertions.
@@ -41,6 +45,11 @@ dotnet test --filter "Category!=UIAutomation"   # headless-safe subset
 dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained `
     -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
 # → dist/WindowsMcp.exe
+
+# Serve over HTTP instead of stdio (remote clients; README "Run over HTTP/HTTPS"):
+$env:WINDOWSMCP_API_KEY = "<16+ chars>"
+dist/WindowsMcp.exe --transport http --port 8765 [--bind <ip>] [--cert-thumbprint <sha1>]
+dist/WindowsMcp.exe --help
 ```
 
 - **`[Trait("Category","UIAutomation")]` tests need an interactive desktop** with the target
@@ -100,14 +109,23 @@ before believing a deploy landed (`Get-CimInstance Win32_Process -Filter "Name='
    interfaces, add `[McpServerTool, Description("…")]` methods.
 2. Put real logic behind an `IXxxService` in `Abstractions` + impl in `Services/` (keeps the
    tool thin and the logic unit-testable with Moq).
-3. Register any **new** service singleton in `Program.cs` (tools auto-register).
+3. Register any **new** service singleton in `Hosting/WindowsMcpHost.AddWindowsMcp` (tools
+   auto-register; both transports pick it up from there).
 4. Update `docs/architecture/*` counts and `CHANGELOG.md` under `## [Unreleased]`.
 
 ## Key technical notes (still true in C#)
 
-- **MCP stdio:** stdout is JSON-RPC, logs go to **stderr only**. `Program.cs` forces
+- **MCP stdio:** stdout is JSON-RPC, logs go to **stderr only** (in HTTP mode too — one logging
+  config, `WindowsMcpHost.ConfigureStderrLogging`). `Program.RunStdioAsync` forces
   `Console.OutputEncoding/InputEncoding = UTF8` **before** host startup — without it, Windows'
-  cp1252 default buffers responses and they never flush. Do not remove that.
+  cp1252 default buffers responses and they never flush. Do not remove that. HTTP mode sets them
+  best-effort only (the setters throw with no attached console, e.g. Task Scheduler).
+- **HTTP transport** (`--transport http`, opt-in): `ServerOptions.Parse` is the *only* reader of
+  the command line (no `IConfiguration` binding; the web builder is created with **no args**);
+  Kestrel endpoints are explicit `Listen()` calls so `ASPNETCORE_URLS` cannot add a listener;
+  the transport is stateless; the bearer gate is an `app.Use` **before** `MapMcp` so it covers
+  every path. Binding off-loopback without an API key is a startup **refusal**, not a warning —
+  keep it that way. `HttpTransportTests` drives the real host in-process on an ephemeral port.
 - **COM vtable gaps:** when declaring COM interfaces, use `_VtblGap1_N()` to skip unused slots,
   or declare only the leading methods you call (an `InterfaceIsIUnknown` interface binds declared
   methods from vtable slot 3). Never stub later methods with guessed signatures — silent stack

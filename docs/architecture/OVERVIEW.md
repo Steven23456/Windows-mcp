@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 9 and C#, it exposes 63 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — all via the standard MCP stdio transport.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 63 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
 
 ## Purpose
 
@@ -25,11 +25,12 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 | **Interface-Driven Architecture** | Every service backed by an `IXxxService` interface in a separate Abstractions assembly |
 | **DPI-Aware** | Per-Monitor DPI Awareness V2 enabled at startup for correct multi-monitor coordinate handling |
 | **UTF-8 Stdio** | Output encoding forced to UTF-8 before host starts — prevents buffering bugs on Windows |
+| **Dual Transport** | stdio (default) or Streamable HTTP/HTTPS on a TCP port, gated by a bearer API key — opt-in via `--transport http` |
 
 ## Platform Requirements
 
 - **Operating System**: Windows 10 or 11 (some features require Windows 10 1703+)
-- **.NET Runtime**: .NET 9 or higher
+- **.NET Runtime**: .NET 10 or higher
 - **Architecture**: x64 (64-bit)
 
 ## High-Level Architecture
@@ -39,13 +40,13 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 │                        AI Agent / LLM                           │
 └─────────────────────────────────────────────────────────────────┘
                                 │
-                         MCP Protocol (stdio)
+                  MCP Protocol (stdio | HTTP/HTTPS)
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │              Windows-MCP Server (Program.cs / Host)             │
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │         ModelContextProtocol SDK (WithStdioServerTransport) ││
+│  │         ModelContextProtocol SDK (Stdio or Streamable-HTTP) ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │        MCP Tool Layer  (15 [McpServerToolType] classes)     ││
@@ -201,7 +202,7 @@ Windows-MCP exposes **63 MCP tools** across 18 tool classes:
 
 | Package | Purpose | Replaces (Python) |
 |---------|---------|------------------|
-| `ModelContextProtocol` | MCP server SDK, stdio transport | `fastmcp` |
+| `ModelContextProtocol` + `.AspNetCore` | MCP server SDK — stdio and Streamable HTTP transports | `fastmcp` |
 | `FlaUI.UIA3` | Windows UI Automation API | `uiautomation` |
 | `H.InputSimulator` | Keyboard and mouse simulation | `pyautogui` + `humancursor` |
 | `SkiaSharp` | Image capture and processing | `Pillow` |

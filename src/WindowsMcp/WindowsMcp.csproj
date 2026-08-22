@@ -1,29 +1,36 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\WindowsMcp.Abstractions\WindowsMcp.Abstractions.csproj" />
   </ItemGroup>
 
+  <!-- Kestrel + WebApplication for the opt-in HTTP transport (Hosting/WindowsMcpHost.cs).
+       A FrameworkReference (Worker-SDK style) rather than switching to Microsoft.NET.Sdk.Web:
+       the Web SDK's extras (web.config on publish, wwwroot globbing, appsettings copy,
+       launchSettings) are unwanted in a stdio-default single-file exe. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
     <PackageReference Include="H.InputSimulator" Version="1.*" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.*" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="9.*" />
     <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.*" PrivateAssets="all" />
-    <PackageReference Include="ModelContextProtocol" Version="1.0.*" />
-    <PackageReference Include="ReverseMarkdown" Version="4.*" />
-    <PackageReference Include="SkiaSharp" Version="3.*" />
-    <PackageReference Include="System.Diagnostics.EventLog" Version="9.*" />
-    <PackageReference Include="System.Drawing.Common" Version="9.*" />
-    <PackageReference Include="System.Management" Version="9.*" />
-    <PackageReference Include="System.ServiceProcess.ServiceController" Version="9.*" />
+    <!-- Keep ModelContextProtocol and ModelContextProtocol.AspNetCore in lockstep. -->
+    <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
+	<PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <PackageReference Include="ReverseMarkdown" Version="6.2.1" />
+    <PackageReference Include="SkiaSharp" Version="4.151.1" />
+    <PackageReference Include="System.Drawing.Common" Version="10.*" />
+    <PackageReference Include="System.Management" Version="10.*" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.*" />
     <PackageReference Include="TaskScheduler" Version="2.12.2" />
     <PackageReference Include="TextCopy" Version="6.*" />
   </ItemGroup>
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 

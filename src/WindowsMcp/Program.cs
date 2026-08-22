@@ -1,12 +1,9 @@
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using ModelContextProtocol.Protocol;
-using ModelContextProtocol.Server;
 using Windows.Win32;
 using Windows.Win32.UI.HiDpi;
-using WindowsMcp.Abstractions;
-using WindowsMcp.Services;
+using WindowsMcp.Hosting;
 
 namespace WindowsMcp;
 
@@ -45,6 +42,33 @@ internal static class Program
             PInvoke.SetProcessDpiAwareness(PROCESS_DPI_AWARENESS.PROCESS_PER_MONITOR_DPI_AWARE);
         }
 
+        ServerOptions options;
+        try
+        {
+            options = ServerOptions.Parse(args, Environment.GetEnvironmentVariable);
+        }
+        catch (OptionsException ex)
+        {
+            Console.Error.WriteLine($"Windows-mcp: {ex.Message}");
+            Console.Error.WriteLine();
+            Console.Error.WriteLine(ServerOptions.Usage);
+            return 2;
+        }
+
+        if (options.ShowHelp)
+        {
+            Console.WriteLine(ServerOptions.Usage);
+            return 0;
+        }
+
+        return options.IsHttp
+            ? await RunHttpAsync(options)
+            : await RunStdioAsync(args);
+    }
+
+    /// <summary>The default: JSON-RPC over stdin/stdout, as launched by the plugin's <c>.mcp.json</c>.</summary>
+    private static async Task<int> RunStdioAsync(string[] args)
+    {
         // CRITICAL: MCP stdio servers must log to stderr only. stdout is JSON-RPC.
         // CRITICAL: On Windows, Console.Out defaults to the system codepage (cp1252).
         // The MCP SDK's StdioServerTransport calls Console.OpenStandardOutput() at DI
@@ -61,76 +85,59 @@ internal static class Program
         Console.InputEncoding = System.Text.Encoding.UTF8;
 
         var builder = Host.CreateApplicationBuilder(args);
-        builder.Logging.ClearProviders();
-        builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
-        builder.Logging.SetMinimumLevel(LogLevel.Information);
+        WindowsMcpHost.ConfigureStderrLogging(builder.Logging, http: false);
 
-        // Register all services as singletons.
-        builder.Services.AddSingleton<IInputService, InputService>();
-        builder.Services.AddSingleton<IScreenshotService, ScreenshotService>();
-        builder.Services.AddSingleton<IOcrService, OcrService>();
-        builder.Services.AddSingleton<IClipboardService, ClipboardService>();
-        builder.Services.AddSingleton<IAudioService, AudioService>();
-        builder.Services.AddSingleton<IPowerShellService, PowerShellService>();
-        builder.Services.AddSingleton<IUIAutomationService, UIAutomationService>();
-        builder.Services.AddSingleton<IFileSystemService, FileSystemService>();
-        builder.Services.AddSingleton<IRegistryService, RegistryService>();
-        builder.Services.AddSingleton<IServiceControlService, ServiceControlService>();
-        builder.Services.AddSingleton<IEventLogService, EventLogService>();
-        builder.Services.AddSingleton<ITaskSchedulerService, TaskSchedulerService>();
-        builder.Services.AddSingleton<IProcessService, ProcessService>();
-        builder.Services.AddSingleton<IWindowService, WindowService>();
-        builder.Services.AddSingleton<IWmiService, WmiService>();
-        builder.Services.AddSingleton<IStorageService, StorageService>();
-        builder.Services.AddSingleton<IDiskService, DiskService>();
-        builder.Services.AddSingleton<ISecurityService, SecurityService>();
-        builder.Services.AddSingleton<IFirewallService, FirewallService>();
-        builder.Services.AddSingleton<ICertStoreService, CertStoreService>();
-        builder.Services.AddSingleton<IReliabilityService, ReliabilityService>();
-        builder.Services.AddSingleton<IDriverService, DriverService>();
-        builder.Services.AddSingleton<IFileStreamService, FileStreamService>();
-        builder.Services.AddSingleton<IEnvService, EnvService>();
-        builder.Services.AddSingleton<IPowerService, PowerService>();
-        builder.Services.AddSingleton<INotificationService, NotificationService>();
-        builder.Services.AddSingleton<INetworkService, NetworkService>();
-        builder.Services.AddSingleton<IWebService, WebService>();
-        builder.Services.AddSingleton<IAuthenticodeInspector, AuthenticodeInspector>();
-        builder.Services.AddSingleton<ILspEnumerator, LspEnumerator>();
-        builder.Services.AddSingleton<IShortcutResolver, ShortcutResolver>();
-        builder.Services.AddSingleton<IStartupReportService, StartupReportService>();
-        builder.Services.AddSingleton<IIntegrityService, IntegrityService>();
-        builder.Services.AddSingleton<IUsnService, UsnService>();
-        builder.Services.AddSingleton<IWatchService, WatchService>();
-
-        builder.Services
-            .AddMcpServer(o =>
-            {
-                o.ServerInfo = new() { Name = "Windows-mcp", Version = ServerVersion };
-            })
-            // Surface our deliberate refusals verbatim. Without this the SDK flattens every
-            // non-McpException to "An error occurred invoking '<tool>'.", so the PID-reuse guard
-            // aborting a kill looks identical to the tool crashing — and a caller may "retry"
-            // without the guard, causing exactly the kill the guard existed to prevent.
-            // Unexpected faults still fall through to the SDK's masking. See ToolErrors.
-            .WithRequestFilters(f => f.AddCallToolFilter(next => async (ctx, ct) =>
-            {
-                try
-                {
-                    return await next(ctx, ct);
-                }
-                catch (Exception ex) when (ToolErrors.IsCallerFacing(ex))
-                {
-                    return new CallToolResult
-                    {
-                        IsError = true,
-                        Content = [new TextContentBlock { Text = ex.Message }],
-                    };
-                }
-            }))
-            .WithStdioServerTransport()
-            .WithToolsFromAssembly();   // source generator discovers [McpServerTool] methods
+        builder.AddWindowsMcp()
+            .WithStdioServerTransport();
 
         await builder.Build().RunAsync();
+        return 0;
+    }
+
+    /// <summary>Streamable HTTP(S) on a TCP port for remote clients; see <see cref="WindowsMcpHost.BuildHttpApp"/>.</summary>
+    private static async Task<int> RunHttpAsync(ServerOptions options)
+    {
+        // UTF-8 so non-ASCII log text renders; not protocol-critical here (stdout is not the
+        // transport). Without an attached console — Task Scheduler, a detached launch — the
+        // setters throw, and that must not stop the server.
+        try
+        {
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+            Console.InputEncoding = System.Text.Encoding.UTF8;
+        }
+        catch (IOException) { /* no console attached */ }
+
+        if (!options.IsLoopback && options.ApiKey is null)
+        {
+            Console.Error.WriteLine(
+                $"Windows-mcp: refusing to listen on {options.BindAddress}:{options.Port} without an API key — " +
+                "every tool (powershell, file_write, registry_set, process kill, ...) would be open to the network. " +
+                $"Set {ServerOptions.EnvPrefix}API_KEY (or pass --api-key), or restrict to this machine with --bind 127.0.0.1.");
+            return 2;
+        }
+
+        X509Certificate2? cert = null;
+        if (options.CertThumbprint is { } thumbprint)
+        {
+            try
+            {
+                cert = CertificateLocator.Find(thumbprint);
+            }
+            catch (InvalidOperationException ex)
+            {
+                Console.Error.WriteLine($"Windows-mcp: {ex.Message}");
+                return 2;
+            }
+        }
+        else if (!options.IsLoopback)
+        {
+            Console.Error.WriteLine(
+                $"Windows-mcp: WARNING: listening on {options.BindAddress}:{options.Port} over plain HTTP — " +
+                "the API key and all tool traffic cross the network unencrypted. Pass --cert-thumbprint to serve HTTPS.");
+        }
+
+        var app = WindowsMcpHost.BuildHttpApp(options, cert);
+        await app.RunAsync();
         return 0;
     }
 }

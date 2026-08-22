@@ -14,8 +14,8 @@ How a tool call travels from the AI agent to the Windows API and back:
 
 ```
 ┌──────────┐   ┌───────────────────┐   ┌──────────────┐   ┌────────────────┐
-│ AI Agent │   │  MCP SDK (stdio)  │   │  Tool Class  │   │    Service     │
-│          │   │  StdioTransport   │   │ [McpServTool] │   │ Implementation │
+│ AI Agent │   │ MCP SDK transport │   │  Tool Class  │   │    Service     │
+│          │   │  stdio or HTTP    │   │ [McpServTool] │   │ Implementation │
 └────┬─────┘   └────────┬──────────┘   └──────┬───────┘   └───────┬────────┘
      │                  │                      │                   │
      │  JSON-RPC        │                      │                   │
@@ -327,9 +327,8 @@ builder.Services.AddSingleton<IInputService, InputService>()
   ...  (24 services)
         │
         ▼
-builder.Services.AddMcpServer(...)
-    .WithStdioServerTransport()
-    .WithToolsFromAssembly()      ← compile-time source generator
+builder.AddWindowsMcp()           ← Hosting/WindowsMcpHost: AddMcpServer(...) + filter + WithToolsFromAssembly()
+    .WithStdioServerTransport()   ← or .WithHttpTransport(stateless) + MapMcp("/mcp") with --transport http
         │
         ▼
 builder.Build()
@@ -498,4 +497,4 @@ All tool methods return `Task<string>` where the string is either:
 | `InputService` click | `Thread.Sleep` between multi-clicks | Prevents double-click collapse |
 | `InputService` type | Delay between keystrokes | Simulates human typing cadence |
 | `PowerShellService` | Async wait on process exit | No timeout enforced in v0.2.0 |
-| MCP SDK stdio | No artificial pauses — reads JSON-RPC frames continuously | Contrast: Python `pg.PAUSE = 1.0` |
+| MCP SDK transport (stdio or HTTP) | No artificial pauses — reads JSON-RPC frames continuously | Contrast: Python `pg.PAUSE = 1.0` |
