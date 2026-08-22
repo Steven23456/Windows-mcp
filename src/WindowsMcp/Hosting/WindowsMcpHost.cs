@@ -15,6 +15,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Services;
+using ModelContextProtocol.AspNetCore;
 
 namespace WindowsMcp.Hosting;
 

@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/WindowsMcp.Abstractions/WindowsMcp.Abstractions.csproj" />
+  <Project Path="src/WindowsMcp/WindowsMcp.csproj" />
+  <Project Path="tests/WindowsMcp.Tests/WindowsMcp.Tests.csproj" />
+</Solution>
