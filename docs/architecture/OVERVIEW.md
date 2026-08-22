@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 9 and C#, it exposes 63 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 63 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
 
 ## Purpose
 
@@ -30,7 +30,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 ## Platform Requirements
 
 - **Operating System**: Windows 10 or 11 (some features require Windows 10 1703+)
-- **.NET Runtime**: .NET 9 or higher
+- **.NET Runtime**: .NET 10 or higher
 - **Architecture**: x64 (64-bit)
 
 ## High-Level Architecture

@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <!-- Single source of truth for the version the MCP server reports about itself.
          Keep in lockstep with .claude-plugin/plugin.json — VersionMatchesPluginManifest
          (ServerInfoTests) fails the build's test gate if these two ever drift. -->

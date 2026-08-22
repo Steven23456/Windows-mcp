@@ -23,7 +23,7 @@ dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained `
 Output: `dist/WindowsMcp.exe` (~66 MB self-contained — bundles the .NET and
 ASP.NET Core runtimes; nothing to install on the target machine).
 
-Requires the .NET 9 SDK for building. End users only need Windows 10 1703+
+Requires the .NET 10 SDK for building. End users only need Windows 10 1703+
 (for per-monitor DPI awareness V2) and System PowerShell (always present on
 Windows 7+ at `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`).
 

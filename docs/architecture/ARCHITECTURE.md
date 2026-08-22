@@ -2,7 +2,7 @@
 
 ## Architectural Overview
 
-Windows-MCP follows a four-layer architecture built on .NET 9 with dependency injection throughout. The system is organized into: MCP Protocol, Tool, Service Abstraction, and Service Implementation layers — each with clearly defined responsibilities and interfaces.
+Windows-MCP follows a four-layer architecture built on .NET 10 with dependency injection throughout. The system is organized into: MCP Protocol, Tool, Service Abstraction, and Service Implementation layers — each with clearly defined responsibilities and interfaces.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -251,10 +251,10 @@ Every service method is `async Task<T>` or `async Task`. No blocking calls on to
 ## Project Structure
 
 ```
-Windows-mcp.sln
+Windows-mcp.slnx
 ├── src/
 │   ├── WindowsMcp/                        ← Main project
-│   │   ├── WindowsMcp.csproj              (targets net9.0-windows10.0.22621)
+│   │   ├── WindowsMcp.csproj              (targets net10.0-windows10.0.19041)
 │   │   ├── Program.cs                     (host + DI wiring)
 │   │   ├── Tools/                         (15 tool classes)
 │   │   │   ├── InputTools.cs

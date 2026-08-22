@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## Overview
 
-Windows-mcp is a **C# / .NET 9** Model Context Protocol (MCP) server for Windows desktop
+Windows-mcp is a **C# / .NET 10** Model Context Protocol (MCP) server for Windows desktop
 automation and system inspection. It exposes 60 tools over MCP — **stdio** by default, or
 **Streamable HTTP/HTTPS** with `--transport http` for clients on other machines (README: "Run
 over HTTP/HTTPS") — covering UI automation, input, screen/OCR, windows, files, disk,

@@ -42,6 +42,14 @@
 - Logging is stderr-only in both modes; HTTP mode additionally mutes the SDK's per-request
   server chatter to `Warning` (stateless mode builds a fresh `McpServer` per request).
 - The `## [Unreleased]` section was buried between 0.6.1 and 0.6.0; moved to the top.
+- **Target framework .NET 9 → .NET 10** (`net10.0-windows10.0.19041.0` in all three projects
+  and in `Directory.Build.props`). `global.json` now pins a .NET 10 SDK (`10.0.100`,
+  `rollForward: latestFeature`) — building requires the .NET 10 SDK; end users are unaffected
+  (self-contained exe). README / CLAUDE.md / `docs/architecture` updated to say .NET 10.
+- `Windows-mcp.sln` → `Windows-mcp.slnx` (the XML solution format). The old `.sln` is removed
+  rather than kept alongside: two solution files in the root make a bare `dotnet build` fail with
+  `MSB1011`. CI (`ci.yml`) and `ServerInfoTests.RepoRoot()` (which located the repo by the `.sln`)
+  now look for the `.slnx`.
 
 ## [0.7.2] - 2026-08-16
 
