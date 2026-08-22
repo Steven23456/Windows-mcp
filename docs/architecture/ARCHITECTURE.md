@@ -8,7 +8,7 @@ Windows-MCP follows a four-layer architecture built on .NET 9 with dependency in
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                        MCP Protocol Layer                                    │
 │                    (ModelContextProtocol SDK)                                │
-│  StdioServerTransport ◄──► JSON-RPC ──► WithToolsFromAssembly() discovery   │
+│  Stdio / Streamable HTTP ◄──► JSON-RPC ──► WithToolsFromAssembly() discovery │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -77,17 +77,20 @@ Windows-MCP follows a four-layer architecture built on .NET 9 with dependency in
 
 The MCP SDK (`ModelContextProtocol.Server`) handles all protocol concerns:
 
-- **Transport**: `WithStdioServerTransport()` — reads JSON-RPC from stdin, writes to stdout
-- **Tool Discovery**: `WithToolsFromAssembly()` — source generator discovers all `[McpServerTool]` methods at compile time, registering them with their parameter schemas automatically
-- **Server Info**: `ServerInfo = new() { Name = "Windows-mcp", Version = "0.2.0" }`
+- **Transport** — selected by `Hosting/ServerOptions` from the command line (`WINDOWSMCP_*` env fallbacks):
+  - **stdio** (default, no arguments): `WithStdioServerTransport()` — JSON-RPC on stdin/stdout, for hosts that spawn the exe.
+  - **Streamable HTTP** (`--transport http`): `WithHttpTransport(o => o.Stateless = true)` + `MapMcp("/mcp")` on Kestrel, built by `Hosting/WindowsMcpHost.BuildHttpApp`. `--port`/`--bind` choose the endpoint, `--cert-thumbprint` (resolved by `Hosting/CertificateLocator`) makes it HTTPS-only, and `--api-key` installs a constant-time bearer gate ahead of every route. Stateless because no tool issues server→client requests, and a restart then stays invisible to clients.
+- **Tool Discovery**: `WithToolsFromAssembly()` — discovers all `[McpServerTool]` methods, registering them with their parameter schemas automatically
+- **Server Info**: `ServerInfo = new() { Name = "Windows-mcp", Version = Program.ServerVersion }` — the version comes from `<Version>` in `Directory.Build.props`
+- **Shared wiring**: `WindowsMcpHost.AddWindowsMcp()` holds the service registrations, server identity, caller-facing error filter and tool discovery, so both transports are configured identically; only the transport call differs.
 
-**Critical startup requirements** (both handled in `Program.cs` before host build):
+**Critical startup requirements** (handled in `Program.cs` before host build):
 ```csharp
-// Prevent JSON-RPC response buffering on Windows (cp1252 default encoding)
+// stdio mode only: prevent JSON-RPC response buffering on Windows (cp1252 default encoding)
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 Console.InputEncoding = System.Text.Encoding.UTF8;
 
-// Per-Monitor DPI Awareness V2 — physical pixel coordinates on multi-monitor
+// Both modes: Per-Monitor DPI Awareness V2 — physical pixel coordinates on multi-monitor
 PInvoke.SetProcessDpiAwarenessContext(new DPI_AWARENESS_CONTEXT((nint)(-4)));
 ```
 
@@ -198,11 +201,23 @@ Services contain all business logic and directly call Windows APIs through platf
 All services follow the DI pattern — no static state, no singletons instantiated outside the container:
 
 ```csharp
+// Hosting/WindowsMcpHost.cs — shared by both transports
+public static IMcpServerBuilder AddWindowsMcp(this IHostApplicationBuilder builder)
+{
+    builder.Services.AddSingleton<IInputService, InputService>();
+    // ...
+    return builder.Services.AddMcpServer(...).WithRequestFilters(...).WithToolsFromAssembly(...);
+}
+
+// Program.cs — stdio
 var builder = Host.CreateApplicationBuilder(args);
-builder.Services.AddSingleton<IInputService, InputService>();
-// ...
-builder.Services.AddMcpServer(...).WithStdioServerTransport().WithToolsFromAssembly();
+builder.AddWindowsMcp().WithStdioServerTransport();
 await builder.Build().RunAsync();
+
+// Program.cs — HTTP (WindowsMcpHost.BuildHttpApp)
+var web = WebApplication.CreateBuilder();
+web.AddWindowsMcp().WithHttpTransport(o => o.Stateless = true);
+app.MapMcp("/mcp");
 ```
 
 ### 2. Interface Segregation
@@ -280,13 +295,13 @@ Windows-mcp.sln
 dotnet run --project src/WindowsMcp
 ```
 
-The `Program.cs` static `Main` returns `Task<int>`. The host runs until the MCP client closes the stdin pipe (EOF), at which point `RunAsync()` returns and the process exits with code 0.
+The `Program.cs` static `Main` returns `Task<int>`. It parses `ServerOptions` first (exit code 2 with usage on a bad option; `--help` prints usage). In **stdio** mode the host runs until the MCP client closes the stdin pipe (EOF), at which point `RunAsync()` returns and the process exits with code 0. In **HTTP** mode (`--transport http`) Kestrel runs until Ctrl+C / SIGTERM; startup is refused (exit 2) when binding off-loopback without an API key, or when the `--cert-thumbprint` certificate cannot be found or its private key opened.
 
 ---
 
 ## Security Considerations
 
-1. **Stdio-only transport** — no network port is opened; only the MCP client process can communicate
+1. **Transport exposure** — by default (stdio) no network port is opened; only the MCP client process can communicate. `--transport http` deliberately opens one, and every tool is reachable through it, so: the server refuses to start on a non-loopback bind without `--api-key`/`WINDOWSMCP_API_KEY` (constant-time bearer check applied to every path, 401 otherwise); `--cert-thumbprint` makes the port HTTPS-only; plain HTTP off-loopback is allowed but warned about at startup. Kestrel endpoints are configured explicitly, so `ASPNETCORE_URLS` cannot add an unauthenticated listener.
 2. **PowerShell sandboxing** — `PowerShellService` filters dangerous commands and injection-risk flags before execution (blocklist in implementation)
 3. **DPI-aware coordinates** — `SetProcessDpiAwarenessContext` ensures coordinates are in physical pixels, preventing misclicks on HiDPI displays
 4. **Async-isolated services** — services are never shared across concurrent requests; the MCP SDK serializes tool calls

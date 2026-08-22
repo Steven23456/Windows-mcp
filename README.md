@@ -20,8 +20,8 @@ dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained `
     -p:EnableCompressionInSingleFile=true
 ```
 
-Output: `dist/WindowsMcp.exe` (~56 MB self-contained; no .NET runtime required
-on the target machine).
+Output: `dist/WindowsMcp.exe` (~66 MB self-contained — bundles the .NET and
+ASP.NET Core runtimes; nothing to install on the target machine).
 
 Requires the .NET 9 SDK for building. End users only need Windows 10 1703+
 (for per-monitor DPI awareness V2) and System PowerShell (always present on
@@ -45,6 +45,80 @@ Add to your MCP host config (e.g.,
 ```
 
 Run `/reload-plugins`. Tools appear as `mcp__Windows-mcp__*`.
+
+## Run over HTTP/HTTPS (remote)
+
+The same exe can listen on a TCP port instead of stdin/stdout — for example inside
+an RDP session on a remote Windows box, driven by Claude Code on your own machine:
+
+```powershell
+# On the remote machine, inside the interactive (RDP) session:
+$env:WINDOWSMCP_API_KEY = "<a long random secret>"
+.\WindowsMcp.exe --transport http --port 8765 --cert-thumbprint <thumbprint>
+```
+
+| Option | Env fallback | Default | Meaning |
+|---|---|---|---|
+| `--transport stdio\|http` | `WINDOWSMCP_TRANSPORT` | `stdio` | `http` = Streamable HTTP at `/mcp` |
+| `--port <n>` | `WINDOWSMCP_PORT` | `8765` | TCP port |
+| `--bind <ip>` | `WINDOWSMCP_BIND` | `0.0.0.0` | Listen address; `127.0.0.1` = this machine only |
+| `--cert-thumbprint <hex>` | `WINDOWSMCP_CERT_THUMBPRINT` | — | Certificate in `LocalMachine\My` or `CurrentUser\My`; makes the port **HTTPS only** |
+| `--api-key <key>` | `WINDOWSMCP_API_KEY` | — | Bearer token (≥ 16 printable ASCII chars). **Required** unless `--bind` is loopback |
+
+`WindowsMcp.exe --help` prints the same table. No arguments = stdio, unchanged.
+
+**Security model.** Every tool — `powershell`, `file_write`, `registry_set`,
+`process kill`, … — is reachable on that port. So the server refuses to start on a
+non-loopback address without an API key, and warns when it serves plain HTTP
+off-loopback (the key and all tool traffic would cross the network in the clear).
+Use HTTPS, and put the port behind a VPN or a firewall rule scoped to your client's
+IP. The bearer check is constant-time; there is no rate limiting, so keep the key long.
+
+**Setup on the remote machine**
+
+1. **Certificate** (for HTTPS). A self-signed one is fine for a private box — create
+   it in the *current user* store so its private key is readable without elevation:
+   ```powershell
+   $cert = New-SelfSignedCertificate -DnsName "<remote-host-name>" -CertStoreLocation Cert:\CurrentUser\My
+   $cert.Thumbprint                                            # → --cert-thumbprint
+   Export-Certificate -Cert $cert -FilePath windows-mcp.cer    # public part, for the client
+   certutil -encode windows-mcp.cer windows-mcp.pem            # Node wants PEM
+   ```
+   A `LocalMachine\My` certificate made from an elevated prompt has a key ACL of
+   SYSTEM + Administrators; the server's startup error says so if it can't open the key.
+2. **Firewall**:
+   `New-NetFirewallRule -DisplayName "Windows-mcp" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow`
+   (add `-RemoteAddress <client-ip>` to scope it).
+3. **Session**. The input, screenshot, window and UI-automation tools need the
+   **interactive desktop**, so run the exe inside the logged-in RDP session — not as a
+   service or a Session-0 scheduled task. Disconnecting RDP keeps the session alive but
+   can leave it without a rendered desktop (black screenshots, failed input): stay
+   connected, or hand the session to the physical console first with
+   `tscon $env:SESSIONNAME /dest:console` (elevated).
+
+**Client (Claude Code on your machine)**
+
+```powershell
+$env:NODE_EXTRA_CA_CERTS = "C:\path\to\windows-mcp.pem"   # trust the self-signed cert
+claude mcp add --transport http windows-mcp-remote https://<remote-host-name>:8765/mcp `
+    --header "Authorization: Bearer <the api key>"
+```
+
+or in `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "windows-mcp-remote": {
+      "type": "http",
+      "url": "https://<remote-host-name>:8765/mcp",
+      "headers": { "Authorization": "Bearer <the api key>" }
+    }
+  }
+}
+```
+
+The host name in the URL must match the certificate's `-DnsName`.
 
 ## Companion skill
 

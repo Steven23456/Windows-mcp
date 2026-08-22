@@ -10,6 +10,9 @@
     <PackageReference Include="FlaUI.UIA3" Version="5.0.0" />
     <PackageReference Include="FluentAssertions" Version="7.*" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <!-- MCP client (HttpClientTransport / McpClient) for the in-process HTTP transport tests.
+         Flows transitively from WindowsMcp, but explicit keeps the intent visible. -->
+    <PackageReference Include="ModelContextProtocol" Version="1.4.*" />
     <PackageReference Include="Moq" Version="4.*" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
@@ -17,6 +20,11 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- WebApplication / IServer / IServerAddressesFeature for HttpTransportTests. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <ItemGroup>

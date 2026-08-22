@@ -9,7 +9,7 @@ This document provides detailed documentation for each component in the Windows-
 ## Program.cs — Host and DI Entry Point
 
 ### Purpose
-Configures the .NET Generic Host, registers all 24 services as singletons, and starts the MCP server with stdio transport.
+Parses the command line (`Hosting/ServerOptions`, with `WINDOWSMCP_*` env fallbacks) and starts the MCP server over stdio (default) or Streamable HTTP (`--transport http`, built by `Hosting/WindowsMcpHost.BuildHttpApp`). The service registrations and MCP wiring both transports share live in `Hosting/WindowsMcpHost.AddWindowsMcp`.
 
 ### Location
 `src/WindowsMcp/Program.cs`
@@ -25,24 +25,30 @@ public static async Task<int> Main(string[] args)
     // 2. Per-Monitor DPI Awareness V2 — physical pixel coordinates on HiDPI
     PInvoke.SetProcessDpiAwarenessContext(new DPI_AWARENESS_CONTEXT((nint)(-4)));
 
-    // 3. Force UTF-8 to prevent JSON-RPC response buffering on Windows (cp1252 default)
+    // 3. Command line / WINDOWSMCP_* env → ServerOptions (exit 2 + usage on a bad option; --help)
+    var options = ServerOptions.Parse(args, Environment.GetEnvironmentVariable);
+    return options.IsHttp ? await RunHttpAsync(options) : await RunStdioAsync(args);
+}
+
+static async Task<int> RunStdioAsync(string[] args)
+{
+    // Force UTF-8 to prevent JSON-RPC response buffering on Windows (cp1252 default)
     Console.OutputEncoding = System.Text.Encoding.UTF8;
     Console.InputEncoding  = System.Text.Encoding.UTF8;
 
-    // 4. Build host and configure DI
     var builder = Host.CreateApplicationBuilder(args);
-    builder.Logging.ClearProviders();
-    builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
-    builder.Services.AddSingleton<IInputService, InputService>();
-    // ... (24 services)
-
-    // 5. Configure MCP server
-    builder.Services
-        .AddMcpServer(o => { o.ServerInfo = new() { Name = "Windows-mcp", Version = "0.2.0" }; })
-        .WithStdioServerTransport()
-        .WithToolsFromAssembly(); // discovers [McpServerTool] at compile time
-
+    WindowsMcpHost.ConfigureStderrLogging(builder.Logging, http: false);
+    builder.AddWindowsMcp()             // Hosting/WindowsMcpHost: all singletons + AddMcpServer(ServerInfo)
+        .WithStdioServerTransport();    //   + ToolErrors call-tool filter + WithToolsFromAssembly()
     await builder.Build().RunAsync();
+    return 0;
+}
+
+static async Task<int> RunHttpAsync(ServerOptions options)
+{
+    // Refuse off-loopback without an API key; resolve --cert-thumbprint via CertificateLocator.
+    var app = WindowsMcpHost.BuildHttpApp(options, cert);   // Kestrel Listen(bind, port[, UseHttps])
+    await app.RunAsync();                                    //   + bearer gate + MapMcp("/mcp"), stateless
     return 0;
 }
 ```
@@ -421,7 +427,8 @@ v0.2.0 limitation — uses PowerShell + `SendKeys` as a backend:
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `ModelContextProtocol` | latest | MCP SDK — stdio transport, `[McpServerTool]` source generator |
+| `ModelContextProtocol` | 1.4.x | MCP SDK — stdio transport, `[McpServerTool]` discovery, request filters |
+| `ModelContextProtocol.AspNetCore` | 1.4.x (lockstep) | Streamable HTTP transport (`WithHttpTransport`, `MapMcp`) on Kestrel via the `Microsoft.AspNetCore.App` framework reference |
 | `FlaUI.UIA3` | latest | Windows UI Automation API (UIA3 COM wrapper) |
 | `H.InputSimulator` | latest | `SendInput`-based keyboard and mouse simulation |
 | `SkiaSharp` | latest | Screenshot capture, image encode/decode |

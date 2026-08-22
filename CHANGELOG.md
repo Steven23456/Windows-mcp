@@ -1,3 +1,48 @@
+## [Unreleased]
+
+### Added
+
+- **Streamable HTTP / HTTPS transport alongside stdio** (`--transport http`). The same exe now
+  listens on a TCP port — `--port` (default 8765), `--bind` (default all interfaces) — so a
+  client on another machine, e.g. Claude Code driving an RDP session host, can use it. MCP
+  endpoint at `/mcp`, stateless Streamable HTTP, HTTP/1.1. `--cert-thumbprint <sha1>` resolves a
+  certificate from `LocalMachine\My` then `CurrentUser\My` (private-key access is probed up
+  front; the error names the key-ACL fix) and makes the port **HTTPS only**. `--api-key` /
+  `WINDOWSMCP_API_KEY` gates every path with a constant-time bearer check; the server **refuses
+  to start off-loopback without a key** (every tool would otherwise be open to the network) and
+  warns when serving plain HTTP off-loopback. Every option has a `WINDOWSMCP_*` env fallback;
+  `--help` prints them. No arguments still means plain stdio, so the plugin's `.mcp.json` is
+  unchanged. README: "Run over HTTP/HTTPS (remote)".
+- `src/WindowsMcp/Hosting/` — `ServerOptions` (pure, exhaustively unit-tested parser),
+  `WindowsMcpHost` (the service/MCP wiring both transports share — registrations, identity,
+  the `ToolErrors` filter, tool discovery — plus the HTTP host factory) and `CertificateLocator`.
+  `HttpTransportTests` starts the real HTTP host in-process on an ephemeral port and drives it
+  with the SDK client: handshake + tool list, 401 on every path without / with a wrong key, HTTPS
+  with an ephemeral certificate (plaintext refused on that port), and a `confirm:true` refusal
+  surfacing verbatim — the first test to exercise the DI wiring end to end.
+- **Claude-in-Actions guard foundation (CI / dev infrastructure).** An agent-immutable
+  `claude-guard` workflow (`workflow_run`-triggered so it always runs from `main`, a PR cannot edit
+  its own gate) that checks any future automation PR against a docs-only allowlist, an `src/**`
+  capability guard, one-concern caps, and a `..`-traversal reject — posting a `claude-guard`
+  check-run (fail-closed on error). Backed by a unit-tested policy script
+  (`.github/scripts/claude-guard.sh`, 13 tests, run in CI via `guard-tests.yml`), plus `CODEOWNERS`,
+  an activation runbook, and the Phase-2 design spec/plan under `docs/superpowers/`. Pilot Claude
+  auth is `ANTHROPIC_API_KEY` (a service credential with a Console spend cap). Part of the
+  human-gated "Claude-in-Actions" doc-drift bot pilot; the bot itself (maintenance workflow +
+  digest) is pending credential provisioning. Design survived two adversarial review rounds
+  (Claude-opus + cross-model Gemini/OpenAI), which caught and fixed a workflow script-injection and
+  a rename bypass before merge.
+
+### Changed
+
+- `ModelContextProtocol` 1.0.x → 1.4.x, plus `ModelContextProtocol.AspNetCore` 1.4.x and a
+  `Microsoft.AspNetCore.App` framework reference. The project SDK stays `Microsoft.NET.Sdk`
+  (no `web.config` / `wwwroot` artefacts); the publish command is unchanged. The self-contained
+  single-file exe grows from ~56 MB to ~66 MB (ASP.NET Core shared framework, compressed).
+- Logging is stderr-only in both modes; HTTP mode additionally mutes the SDK's per-request
+  server chatter to `Warning` (stateless mode builds a fresh `McpServer` per request).
+- The `## [Unreleased]` section was buried between 0.6.1 and 0.6.0; moved to the top.
+
 ## [0.7.2] - 2026-08-16
 
 ### Fixed
@@ -153,22 +198,6 @@
 - `ProcessService.ListAsync` filters by name **before** projecting to DTOs — `MainModule` access
   opens a native handle and throws on protected processes, so skipping non-matches is cheaper and
   quieter. Extracted the duplicated name-or-command-line predicate into `ProcessLineage.Matches`.
-
-## [Unreleased]
-
-### Added
-- **Claude-in-Actions guard foundation (CI / dev infrastructure).** An agent-immutable
-  `claude-guard` workflow (`workflow_run`-triggered so it always runs from `main`, a PR cannot edit
-  its own gate) that checks any future automation PR against a docs-only allowlist, an `src/**`
-  capability guard, one-concern caps, and a `..`-traversal reject — posting a `claude-guard`
-  check-run (fail-closed on error). Backed by a unit-tested policy script
-  (`.github/scripts/claude-guard.sh`, 13 tests, run in CI via `guard-tests.yml`), plus `CODEOWNERS`,
-  an activation runbook, and the Phase-2 design spec/plan under `docs/superpowers/`. Pilot Claude
-  auth is `ANTHROPIC_API_KEY` (a service credential with a Console spend cap). Part of the
-  human-gated "Claude-in-Actions" doc-drift bot pilot; the bot itself (maintenance workflow +
-  digest) is pending credential provisioning. Design survived two adversarial review rounds
-  (Claude-opus + cross-model Gemini/OpenAI), which caught and fixed a workflow script-injection and
-  a rename bypass before merge.
 
 ## [0.6.0] - 2026-07-08
 
