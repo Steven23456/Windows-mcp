@@ -1,5 +1,7 @@
 using System.Diagnostics;
-using System.Text;
+using System.Globalization;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
@@ -17,15 +19,7 @@ public sealed class PowerShellService : IPowerShellService
     // serialization gate forever and wedge every PowerShell-backed tool. Deliberately generous —
     // longer than any legitimate caller budget (storage_health caps its own CTS at 300s). The
     // normal cancellation path is the caller's CancellationToken; this is the last-resort teardown.
-    private static readonly TimeSpan DefaultBackstop = TimeSpan.FromMinutes(10);
-
-    // System PowerShell is guaranteed present at this path on Windows 7+.
-    // Avoids the broken InitialSessionState.CreateDefault2 path in the PS NuGet
-    // SDK when running under PublishSingleFile=true: Assembly.Location returns ""
-    // in single-file mode, then Path.Combine chokes inside PSSnapInReader.
-    // Snap-in DLLs are not bundled in the single-file image.
-    private const string PowerShellExe =
-        @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+    private static readonly TimeSpan DefaultBackstop = TimeSpan.FromMinutes(15);
 
     public PowerShellService(ILogger<PowerShellService> log) : this((ILogger)log, null) { }
 
@@ -55,30 +49,12 @@ public sealed class PowerShellService : IPowerShellService
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
             var token = linkedCts.Token;
 
-            // Build the invocation. See BuildArguments for why stdin is NOT used.
-            var (arguments, tempScript) = await BuildArgumentsAsync(command, token);
+            // Build the invocation. See PowerShellInvocation for why stdin is NOT used and how
+            // the EncodedCommand / temp-file fallback works.
+            var (arguments, tempScript) = await PowerShellInvocation.BuildArgumentsAsync(command, token);
             scriptFileToDelete = tempScript;
 
-            // -NoProfile: skip user profile load (faster, deterministic)
-            // -NonInteractive: never prompt
-            // -ExecutionPolicy Bypass: allow scripts
-            var psi = new ProcessStartInfo
-            {
-                FileName = PowerShellExe,
-                Arguments = arguments,
-                // Still redirect stdin even though we never write to it: this process is an MCP
-                // STDIO server, so our own stdin is the JSON-RPC channel. An un-redirected child
-                // would INHERIT that handle and could consume protocol bytes. Redirect and close.
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8,
-            };
-
-            using var proc = new Process { StartInfo = psi };
+            using var proc = new Process { StartInfo = PowerShellInvocation.CreateStartInfo(arguments) };
             proc.Start();
 
             // Register the kill BEFORE any await: if cancellation (caller or backstop) fires
@@ -100,9 +76,7 @@ public sealed class PowerShellService : IPowerShellService
             var stdout = await stdoutTask;
             var stderr = await stderrTask;
 
-            var errors = string.IsNullOrEmpty(stderr)
-                ? Array.Empty<string>()
-                : stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var errors = ExtractErrors(stderr);
 
             return new PSResult(
                 Success: proc.ExitCode == 0 && errors.Length == 0,
@@ -128,54 +102,57 @@ public sealed class PowerShellService : IPowerShellService
         }
     }
 
-    // Windows caps a command line at 32767 chars. -EncodedCommand base64s UTF-16LE, so the
-    // encoded form is ~2.67x the script length; stay well clear of the ceiling.
-    private const int MaxEncodedCommandChars = 30_000;
-
     /// <summary>
-    /// Produces the powershell.exe arguments for <paramref name="command"/>, plus the path of a
-    /// temp script file to delete afterwards (null when none was needed).
+    /// Extracts the lines that should count as errors from a child's raw stderr.
     /// </summary>
     /// <remarks>
-    /// We deliberately do NOT use <c>-Command -</c> with the script piped to stdin. PowerShell
-    /// reads piped stdin and evaluates it LINE BY LINE as independent statements, so every
-    /// multi-line construct (hashtable literal, try/catch, foreach, function, wrapped assignment)
-    /// is silently mangled — and the process still exits 0 with EMPTY stdout. That is what made
-    /// <c>disk_inspect mode:reclaimable</c> return nothing on exit 0: its script ends in a
-    /// multi-line <c>[PSCustomObject]@{...} | ConvertTo-Json</c>. Piping also left the input
-    /// encoding at the console default, corrupting non-ASCII.
-    ///
-    /// <c>-EncodedCommand</c> passes the script as one base64 UTF-16LE blob: parsed as a single
-    /// unit, encoding explicit, no quoting hazards. Its only limit is the command-line length —
-    /// and since stdin had no such limit, an oversized script falls back to a temp <c>.ps1</c>
-    /// run with <c>-File</c> so large scripts do not regress.
+    /// Windows PowerShell 5.1 with redirected stderr wraps its error/warning/progress/verbose
+    /// streams in a CLIXML document (a <c>#&lt; CLIXML</c> header line followed by
+    /// <c>&lt;Objs&gt;</c> XML). Benign records land there too — e.g. an <c>Obj S="progress"</c>
+    /// "Preparing modules for first use." on first-touch module import, or <c>S S="warning"</c>
+    /// from Write-Warning — so non-empty stderr does NOT mean the command failed. Only genuine
+    /// <c>&lt;S S="Error"&gt;</c> records count against Success; <see cref="PSResult.Stderr"/>
+    /// keeps the raw stream. Non-CLIXML stderr (native children write raw bytes) and unparseable
+    /// CLIXML (raw bytes interleaved with it) fall back to the plain line split.
     /// </remarks>
-    private static async Task<(string Arguments, string? TempScript)> BuildArgumentsAsync(
-        string command, CancellationToken token)
+    internal static string[] ExtractErrors(string stderr)
     {
-        const string CommonFlags = "-NoProfile -NonInteractive -ExecutionPolicy Bypass";
+        if (string.IsNullOrEmpty(stderr)) return Array.Empty<string>();
 
-        // We read the child's stdout as UTF-8 (StandardOutputEncoding), but Windows PowerShell 5.1
-        // WRITES stdout in the console OEM codepage, so non-ASCII arrives corrupted (café -> caf?).
-        // Force the writer side to match the reader side. Kept to one line and try/caught so it can
-        // never break a caller's script; `catch {}` deliberately swallows, as failing to set an
-        // encoding must not fail the command.
-        const string EncodingPreamble =
-            "try{[Console]::OutputEncoding=[System.Text.Encoding]::UTF8}catch{}\n";
+        string[] RawLines() => stderr.Split('\n',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        var payload = EncodingPreamble + command;
+        const string ClixmlHeader = "#< CLIXML";
+        if (!stderr.StartsWith(ClixmlHeader, StringComparison.Ordinal))
+            return RawLines();
 
-        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(payload));
-        if (encoded.Length <= MaxEncodedCommandChars)
-            return ($"{CommonFlags} -EncodedCommand {encoded}", null);
+        int xmlStart = stderr.IndexOf('<', ClixmlHeader.Length);
+        if (xmlStart < 0) return Array.Empty<string>(); // header only, no records at all
 
-        // Too long for a command line: write it out and run the file instead.
-        // UTF-8 *with BOM* — Windows PowerShell 5.1 assumes the ANSI codepage for a BOM-less
-        // file and mangles non-ASCII (the em-dash parse trap).
-        var path = Path.Combine(Path.GetTempPath(), $"winmcp-{Guid.NewGuid():N}.ps1");
-        await File.WriteAllTextAsync(path, payload, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), token);
-        return ($"{CommonFlags} -File \"{path}\"", path);
+        try
+        {
+            // One <Objs> document per stream flush can be concatenated; wrap to parse as one.
+            var root = XElement.Parse("<r>" + stderr[xmlStart..] + "</r>");
+            return root.Descendants()
+                .Where(e => e.Name.LocalName == "S" && string.Equals(
+                    (string?)e.Attribute("S"), "Error", StringComparison.OrdinalIgnoreCase))
+                .SelectMany(e => DecodeClixmlEscapes(e.Value).Split('\n',
+                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .ToArray();
+        }
+        catch (System.Xml.XmlException)
+        {
+            return RawLines();
+        }
     }
+
+    // CLIXML escapes characters that are invalid in XML text as _xHHHH_ (CRLF arrives as
+    // _x000D__x000A_); a surrogate pair is two consecutive escapes, so per-char decode is exact.
+    private static readonly Regex ClixmlEscape = new("_x([0-9A-Fa-f]{4})_", RegexOptions.Compiled);
+
+    private static string DecodeClixmlEscapes(string value) =>
+        ClixmlEscape.Replace(value, m => ((char)ushort.Parse(
+            m.Groups[1].ValueSpan, NumberStyles.HexNumber, CultureInfo.InvariantCulture)).ToString());
 
     public void Dispose()
     {

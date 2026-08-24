@@ -176,22 +176,35 @@ Output: ClickResult { X=800, Y=400, Button="Right", Clicks=1 }
      ├─────────────►│                    │                          │
      │              │ RunAsync(command)  │                          │
      │              ├───────────────────►│                          │
-     │              │                    │ [security filter]        │
-     │              │                    │ ValidateCommand()        │
-     │              │                    ├────────────────────────► │
+     │              │                    │ acquire serialization    │
+     │              │                    │ gate, then start 15-min  │
+     │              │                    │ execution backstop CTS   │
+     │              │                    │                          │
+     │              │                    │ PowerShellInvocation:    │
+     │              │                    │  -EncodedCommand (or     │
+     │              │                    │  temp .ps1 -File if big) │
      │              │                    │                          │
      │              │                    │ Process.Start()          │
-     │              │                    │  "pwsh -NonInteractive"  │
+     │              │                    │  powershell.exe          │
+     │              │                    │  -NoProfile              │
+     │              │                    │  -NonInteractive         │
      │              │                    ├─────────────────────────►│
-     │              │                    │                          │ write stdin
-     │              │                    │◄─────────────────────────┤
-     │              │                    │  (stdout, stderr,        │
-     │              │                    │   exitCode)              │
-     │              │ PowerShellResult   │                          │
+     │              │                    │ close stdin; read        │
+     │              │  progress          │ stdout+stderr; on cancel │
+     │  progress    │  heartbeat / 10s   │ or backstop: kill whole  │
+     │  notification│  while waiting     │ process tree             │
+     │◄─────────────┤                    │◄─────────────────────────┤
+     │              │ PSResult           │                          │
      │              │◄───────────────────┤                          │
      │ JSON string  │                    │                          │
      │◄─────────────┤                    │                          │
 ```
+
+`background:true` skips this path entirely: ShellTools calls `JobService.StartAsync`, which
+builds the child via the same `PowerShellInvocation` helper but runs it **outside** the
+serialization gate, pumps stdout/stderr into bounded buffers, and returns a `JobInfo`
+immediately. The agent then polls via the `job` tool (`status`/`output`/`cancel`/`list`);
+a per-job 60-min backstop tears down runaway jobs as `timedOut`.
 
 ### Data
 
@@ -199,13 +212,15 @@ Output: ClickResult { X=800, Y=400, Button="Right", Clicks=1 }
 Input:  command = "Get-Process | Select-Object Name,CPU | ConvertTo-Json"
 
 Processing:
-  1. ValidateCommand() — blocklist check (format, shutdown, del, -enc, ...)
-  2. Process.Start("pwsh", ["-NonInteractive", "-Command", "-"])
-  3. Write command to stdin pipe
-  4. Await exit; read stdout + stderr
+  1. Acquire the serialization gate (one PowerShell at a time), then arm the 15-min backstop
+  2. PowerShellInvocation.BuildArgumentsAsync — UTF-8 preamble + -EncodedCommand
+     (temp .ps1 -File fallback for oversized scripts)
+  3. Process.Start(powershell.exe); close stdin (protects the MCP stdio channel)
+  4. Await exit (ShellTools reports a progress heartbeat every 10s meanwhile);
+     read stdout + stderr
 
-Output: PowerShellResult { Stdout="[{...}]", Stderr="", ExitCode=0 }
-        → JSON: {"Stdout":"[{...}]","Stderr":"","ExitCode":0}
+Output: PSResult { Success=true, Stdout="[{...}]", Stderr="", ExitCode=0, Errors=[] }
+        → JSON: {"Success":true,"Stdout":"[{...}]","Stderr":"","ExitCode":0,"Errors":[]}
 ```
 
 ---
@@ -496,5 +511,7 @@ All tool methods return `Task<string>` where the string is either:
 | `WaitFor` | Polls every `interval_ms` (default 500ms) up to `timeout_ms` (default 10s) | Only tool with a loop |
 | `InputService` click | `Thread.Sleep` between multi-clicks | Prevents double-click collapse |
 | `InputService` type | Delay between keystrokes | Simulates human typing cadence |
-| `PowerShellService` | Async wait on process exit | No timeout enforced in v0.2.0 |
+| `PowerShellService` | Async wait on process exit | 15-min execution backstop (armed after the serialization gate); caller cancellation kills the process tree |
+| `ShellTools` heartbeat | Progress notification every 10s during a foreground `powershell` call | Lets spec-compliant clients reset their request timeout |
+| `JobService` | Background jobs poll-based; per-job 60-min backstop | Runs outside the PowerShell serialization gate |
 | MCP SDK transport (stdio or HTTP) | No artificial pauses — reads JSON-RPC frames continuously | Contrast: Python `pg.PAUSE = 1.0` |

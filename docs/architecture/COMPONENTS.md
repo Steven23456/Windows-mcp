@@ -89,6 +89,10 @@ static async Task<int> RunHttpAsync(ServerOptions options)
 | `ILspEnumerator` | `LspEnumerator` |
 | `IShortcutResolver` | `ShortcutResolver` |
 | `IStartupReportService` | `StartupReportService` |
+| `IIntegrityService` | `IntegrityService` |
+| `IUsnService` | `UsnService` |
+| `IWatchService` | `WatchService` |
+| `IJobService` | `JobService` |
 
 ---
 
@@ -231,11 +235,22 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 ### `ShellTools` — 1 tool
 `src/WindowsMcp/Tools/ShellTools.cs`
 
-**Injected:** `IPowerShellService`
+**Injected:** `IPowerShellService`, `IJobService`
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `Powershell` | `(string command)` | Execute PowerShell; returns `{stdout, stderr, exitCode}` JSON |
+| `Powershell` | `(string command, bool background)` | Execute PowerShell; returns `{stdout, stderr, exitCode}` JSON. Foreground calls emit MCP progress heartbeats every 10s (via an SDK-injected `IProgress<ProgressNotificationValue>`, excluded from the tool schema) so spec-compliant clients reset their request timeout; the foreground execution backstop is 15 min. `background:true` starts a `JobService` job and returns its `JobInfo` immediately |
+
+---
+
+### `JobTools` — 1 tool
+`src/WindowsMcp/Tools/JobTools.cs`
+
+**Injected:** `IJobService`
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `Job` | `(string mode, string? id, int tail)` | modes `status\|output\|cancel\|list` over background PowerShell jobs. Unknown ids are forgiving (`found:false` / `cancelled:false`). `tail` limits `output` to the last N chars per stream |
 
 ---
 
@@ -320,6 +335,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IClipboardService` | `GetTextAsync`, `SetTextAsync` |
 | `IAudioService` | `GetAsync`, `SetVolumeAsync`, `SetMutedAsync` |
 | `IPowerShellService` | `RunAsync(command)` |
+| `IJobService` | `StartAsync(command)`, `GetStatus(id)`, `GetOutput(id, tailChars)`, `Cancel(id)`, `List()` |
 | `IUIAutomationService` | `GetStateAsync`, `FindElementAsync`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync`, `InteractAsync`, `GetTableAsync`, `WaitForAsync` |
 | `IFileSystemService` | `ReadAsync`, `WriteAsync`, `ManageAsync`, `InfoAsync`, `SearchAsync`, `ArchiveAsync` |
 | `IRegistryService` | `GetAsync`, `SetAsync`, `EnumerateValuesAsync`, `EnumerateSubKeysAsync` |
@@ -395,10 +411,34 @@ Uses **H.InputSimulator** (`WindowsInput` namespace) which calls `SendInput` dir
 
 ### `PowerShellService`
 
-Executes PowerShell via `System.Diagnostics.Process` with security filtering:
-- Blocks dangerous commands (format, shutdown, del, etc.) and injection-risk flags (-enc, -encodedcommand)
-- Pipes stdin as the script body (avoids command-line length limits)
-- Returns `PowerShellResult(Stdout, Stderr, ExitCode)` to callers
+Executes foreground PowerShell via `System.Diagnostics.Process` (system `powershell.exe`):
+- Serializes all calls through a `SemaphoreSlim(1,1)` gate; a 15-minute execution backstop
+  (started **after** the gate is acquired, so it bounds execution rather than queue-wait)
+  tears down runaway scripts by killing the whole process tree
+- Builds the invocation via the shared `PowerShellInvocation` helper: `-EncodedCommand`
+  (base64 UTF-16LE, UTF-8 console-encoding preamble) with a temp-`.ps1` `-File` fallback for
+  oversized scripts; stdin is redirected and closed so the child cannot eat MCP protocol bytes
+- Returns `PSResult(Success, Stdout, Stderr, ExitCode, Errors)` to callers
+
+### `JobService`
+
+Background PowerShell jobs (`powershell background:true` + the `job` tool):
+- Spawns children via the same `PowerShellInvocation` helper as the foreground service, but
+  **outside** the foreground serialization gate — jobs run concurrently (cap: 8 running; new
+  starts are rejected when full)
+- Per-job 60-minute backstop kills the process tree and marks the job `timedOut`; `Cancel`
+  marks it `cancelled`; a per-job monitor task is the single writer of the final state
+  (`completed`/`failed` by exit code otherwise)
+- Stdout/stderr are pumped into `BoundedTextBuffer`s (~1 MB/stream, oldest chars trimmed,
+  trim counters surfaced); the ~32 most recent finished jobs are retained, oldest evicted
+- Registry pattern mirrors `WatchService`: `Dictionary` + lock, sequential ids (`j1`, `j2`…),
+  forgiving unknown-id semantics
+
+### `BoundedTextBuffer`
+
+Thread-safe bounded text accumulator (lock + `StringBuilder`): keeps the most recent tail once
+capacity is exceeded and counts trimmed chars — the unit-testable core of job output capture
+(sibling of `EventRingBuffer`).
 
 ### `ScreenshotService`
 
