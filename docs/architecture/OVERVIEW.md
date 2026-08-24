@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 63 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 64 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
 
 ## Purpose
 
@@ -76,7 +76,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 ## Available Tools
 
-Windows-MCP exposes **63 MCP tools** across 18 tool classes:
+Windows-MCP exposes **64 MCP tools** across 19 tool classes:
 
 ### Input Tools (`InputTools` — 8 tools)
 | Tool | Purpose |
@@ -163,7 +163,12 @@ Windows-MCP exposes **63 MCP tools** across 18 tool classes:
 ### Shell Tool (`ShellTools` — 1 tool)
 | Tool | Purpose |
 |------|---------|
-| `Powershell` | Execute a PowerShell command; returns stdout, stderr, exit code |
+| `Powershell` | Execute a PowerShell command; returns stdout, stderr, exit code. Emits MCP progress heartbeats on long foreground calls; `background: true` starts a job (see `JobTools`) instead of waiting |
+
+### Job Tool (`JobTools` — 1 tool)
+| Tool | Purpose |
+|------|---------|
+| `Job` | Manage background PowerShell jobs (`status`/`output`/`cancel`/`list`): jobs run concurrently outside the foreground PowerShell gate, with bounded output capture and a per-job backstop |
 
 ### Registry Tools (`RegistryTools` — 2 tools)
 | Tool | Purpose |

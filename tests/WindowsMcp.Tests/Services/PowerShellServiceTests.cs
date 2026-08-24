@@ -79,6 +79,45 @@ public class PowerShellServiceTests
         result.Errors.Should().NotBeEmpty();
     }
 
+    // REGRESSION: PS 5.1 with redirected stderr wraps ALL non-stdout streams in CLIXML, so
+    // benign progress records (e.g. "Preparing modules for first use." on first-touch module
+    // import) land on stderr and used to flip Success=false with phantom "errors" on perfectly
+    // good commands. Only genuine <S S="Error"> records may count against Success.
+    [Fact]
+    public async Task RunAsync_progress_records_on_stderr_do_not_fail_the_command()
+    {
+        using var svc = new PowerShellService(NullLogger.Instance);
+        var result = await svc.RunAsync("Write-Progress -Activity 'probe' -Status 'working'; 'clean'");
+
+        result.Stderr.Should().Contain("progress", "the test must actually exercise the CLIXML path");
+        result.Success.Should().BeTrue("a progress record is not an error");
+        result.Errors.Should().BeEmpty();
+        result.Stdout.Trim().Should().Be("clean");
+    }
+
+    [Fact]
+    public async Task RunAsync_warning_records_on_stderr_do_not_fail_the_command()
+    {
+        using var svc = new PowerShellService(NullLogger.Instance);
+        var result = await svc.RunAsync("Write-Warning 'careful'; 'warned'");
+
+        result.Success.Should().BeTrue("a warning is not an error");
+        result.Errors.Should().BeEmpty();
+        result.Stdout.Trim().Should().Be("warned");
+    }
+
+    [Fact]
+    public async Task RunAsync_real_error_records_still_fail_and_are_extracted_as_text()
+    {
+        using var svc = new PowerShellService(NullLogger.Instance);
+        var result = await svc.RunAsync("Write-Error 'boom'; 'after'");
+
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("boom"));
+        result.Errors.Should().OnlyContain(e => !e.StartsWith("<"), "errors must be decoded text, not raw CLIXML");
+        result.Stdout.Trim().Should().Be("after", "a non-terminating error must not eat stdout");
+    }
+
     [Fact]
     public async Task RunAsync_serialized_calls_preserve_per_caller_output()
     {

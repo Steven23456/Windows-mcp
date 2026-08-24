@@ -2,6 +2,25 @@
 
 ### Added
 
+- **Background PowerShell jobs** (63 → 64 tools). `powershell` gains `background: true`: instead
+  of waiting, it starts the command as a job and returns `{Id, Pid, State}` immediately — the
+  right pattern for silent installers, DISM, and anything longer than the foreground backstop.
+  A new `job` tool manages them (`status` | `output` | `cancel` | `list`). Jobs run concurrently
+  **outside** the foreground PowerShell serialization gate (`IJobService`/`JobService`): max 8
+  running (new starts rejected when full), a 60-min per-job backstop that tree-kills runaways as
+  `timedOut`, stdout/stderr captured into bounded ~1 MB/stream buffers (`BoundedTextBuffer`,
+  oldest chars trimmed with counters surfaced), and the ~32 most recent finished jobs retained
+  before eviction. Unknown job ids answer `found:false`/`cancelled:false` rather than erroring.
+- **MCP progress heartbeats on foreground `powershell` calls.** While a command runs (or waits
+  behind the serialization gate), the tool reports an `IProgress<ProgressNotificationValue>`
+  heartbeat every 10s — spec-compliant clients that sent a `progressToken` reset their request
+  timeout on progress, so long commands no longer die to client-side timeouts. No schema change
+  (the SDK binds the parameter outside the tool's JSON schema) and a no-op sink when the client
+  sends no token.
+- `Services/PowerShellInvocation.cs` — the powershell.exe invocation builder (exe path, common
+  flags, UTF-8 encoding preamble, `-EncodedCommand` with temp-`.ps1` fallback, stdin-redirect
+  start-info) extracted from `PowerShellService` and shared with `JobService`, so background jobs
+  spawn children exactly like foreground calls.
 - **Streamable HTTP / HTTPS transport alongside stdio** (`--transport http`). The same exe now
   listens on a TCP port — `--port` (default 8765), `--bind` (default all interfaces) — so a
   client on another machine, e.g. Claude Code driving an RDP session host, can use it. MCP
@@ -35,6 +54,9 @@
 
 ### Changed
 
+- **Foreground PowerShell execution backstop 10 → 15 minutes** (`PowerShellService`). The
+  backstop still arms only after the serialization gate is acquired, so it bounds execution,
+  not queue-wait.
 - `ModelContextProtocol` 1.0.x → 1.4.x, plus `ModelContextProtocol.AspNetCore` 1.4.x and a
   `Microsoft.AspNetCore.App` framework reference. The project SDK stays `Microsoft.NET.Sdk`
   (no `web.config` / `wwwroot` artefacts); the publish command is unchanged. The self-contained
@@ -50,6 +72,24 @@
   rather than kept alongside: two solution files in the root make a bare `dotnet build` fail with
   `MSB1011`. CI (`ci.yml`) and `ServerInfoTests.RepoRoot()` (which located the repo by the `.sln`)
   now look for the `.slnx`.
+
+### Fixed
+
+- **`powershell` no longer reports `Success:false` on healthy commands because of benign stderr
+  noise.** Windows PowerShell 5.1 with redirected stderr wraps its error/warning/progress/verbose
+  streams in CLIXML, so progress records ("Preparing modules for first use." on first-touch module
+  import, or any `Write-Progress`) and warnings landed in `PSResult.Errors` and flipped `Success`.
+  `PowerShellService` now parses CLIXML stderr and counts only genuine `<S S="Error">` records
+  (decoded to plain text) against Success; `PSResult.Stderr` keeps the raw stream, and non-CLIXML
+  or unparseable stderr falls back to the previous line-split behavior. Background jobs were never
+  affected (their state derives from the exit code alone).
+- Stale tool counts in docs: README / CLAUDE.md / `skills/windows/README.md` still said 60 tools
+  (the surface has been 63 since 0.7.0; now 64), and `ARCHITECTURE.md` said 15 tool classes.
+  `DATAFLOW.md`'s Powershell diagram described a long-removed implementation
+  (`ValidateCommand` blocklist, `pwsh`, script piped via stdin) — rewritten to match the real
+  gate → backstop → `-EncodedCommand`/temp-file flow. `COMPONENTS.md`'s `PowerShellService`
+  section had the same rot and its service table was missing the integrity/USN/watch
+  registrations.
 
 ## [0.7.2] - 2026-08-16
 

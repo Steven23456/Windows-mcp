@@ -92,6 +92,7 @@ internal static class WindowsMcpHost
         services.AddSingleton<IIntegrityService, IntegrityService>();
         services.AddSingleton<IUsnService, UsnService>();
         services.AddSingleton<IWatchService, WatchService>();
+        services.AddSingleton<IJobService, JobService>();
 
         return services
             .AddMcpServer(o =>

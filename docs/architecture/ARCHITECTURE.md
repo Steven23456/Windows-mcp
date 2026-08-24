@@ -14,7 +14,7 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Tool Layer                                         │
-│                 (18 [McpServerToolType] classes, 63 tools)                   │
+│                 (19 [McpServerToolType] classes, 64 tools)                   │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ │
 │  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │ │
 │  │  8 tools   │ │  8 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │ │
@@ -256,7 +256,7 @@ Windows-mcp.slnx
 │   ├── WindowsMcp/                        ← Main project
 │   │   ├── WindowsMcp.csproj              (targets net10.0-windows10.0.19041)
 │   │   ├── Program.cs                     (host + DI wiring)
-│   │   ├── Tools/                         (15 tool classes)
+│   │   ├── Tools/                         (19 tool classes)
 │   │   │   ├── InputTools.cs
 │   │   │   ├── UIAutomationTools.cs
 │   │   │   ├── FileTools.cs
@@ -265,6 +265,7 @@ Windows-mcp.slnx
 │   │   │   ├── ProcessTools.cs
 │   │   │   ├── ScreenTools.cs
 │   │   │   ├── ShellTools.cs
+│   │   │   ├── JobTools.cs
 │   │   │   ├── RegistryTools.cs
 │   │   │   ├── NetworkTools.cs
 │   │   │   ├── WebTools.cs
