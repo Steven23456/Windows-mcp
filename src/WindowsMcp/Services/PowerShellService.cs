@@ -1,7 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
-using System.Text.RegularExpressions;
-using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
@@ -81,7 +78,10 @@ public sealed class PowerShellService : IPowerShellService
             return new PSResult(
                 Success: proc.ExitCode == 0 && errors.Length == 0,
                 Stdout: stdout,
-                Stderr: stderr,
+                // D-8: the raw CLIXML blob never reaches the model. Progress records are dropped
+                // (there is no console to draw them on) and the remaining streams become prefixed
+                // text; non-CLIXML stderr passes through untouched.
+                Stderr: ClixmlStderr.Decode(stderr),
                 ExitCode: proc.ExitCode,
                 Errors: errors);
         }
@@ -111,48 +111,23 @@ public sealed class PowerShellService : IPowerShellService
     /// <c>&lt;Objs&gt;</c> XML). Benign records land there too — e.g. an <c>Obj S="progress"</c>
     /// "Preparing modules for first use." on first-touch module import, or <c>S S="warning"</c>
     /// from Write-Warning — so non-empty stderr does NOT mean the command failed. Only genuine
-    /// <c>&lt;S S="Error"&gt;</c> records count against Success; <see cref="PSResult.Stderr"/>
-    /// keeps the raw stream. Non-CLIXML stderr (native children write raw bytes) and unparseable
-    /// CLIXML (raw bytes interleaved with it) fall back to the plain line split.
+    /// <c>&lt;S S="Error"&gt;</c> records count against Success. Non-CLIXML stderr (native children
+    /// write raw bytes) and unparseable CLIXML (raw bytes interleaved with it) fall back to the
+    /// plain line split. Parsing lives in <see cref="ClixmlStderr"/>, shared with the stderr
+    /// decoder so the two cannot drift.
     /// </remarks>
     internal static string[] ExtractErrors(string stderr)
     {
         if (string.IsNullOrEmpty(stderr)) return Array.Empty<string>();
 
-        string[] RawLines() => stderr.Split('\n',
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (!ClixmlStderr.TryParseRecords(stderr, out var records))
+            return stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        const string ClixmlHeader = "#< CLIXML";
-        if (!stderr.StartsWith(ClixmlHeader, StringComparison.Ordinal))
-            return RawLines();
-
-        int xmlStart = stderr.IndexOf('<', ClixmlHeader.Length);
-        if (xmlStart < 0) return Array.Empty<string>(); // header only, no records at all
-
-        try
-        {
-            // One <Objs> document per stream flush can be concatenated; wrap to parse as one.
-            var root = XElement.Parse("<r>" + stderr[xmlStart..] + "</r>");
-            return root.Descendants()
-                .Where(e => e.Name.LocalName == "S" && string.Equals(
-                    (string?)e.Attribute("S"), "Error", StringComparison.OrdinalIgnoreCase))
-                .SelectMany(e => DecodeClixmlEscapes(e.Value).Split('\n',
-                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                .ToArray();
-        }
-        catch (System.Xml.XmlException)
-        {
-            return RawLines();
-        }
+        return records
+            .Where(r => string.Equals(r.Stream, "Error", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(r => r.Text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .ToArray();
     }
-
-    // CLIXML escapes characters that are invalid in XML text as _xHHHH_ (CRLF arrives as
-    // _x000D__x000A_); a surrogate pair is two consecutive escapes, so per-char decode is exact.
-    private static readonly Regex ClixmlEscape = new("_x([0-9A-Fa-f]{4})_", RegexOptions.Compiled);
-
-    private static string DecodeClixmlEscapes(string value) =>
-        ClixmlEscape.Replace(value, m => ((char)ushort.Parse(
-            m.Groups[1].ValueSpan, NumberStyles.HexNumber, CultureInfo.InvariantCulture)).ToString());
 
     public void Dispose()
     {

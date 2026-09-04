@@ -112,4 +112,62 @@ public sealed class JobServiceTests : IDisposable
         tail.Stdout.Length.Should().BeLessThanOrEqualTo(4);
         full.Stdout.Should().EndWith(tail.Stdout);
     }
+
+    // ---- D-9: a job's stderr is decoded from CLIXML, like the foreground tool's ----------------
+
+    [Fact]
+    public async Task GetOutput_decodes_a_finished_jobs_clixml_stderr()
+    {
+        var info = await _svc.StartAsync("Write-Warning 'careful'; 'done'");
+        await _svc.WhenCompleted(info.Id)!;
+
+        var output = _svc.GetOutput(info.Id)!;
+
+        output.Stdout.Should().Contain("done");
+        output.Stderr.Should().Contain("careful");
+        output.Stderr.Should().NotContain("<Objs", "raw CLIXML must never reach the model");
+        output.Stderr.Should().NotContain("_x000D_", "CLIXML escapes must be decoded");
+    }
+
+    // Layer 1 (the invocation preamble) applies to jobs too, so an ordinary job has no stderr at all.
+    [Fact]
+    public async Task Job_progress_output_is_suppressed()
+    {
+        var info = await _svc.StartAsync("Write-Progress -Activity 'probe' -Status 'working'; 'clean'");
+        await _svc.WhenCompleted(info.Id)!;
+
+        var output = _svc.GetOutput(info.Id)!;
+
+        output.Stdout.Should().Contain("clean");
+        output.Stderr.Should().BeEmpty();
+    }
+
+    // Even when a script re-enables progress, the records are dropped rather than shipped as XML.
+    [Fact]
+    public async Task Job_progress_re_enabled_by_the_script_is_still_dropped()
+    {
+        var info = await _svc.StartAsync(
+            "$ProgressPreference='Continue'; Write-Progress -Activity 'probe' -Status 'working'; " +
+            "Write-Warning 'kept'; 'clean'");
+        await _svc.WhenCompleted(info.Id)!;
+
+        var output = _svc.GetOutput(info.Id)!;
+
+        output.Stderr.Should().Contain("kept").And.NotContain("<Objs");
+        output.Stderr.Should().NotContain("Preparing modules");
+    }
+
+    // The decode happens BEFORE the state flips, so a reader can never see "completed" with raw XML.
+    [Fact]
+    public async Task Status_length_matches_the_decoded_stderr_a_reader_gets()
+    {
+        var info = await _svc.StartAsync("Write-Warning 'careful'; 'done'");
+        await _svc.WhenCompleted(info.Id)!;
+
+        var status = _svc.GetStatus(info.Id)!;
+        var output = _svc.GetOutput(info.Id)!;
+
+        status.State.Should().Be("completed");
+        status.StderrChars.Should().Be(output.Stderr.Length);
+    }
 }

@@ -83,15 +83,32 @@ public class PowerShellServiceTests
     // benign progress records (e.g. "Preparing modules for first use." on first-touch module
     // import) land on stderr and used to flip Success=false with phantom "errors" on perfectly
     // good commands. Only genuine <S S="Error"> records may count against Success.
+    // D-8 flipped this test's precondition: progress used to reach Stderr as ~600 characters of
+    // CLIXML on every call. The preamble now suppresses it at the source. The CLIXML decoding this
+    // test used to exercise incidentally is covered properly by ClixmlStderrTests.
     [Fact]
-    public async Task RunAsync_progress_records_on_stderr_do_not_fail_the_command()
+    public async Task RunAsync_progress_output_is_suppressed()
     {
         using var svc = new PowerShellService(NullLogger.Instance);
         var result = await svc.RunAsync("Write-Progress -Activity 'probe' -Status 'working'; 'clean'");
 
-        result.Stderr.Should().Contain("progress", "the test must actually exercise the CLIXML path");
+        result.Stderr.Should().BeEmpty("progress output has no console to draw on and must not reach the model");
         result.Success.Should().BeTrue("a progress record is not an error");
         result.Errors.Should().BeEmpty();
+        result.Stdout.Trim().Should().Be("clean");
+    }
+
+    // Layer 2 on its own: even when a script re-enables progress, the records are dropped in the
+    // decoder rather than shipped as XML.
+    [Fact]
+    public async Task RunAsync_progress_re_enabled_by_the_script_is_still_dropped()
+    {
+        using var svc = new PowerShellService(NullLogger.Instance);
+        var result = await svc.RunAsync(
+            "$ProgressPreference='Continue'; Write-Progress -Activity 'probe' -Status 'working'; 'clean'");
+
+        result.Stderr.Should().NotContain("<Objs").And.NotContain("progress");
+        result.Success.Should().BeTrue();
         result.Stdout.Trim().Should().Be("clean");
     }
 
@@ -104,6 +121,9 @@ public class PowerShellServiceTests
         result.Success.Should().BeTrue("a warning is not an error");
         result.Errors.Should().BeEmpty();
         result.Stdout.Trim().Should().Be("warned");
+
+        // D-8: the warning survives as readable text, not as the CLIXML the host emits.
+        result.Stderr.Should().Contain("careful").And.NotContain("<Objs");
     }
 
     [Fact]

@@ -7,8 +7,9 @@
 HTTP transport + background-jobs work. SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
-This is the working list of everything upstream can do that this server cannot (plus eight
-defects: D-1…D-4 from the original comparison, D-5…D-8 added later under rule 4). Each item
+This is the working list of everything upstream can do that this server cannot (plus nine
+defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 — **all nine are
+now fixed**; section A is the next work). Each item
 carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
 implementation sketch, files to touch, tests, and a "done when" bar.
@@ -55,10 +56,11 @@ function names are the stable anchor.
 | D-2 | `interact_element` missing click / focus / type | P1 | S | D-3 | ☑ |
 | D-3 | Cursor placement wrong on secondary monitors | P1 | S | — | ☑ |
 | D-4 | `assert_element` advertises `value` / `focused` but implements neither | P2 | S | — | ☑ |
-| D-5 | `find_element(kind=any)` / `wait_for` fail on the first stale element; whole-desktop walk | P1 | S | — | ☐ |
-| D-6 | `find_element(kind=interactive)` excludes Edit, ComboBox, ListItem, TabItem, … | P2 | S | — | ☐ |
-| D-7 | `find_element` / `wait_for` return off-screen elements by default | P2 | S | D-5 | ☐ |
-| D-8 | `powershell` ships the CLIXML progress stream to the model on every call | P2 | S | — | ☐ |
+| D-5 | `find_element(kind=any)` / `wait_for` fail on the first stale element; whole-desktop walk | P1 | S | — | ☑ |
+| D-6 | `find_element(kind=interactive)` excludes Edit, ComboBox, ListItem, TabItem, … | P2 | S | — | ☑ |
+| D-7 | `find_element` / `wait_for` return off-screen elements by default | P2 | S | D-5 | ☑ |
+| D-8 | `powershell` ships the CLIXML progress stream to the model on every call | P2 | S | — | ☑ |
+| D-9 | `job output` still returns raw CLIXML on stderr | P3 | S | D-8 | ☑ |
 | A-1 | Whole-desktop window inventory | P1 | M | — | ☐ |
 | A-2 | Desktop-wide labeled interactive-element snapshot | P1 | L | A-1 | ☐ |
 | A-3 | Scrollable regions with scroll percentages | P2 | S | A-2 | ☐ |
@@ -103,9 +105,7 @@ function names are the stable anchor.
 | S-9 | Claude Desktop Extension (`.mcpb`) + registry `server.json` | P3 | M | — | ☐ |
 | S-10 | Per-tool black-box tester skill | P3 | S | — | ☐ |
 
-**Suggested order.** D-1 … D-4 are done. Next D-5 → D-7 → D-6 as one PR (all three edit
-`FindElementAsync`, and `wait_for` is unusable until D-5 lands), then D-8 (independent, an hour,
-pays for itself on the first day). Then the
+**Suggested order.** **All defects (D-1 … D-9) are done** — the D section is closed. Next the
 screenshot cluster (A-7, A-9, A-8, A-11) because every agent loop starts with a screenshot.
 Then A-1 → A-2 → A-4, which unlock B-6, B-8, B-10, A-3, A-6. Quick wins B-5, B-1, B-2, B-3,
 C-2, C-7, S-8, S-1 can be interleaved anywhere. A-5, A-12, S-4 last.
@@ -224,7 +224,7 @@ or drop `value` from the description. Either way put the observed state in the `
 ---
 
 ### D-5 — `find_element(kind=any)` and `wait_for` fail on the first stale element  `P1 · S`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/D-5-find-path-resilience.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Found 2026-09-04 in use**, not by the upstream comparison — logged under rule 4. `kind=any`
 errored twice on a busy desktop while `text` and `interactive` worked; reproduced the same day on
@@ -258,9 +258,13 @@ the `TreeElementBudget` (A-4). A dead element costs one node, never the call.
   Win32 window's element answers reads with defaults (ControlType Pane, ProcessId 0) rather than
   throwing, so the walker must not rely on an exception alone.
 - Scope the walk: `scope` = `foreground` (default: `GetForegroundRoot()`, the root `get_state`
-  already uses and the window the agent is acting on) | `desktop` on `find_element` and
+  already uses and the window the agent is acting on) | `window` (a `window` title, matched
+  exact-then-substring against the top-level windows' UIA names) | `desktop` on `find_element` and
   `wait_for`. `desktop` walks the desktop's top-level children one window at a time, each in its
   own try/catch, so a window closing mid-walk drops out instead of killing the search.
+  **Scope added 2026-09-04 at the user's request** (rule 4: recorded, not silent): `window` makes a
+  multi-step workflow deterministic when focus moves, and takes over B-6's `window_name` filter
+  — see the design note.
 - Push the kind filter into the UIA condition where it can be (`ConditionFactory.ByControlType`
   OR-ed for `text` / `interactive`, `TrueCondition` for `any` / `scrollable`) so the provider
   marshals fewer elements; `Name` still has to be read client-side (UIA has no "contains").
@@ -288,7 +292,7 @@ the STA worker is not held for a whole-desktop walk unless asked.
 ---
 
 ### D-6 — `find_element(kind=interactive)` excludes Edit, ComboBox, ListItem, TabItem, RadioButton, Slider, TreeItem  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/D-6-interactive-control-types.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Ours today.** `MatchesKind` (`Services/UIAutomationService.cs`):
 `Interactive => Button | CheckBox | Hyperlink | MenuItem`. Edit, ComboBox, ListItem, TabItem,
@@ -325,7 +329,7 @@ items; the set matches upstream's and is stated in the description.
 ---
 
 ### D-7 — `find_element` and `wait_for` return off-screen elements by default  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/D-7-offscreen-filter.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Ours today.** `FindElementAsync` has no `IsOffscreen` filter; `ToInfo` reports the flag and
 leaves it to the caller. Observed 2026-09-04: 18 of 21 `kind=text` hits were `IsOffscreen: true`
@@ -359,7 +363,7 @@ the filter; `include_offscreen=true` restores today's behaviour.
 ---
 
 ### D-8 — `powershell` ships the CLIXML progress stream to the model on every call  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/D-8-powershell-clixml-stderr.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Not an upstream-parity item** — logged here (rule 4) because it is the highest token-ROI fix on
 the most-used tool. Related: C-6 touches the same service; do D-8 first or together.
@@ -405,6 +409,39 @@ real-process test that `Write-Warning 'careful'` yields `Stderr` containing `car
 **Done when.** A `powershell` call that triggers module first-use returns `Stderr: ""`; a
 `Write-Warning` arrives as text; `Errors[]` and `Success` semantics are unchanged; the response for
 `'hi'` is under 200 bytes.
+
+---
+
+### D-9 — `job output` still returns raw CLIXML on stderr  `P3 · S`
+- [x] Done 2026-09-04 — [design note](design/D-9-job-clixml-stderr.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
+
+**Found while implementing [D-8](design/D-8-powershell-clixml-stderr.md)** — logged under rule 4
+rather than widening D-8.
+
+**Ours today.** D-8 gave `PowerShellService` a whole-stream `ClixmlStderr.Decode`, and put
+`$ProgressPreference='SilentlyContinue'` in `PowerShellInvocation`'s preamble — which background
+jobs share, so the bulk of the noise is gone for them too. But `JobService` pumps stderr
+incrementally into a `BoundedTextBuffer` and serves a `Tail(n)` of it, so it has no whole document
+to parse and a tail can cut a CLIXML record in half. A job whose script re-enables progress, or
+that writes warnings/verbose, still returns raw `<Objs>` XML from `job output`.
+
+**Sketch.** Either decode at job **completion** (the full stream is known then, and `job output` on
+a finished job is the common case), or a streaming line filter that drops `<Obj S="progress">`
+spans as they arrive. The first is simpler and covers the case that matters; the second also helps
+`job output` on a still-running job.
+
+**As landed:** both, via a third trick. Decode once in `MonitorAsync` (before the state flips to a
+terminal value, so no reader sees a finished job with raw XML), rewriting the buffer through a new
+`BoundedTextBuffer.ReplaceAll` so `Tail`/`Length`/`TrimmedChars` stay consistent at no per-read
+cost; and decode a copy on read while a job is **running**, which works because `ClixmlStderr` now
+retries on everything up to the last `</Objs>` and drops a trailing partial document. A stream with
+no complete document still passes through raw.
+
+**Touches.** `Services/JobService.cs`, `tests/.../Services/JobServiceTests.cs`,
+`docs/architecture/COMPONENTS.md` (JobService bullets).
+
+**Done when.** `job output` on a finished job that emitted warnings returns prefixed text, not
+`<Objs`; a running job's tail is no worse than today.
 
 ---
 
@@ -835,6 +872,9 @@ returns elapsed + attempts + a detail string; raises `TimeoutError` with the las
 (`tools/input.py` `_matches_wait_condition`, `_validate_wait_for_args`).
 
 **Ours.** `wait_for(text, timeout_ms, interval_ms)` — element-name text only, foreground only.
+**Scope note:** the `window_name` filter is delivered by [D-5](design/D-5-find-path-resilience.md)
+(`scope=foreground|window|desktop` on both `find_element` and `wait_for`); B-6 keeps the
+`condition` enum and `use_dom`. Do not build the filter twice.
 
 **Sketch.** `condition` enum + `window_title` filter + `use_dom` (A-5); evaluate against the A-2
 snapshot (cheaper: A-1 window list for `active_window`); return

@@ -2,6 +2,56 @@
 
 ### Fixed
 
+- **`find_element` and `wait_for` survive a stale element, and can be pinned to one window**
+  (parity D-5). The find path walked the whole desktop in one `FindAllDescendants` and read
+  `Name` / `ControlType` / bounds **unguarded**, so a single element that died between the walk and
+  the read — a fading tooltip, a closing menu, a virtualised row — failed the entire call
+  (`find_element(kind:"any")` errored on a busy desktop while `kind:"text"` worked). Every read is
+  now guarded and each element is evaluated inside a catch: a dead element is skipped, never fatal.
+  New `scope` parameter — **`foreground` is now the default** (behaviour change: the old implicit
+  scope was the whole desktop, which is what made the tool slow and fragile), `window` with a
+  `window` title pins a multi-step workflow to one window regardless of what steals focus (matched
+  exact-then-substring on the window's UIA name; an unmatched title lists the open windows), and
+  `desktop` restores the old whole-desktop walk. The kind filter is pushed into a UIA `OrCondition`
+  so the provider marshals fewer elements. `wait_for` gained `kind`/`scope`/`window`, re-resolves
+  the window on every poll (so it doubles as "wait for that app to open"), **retries a poll that
+  throws** instead of ending the wait on the first transient failure, polls at least once
+  (`timeout_ms: 0` now means "check now"), and throws rather than reporting a misleading `null`
+  when *every* poll failed. The retry loop is a pure `PollAsync` with unit tests.
+- **`find_element(kind:"interactive")` sees inputs, dropdowns, list rows, tabs and sliders**
+  (parity D-6). The filter was four control types (Button, CheckBox, Hyperlink, MenuItem), so a text
+  box was not "interactive" — the Claude Code prompt box is an `Edit` and could not be found that
+  way. Replaced with upstream's `INTERACTIVE_CONTROL_TYPE_NAMES` plus `Document` (17 types, pinned
+  by a test and spelled out in the tool description). Upstream's `TextBox` is omitted — no such UIA
+  control type; it is `Edit`, already in the set.
+- **`find_element` and `wait_for` no longer return off-screen elements by default** (parity D-7).
+  Measured on a normal desktop, 18 of 21 `kind:"text"` hits were `IsOffscreen` — and because the
+  20-result cap ran *before* any filtering the caller could do, on-screen matches were crowded out
+  of the results entirely. Off-screen elements and empty bounds are now dropped **before** the cap;
+  `wait_for` can no longer succeed on an element that has not been shown yet. `include_offscreen:true`
+  restores the old behaviour. Upstream's `Edit` exception is kept: an `Edit` with real bounds stays
+  in the results, because Chromium/WebView2 over-report it as off-screen while it is still the
+  right target for `type`.
+- **Background jobs decode their CLIXML stderr too** (D-9, the leftover D-8 deliberately left
+  open). `JobService` pumps stderr into a bounded buffer as chars arrive, so it never had a whole
+  document to decode and `job output` still returned raw `<Objs>` XML for a job that wrote a warning
+  or re-enabled progress. Now decoded **once** when the job finishes — in the monitor, before the
+  state flips to a terminal value, so no reader can see a finished job together with raw XML — via a
+  new `BoundedTextBuffer.ReplaceAll`, which keeps `job status`'s `StderrChars` agreeing with what
+  `job output` returns at no per-read cost. A *running* job's stderr is decoded on read, which works
+  because `ClixmlStderr` now retries on everything up to the last `</Objs>` and drops a trailing
+  partial document (that also helps the foreground tool when a child is killed mid-flush). A stream
+  with no complete document still passes through raw, so this can never swallow non-CLIXML output.
+- **`powershell` no longer ships the CLIXML progress stream to the model** (D-8). Windows PowerShell
+  5.1 wraps every non-stdout stream in CLIXML when stderr is redirected, so each call carried
+  ~0.6–3 KB of XML the model read and ignored (measured: a one-liner with one `Write-Progress`
+  produced 596 characters of it). Two layers: `$ProgressPreference='SilentlyContinue'` in the
+  invocation preamble kills it at the source — shared with background jobs, and a welcome speed-up
+  for `Invoke-WebRequest`/`Invoke-RestMethod` — and the new `ClixmlStderr` decoder turns whatever
+  remains into readable text (`WARNING: careful`), dropping progress records even when a script
+  re-enables them. Non-CLIXML and unparseable CLIXML pass through raw. `Errors[]`, `Success` and
+  the `PSResult` shape are unchanged; `ExtractErrors` now shares the same parser so the two cannot
+  drift.
 - **Stripped host environment no longer breaks child processes.** Claude Desktop (1.46) launches
   stdio servers with ~18 variables and `PATHEXT=.CPL`, so the `powershell` tool could not resolve
   `git`, `winget`, `dotnet`, `wsl` (no `.EXE` in the search list) and `docker mcp` panicked on a

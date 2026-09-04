@@ -132,13 +132,13 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `GetState` | `()` | Full UI element tree of the foreground app |
-| `FindElement` | `(string text, string kind="any")` | Find elements by text; kind: any/interactive/text/scrollable |
+| `FindElement` | `(string text, string kind="any", string scope="foreground", string? window=null, bool include_offscreen=false)` | Find elements whose name contains `text`; kind: any/interactive/text/scrollable; scope: foreground (default) / window (needs `window`) / desktop; off-screen elements dropped unless `include_offscreen`; ≤20 matches, capped after filtering |
 | `GetElement` | `(string element_id)` | Properties of a specific element by ID |
 | `GetText` | `(string element_id)` | Extract text content (faster than OCR) |
 | `AssertElement` | `(string element_id, string state, string? expected=null)` | exists / enabled / checked / visible / focused / value (needs `expected`); returns `PASS` or `FAIL: <state> — observed <what was found>` |
 | `InteractElement` | `(string element_id, string action, string? value=null)` | click / invoke / toggle / select / focus / type via UIA patterns, with a physical click or keyboard fallback; returns `InteractResult` JSON naming what fired |
 | `GetTable` | `(string element_id)` | Extract grid/table data via `GridPattern` |
-| `WaitFor` | `(string text, int timeout_ms=10000, int interval_ms=500)` | Poll until element appears |
+| `WaitFor` | `(string text, int timeout_ms=10000, int interval_ms=500, string kind="any", string scope="foreground", string? window=null, bool include_offscreen=false)` | Poll `find_element` until a match appears; same filters; a failed poll is retried, and if every poll failed it errors instead of reporting `null` |
 
 ---
 
@@ -373,7 +373,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IAudioService` | `GetAsync` → `AudioState`, `SetVolumeAsync`, `SetMutedAsync` |
 | `IPowerShellService` | `RunAsync(command)` → `PSResult` |
 | `IJobService` | `StartAsync(command)`, `GetStatus(id)`, `GetOutput(id, tailChars)`, `Cancel(id)`, `List()` |
-| `IUIAutomationService` | `GetStateAsync`, `FindElementAsync`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync` → `AssertResult`, `InteractAsync` → `InteractResult`, `GetTableAsync`, `WaitForAsync`, `FocusAsync` |
+| `IUIAutomationService` | `GetStateAsync`, `FindElementAsync(text, kind, scope, windowTitle, includeOffscreen)`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync` → `AssertResult`, `InteractAsync` → `InteractResult`, `GetTableAsync`, `WaitForAsync(text, timeoutMs, intervalMs, kind, scope, windowTitle, includeOffscreen)`, `FocusAsync` |
 | `IFileSystemService` | `ReadTextAsync`, `ReadBytesAsync`, `WriteTextAsync`, `CopyAsync`, `MoveAsync`, `DeleteAsync`, `ListAsync`, `SearchAsync`, `GetInfoAsync`, `HashFileAsync`, `ZipAsync`, `UnzipAsync` |
 | `IFileStreamService` | `GetStreamsAsync(path)` → `FileStreamsDto` (alternate data streams + reparse target) |
 | `IRegistryService` | `GetAsync`, `SetAsync`, `EnumerateValuesAsync`, `EnumerateSubKeysAsync` |
@@ -413,7 +413,7 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 21 f
 |------|-----------|
 | `InputDtos.cs` | `ClickResult`, `DragResult`, `TypeResult`, `MouseButton` (enum) |
 | `ScreenDtos.cs` | `ScreenRegion`, `ScreenshotResult`, `ImageFormat` (enum) |
-| `UIAutomationDtos.cs` | `ElementInfo`, `Bounds`, `ElementTree`, `FindElementResult`, `FindKind` (enum), `TableData`, `InteractResult`, `AssertResult` |
+| `UIAutomationDtos.cs` | `ElementInfo`, `Bounds`, `ElementTree`, `FindElementResult`, `FindKind` (enum), `FindScope` (enum), `TableData`, `InteractResult`, `AssertResult` |
 | `WindowDtos.cs` | `WindowAction`, `MonitorInfo` |
 | `ProcessDtos.cs` | `ProcessDto`, `ProcessDetailDto`, `ModuleInfo`, `ProcessLineageDto`, `ProcessGroupDto` |
 | `PowerShellDtos.cs` | `PSResult` (success, stdout, stderr, exit code, parsed errors) |
@@ -451,9 +451,9 @@ public record AudioState(int Level, bool Muted);
 
 Uses **FlaUI.UIA3** to walk the Windows Accessibility (UIA3) tree:
 - `GetStateAsync()` — builds a three-level `ElementTree` rooted at the foreground window (falls back to the focused element, then the desktop); every element gets a cached `el_N` id
-- `FindElementAsync()` — searches by name/value with optional kind filter
+- `FindElementAsync()` — walks one window root at a time (foreground by default; `scope=window` resolves a title exact-then-substring against the top-level windows and names the open windows when nothing matches; `scope=desktop` walks them all). Every property read is guarded and each element is evaluated inside a catch, so an element that dies mid-walk is skipped rather than failing the call; the kind filter is pushed into a UIA `OrCondition` for descendants and applied client-side to the root. `kind=interactive` is upstream's control-type set plus `Document` (`InteractiveControlTypes`). Off-screen elements and empty bounds are dropped before the 20-result cap unless `includeOffscreen` — an `Edit` with real bounds is kept either way, because browsers over-report it as off-screen
 - `InteractAsync()` — click / invoke / toggle / select / focus / type. Each acts through a UIA pattern (Invoke, SelectionItem, Toggle, Value) or a physical fallback via `IInputService` (a click at the element's centre; keyboard entry when there is no writable ValuePattern) and returns an `InteractResult` naming what fired; an unsupported pattern throws `NotSupportedException` with the control type — never a silent no-op. `FocusAsync()` sets keyboard focus
-- `WaitForAsync()` — polls at `interval_ms` until element appears or `timeout_ms` elapses
+- `WaitForAsync()` — polls `FindElementAsync` (same kind/scope/window/off-screen filters, the window re-resolved each poll) via the pure `PollAsync` loop: polls at least once, retries a poll that throws, clamps the sleep to the remaining budget, returns `null` when clean polls found nothing, and throws `TimeoutException` when *every* poll failed
 - `GetTableAsync()` — reads cells via `IGridPattern`
 - `AssertElementAsync()` — exists / enabled / checked / visible / focused / value (`expected`: ordinal match against the ValuePattern value, else the Name — the same read as `get_text`); returns `AssertResult` with the observed state (focus owner, actual value, toggle state). A stale element (ProcessId 0, or UIA_E_ELEMENTNOTAVAILABLE / an RPC failure on a read — `IsElementGone`) fails with `element no longer available` instead of throwing; optional properties a provider omits (modern Notepad's document has no `IsOffscreen`) fall back to UIA's defaults
 
@@ -472,8 +472,15 @@ Executes foreground PowerShell via `System.Diagnostics.Process` (system `powersh
   (started **after** the gate is acquired, so it bounds execution rather than queue-wait)
   tears down runaway scripts by killing the whole process tree
 - Builds the invocation via the shared `PowerShellInvocation` helper: `-EncodedCommand`
-  (base64 UTF-16LE, UTF-8 console-encoding preamble) with a temp-`.ps1` `-File` fallback for
-  oversized scripts; stdin is redirected and closed so the child cannot eat MCP protocol bytes
+  (base64 UTF-16LE, two-line preamble — UTF-8 console encoding, then
+  `$ProgressPreference='SilentlyContinue'`) with a temp-`.ps1` `-File` fallback for oversized
+  scripts; stdin is redirected and closed so the child cannot eat MCP protocol bytes
+- `Stderr` is decoded through `ClixmlStderr`: Windows PowerShell 5.1 wraps every non-stdout stream
+  in CLIXML when stderr is redirected, so progress records are dropped and error/warning/verbose/
+  debug records become stream-prefixed text (`WARNING: careful`). Non-CLIXML and unparseable CLIXML
+  pass through raw — losing output is worse than a blob
+- `Errors[]` still holds only the `<S S="Error">` records (they alone decide `Success`), extracted
+  through the same `ClixmlStderr` parser so the two cannot drift
 - Returns `PSResult(Success, Stdout, Stderr, ExitCode, Errors)` to callers
 
 ### `JobService`
@@ -487,6 +494,11 @@ Background PowerShell jobs (`powershell background:true` + the `job` tool):
   (`completed`/`failed` by exit code otherwise)
 - Stdout/stderr are pumped into `BoundedTextBuffer`s (~1 MB/stream, oldest chars trimmed,
   trim counters surfaced); the ~32 most recent finished jobs are retained, oldest evicted
+- Stderr is decoded from CLIXML like the foreground tool's: **once** when the job finishes (in the
+  monitor, before the state flips to a terminal value, rewriting the buffer via
+  `BoundedTextBuffer.ReplaceAll` so `Tail`/`Length`/`TrimmedChars` stay consistent), and on read
+  while a job is still running — `ClixmlStderr` drops a trailing partial document, so a mid-flush
+  read still decodes the records that are complete. Stdout is never CLIXML and is left alone
 - Registry pattern mirrors `WatchService`: `Dictionary` + lock, sequential ids (`j1`, `j2`…),
   forgiving unknown-id semantics
 

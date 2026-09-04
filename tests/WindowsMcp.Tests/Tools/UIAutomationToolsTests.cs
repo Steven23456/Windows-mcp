@@ -16,7 +16,7 @@ public class UIAutomationToolsTests
         var element = new ElementInfo("el-1", "Submit", "Button", true, false,
             new Bounds(10, 20, 100, 30), null, null, null);
         var mock = new Mock<IUIAutomationService>();
-        mock.Setup(s => s.FindElementAsync("Submit", FindKind.Interactive, It.IsAny<CancellationToken>()))
+        mock.Setup(s => s.FindElementAsync("Submit", FindKind.Interactive, FindScope.Foreground, null, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FindElementResult(new[] { element }));
         var tools = new UIAutomationTools(mock.Object);
 
@@ -73,6 +73,100 @@ public class UIAutomationToolsTests
         var tools = new UIAutomationTools(mock.Object);
 
         (await tools.AssertElement("el-1", "enabled")).Should().Be("PASS");
+        mock.VerifyAll();
+    }
+
+    // ---- D-5 / D-7: scope, window target, and the off-screen flag reach the service ------------
+
+    [Fact]
+    public async Task FindElement_defaults_to_the_foreground_window_and_drops_offscreen()
+    {
+        var mock = new Mock<IUIAutomationService>();
+        mock.Setup(s => s.FindElementAsync("Save", FindKind.Any, FindScope.Foreground, null, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FindElementResult(Array.Empty<ElementInfo>()));
+        var tools = new UIAutomationTools(mock.Object);
+
+        await tools.FindElement("Save");
+
+        mock.VerifyAll();
+    }
+
+    [Fact]
+    public async Task FindElement_forwards_window_scope_with_its_title()
+    {
+        var mock = new Mock<IUIAutomationService>();
+        mock.Setup(s => s.FindElementAsync("Save", FindKind.Any, FindScope.Window, "Notepad", false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FindElementResult(Array.Empty<ElementInfo>()));
+        var tools = new UIAutomationTools(mock.Object);
+
+        await tools.FindElement("Save", scope: "window", window: "Notepad");
+
+        mock.VerifyAll();
+    }
+
+    [Fact]
+    public async Task FindElement_forwards_desktop_scope_and_include_offscreen()
+    {
+        var mock = new Mock<IUIAutomationService>();
+        mock.Setup(s => s.FindElementAsync("", FindKind.Text, FindScope.Desktop, null, true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FindElementResult(Array.Empty<ElementInfo>()));
+        var tools = new UIAutomationTools(mock.Object);
+
+        await tools.FindElement("", "text", scope: "desktop", include_offscreen: true);
+
+        mock.VerifyAll();
+    }
+
+    [Fact]
+    public async Task FindElement_rejects_unknown_scope_with_clear_message()
+    {
+        var tools = new UIAutomationTools(new Mock<IUIAutomationService>().Object);
+        Func<Task> act = () => tools.FindElement("text", scope: "everywhere");
+        await act.Should().ThrowAsync<ArgumentException>().WithMessage("*everywhere*");
+    }
+
+    // A window title only means something with scope=window. Rejecting the mismatch rather than
+    // ignoring the argument is the D-4 `expected` rule.
+    [Fact]
+    public async Task FindElement_rejects_window_scope_without_a_title()
+    {
+        var tools = new UIAutomationTools(new Mock<IUIAutomationService>().Object);
+        Func<Task> act = () => tools.FindElement("text", scope: "window");
+        await act.Should().ThrowAsync<ArgumentException>().WithMessage("*requires window*");
+    }
+
+    [Fact]
+    public async Task FindElement_rejects_a_window_title_with_another_scope()
+    {
+        var tools = new UIAutomationTools(new Mock<IUIAutomationService>().Object);
+        Func<Task> act = () => tools.FindElement("text", scope: "desktop", window: "Notepad");
+        await act.Should().ThrowAsync<ArgumentException>().WithMessage("*only used with scope=window*");
+    }
+
+    [Fact]
+    public async Task WaitFor_forwards_kind_scope_window_and_offscreen()
+    {
+        var element = new ElementInfo("el-9", "Ready", "Text", true, false, new Bounds(0, 0, 5, 5), null, null, null);
+        var mock = new Mock<IUIAutomationService>();
+        mock.Setup(s => s.WaitForAsync("Ready", 2000, 100, FindKind.Text, FindScope.Window, "Notepad", false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(element);
+        var tools = new UIAutomationTools(mock.Object);
+
+        var result = await tools.WaitFor("Ready", 2000, 100, "text", "window", "Notepad");
+
+        result.Should().Contain("el-9");
+        mock.VerifyAll();
+    }
+
+    [Fact]
+    public async Task WaitFor_renders_null_on_timeout()
+    {
+        var mock = new Mock<IUIAutomationService>();
+        mock.Setup(s => s.WaitForAsync("Ready", 10000, 500, FindKind.Any, FindScope.Foreground, null, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ElementInfo?)null);
+        var tools = new UIAutomationTools(mock.Object);
+
+        (await tools.WaitFor("Ready")).Should().Be("null");
         mock.VerifyAll();
     }
 }

@@ -27,7 +27,10 @@ public sealed class ShellTools
 
     [McpServerTool, Description(
         "Execute a PowerShell command and return the result including stdout, stderr, and exit " +
-        "code. Long-running foreground calls emit MCP progress heartbeats every 10s so " +
+        "code. Progress output is suppressed (there is no console to draw a progress bar on) and " +
+        "the warning/verbose/debug streams arrive as prefixed text ('WARNING: careful'), not the " +
+        "CLIXML the host emits when stderr is redirected. Long-running foreground calls emit MCP " +
+        "progress heartbeats every 10s so " +
         "spec-compliant clients reset their request timeout (foreground execution backstop: 15 " +
         "min). For commands longer than that — installers, DISM, bulk hashes — pass " +
         "background:true to run it as a job instead: returns {Id, Pid, State} immediately, then " +

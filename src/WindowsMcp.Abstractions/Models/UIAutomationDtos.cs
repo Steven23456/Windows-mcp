@@ -19,6 +19,15 @@ public record FindElementResult(ElementInfo[] Matches);
 
 public enum FindKind { Interactive, Text, Scrollable, Any }
 
+/// <summary>
+/// Which part of the UI tree <c>find_element</c> / <c>wait_for</c> walk (checklist D-5).
+/// <see cref="Foreground"/> is the default: the window the agent is acting on, resolved at call
+/// time. <see cref="Window"/> pins the search to one window by title so a multi-step workflow is
+/// unaffected by focus moving. <see cref="Desktop"/> walks every top-level window — what the tool
+/// did implicitly before D-5, and the reason one stale element could fail the whole call.
+/// </summary>
+public enum FindScope { Foreground, Window, Desktop }
+
 public record TableData(string[] Headers, string[][] Rows);
 
 /// <summary>
