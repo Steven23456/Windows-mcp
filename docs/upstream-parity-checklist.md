@@ -7,7 +7,7 @@
 HTTP transport + background-jobs work. SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
-This is the working list of everything upstream can do that this server cannot (plus three
+This is the working list of everything upstream can do that this server cannot (plus four
 defects the comparison exposed). Each item carries enough context to write a
 design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an

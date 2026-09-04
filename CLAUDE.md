@@ -22,7 +22,9 @@ MCP protocol  →  Tool classes  →  Service abstractions  →  Service impleme
   the MCP server over stdio (default) or HTTP. `Hosting/WindowsMcpHost.cs` registers every
   service as a singleton and holds the MCP wiring both transports share (`AddWindowsMcp`) plus
   the Kestrel host factory (`BuildHttpApp`); `Hosting/CertificateLocator.cs` resolves
-  `--cert-thumbprint`. `Tools/*.cs` are the tool surface; `Services/*.cs` are the implementations.
+  `--cert-thumbprint`; `Hosting/EnvironmentRepair.cs` runs first in `Main` and repairs a
+  host-stripped environment (`PATHEXT`, `ProgramData`, missing `Path`) before anything spawns a
+  child. `Tools/*.cs` are the tool surface; `Services/*.cs` are the implementations.
 - **`src/WindowsMcp.Abstractions/`** — `IXxxService` interfaces (one per file) and DTO records
   under `Models/`. Tools and services depend on these interfaces (testability).
 - **`tests/WindowsMcp.Tests/`** — xUnit + Moq + FluentAssertions.
@@ -132,7 +134,8 @@ build step before install or a changed manifest (see `todo.md`).
 - **COM vtable gaps:** when declaring COM interfaces, use `_VtblGap1_N()` to skip unused slots,
   or declare only the leading methods you call (an `InterfaceIsIUnknown` interface binds declared
   methods from vtable slot 3). Never stub later methods with guessed signatures — silent stack
-  corruption. See `ShortcutResolver.cs` (IShellLink/IPersistFile) and the audio service.
+  corruption. See `ShortcutResolver.cs` (IShellLink/IPersistFile) — currently the only COM
+  interface declarations in `src/`.
 - **Native interop** for the startup report: `AuthenticodeInspector` (WinVerifyTrust, catalog-
   aware), `LspEnumerator` (`WSCEnumProtocols`), `ShortcutResolver` (IShellLink). Catalog-aware
   trust matters — most Windows components are catalog-signed, not embedded-signed.

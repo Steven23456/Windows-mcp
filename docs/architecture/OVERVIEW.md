@@ -87,8 +87,8 @@ Windows-MCP exposes **64 MCP tools** across 19 tool classes:
 | `Drag` | Drag from one point to another |
 | `Hover` | Hover cursor at coordinates with optional duration |
 | `Type` | Type a string into the focused input |
-| `Key` | Press a single key by name (Enter, Tab, F1-F12, arrows, etc.) |
-| `Shortcut` | Press a keyboard shortcut (e.g., `ctrl+c`, `alt+tab`) |
+| `Key` | Press one key: a character (`a`, `7`, `/`), `f1`-`f24`, or a name (enter, tab, esc, arrows, win, printscreen, …) |
+| `Shortcut` | Press a chord (`ctrl+c`, `ctrl+shift+s`, `win+r`); a single key such as `win` also works |
 | `Scroll` | Scroll the mouse wheel (up/down/left/right) |
 | `Clipboard` | Get or set clipboard text |
 
@@ -98,10 +98,10 @@ Windows-MCP exposes **64 MCP tools** across 19 tool classes:
 | `GetState` | Capture the UI element tree of the foreground window (three levels deep) |
 | `FindElement` | Find elements whose name/value contains text (kind: any / interactive / text / scrollable) |
 | `GetElement` | Get properties of a specific UI element by id |
-| `InteractElement` | Toggle, select, or invoke a UI element by id |
+| `InteractElement` | Act on a UI element by id: click / invoke / toggle / select / focus / type, through the UIA pattern or a physical fallback; returns which one fired |
 | `GetText` | Extract text content from a UI element |
 | `GetTable` | Extract tabular data from a grid/table element |
-| `AssertElement` | Assert element state (exists / enabled / checked / value / visible / focused) with PASS/FAIL result |
+| `AssertElement` | Assert element state (exists / enabled / checked / visible) with PASS/FAIL result; the tool also advertises `value` and `focused`, which are not implemented (parity checklist D-4) |
 | `WaitFor` | Poll until an element whose name/value contains text appears |
 
 ### Window Tools (`WindowTools` — 5 tools)

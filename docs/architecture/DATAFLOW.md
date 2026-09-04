@@ -422,12 +422,13 @@ UIAutomationService.AssertElementAsync(element_id, state)
         │
         ▼
   switch (state)
-  ├─ "exists"  → element != null
+  ├─ "exists"  → true (the id resolved from the cache)
   ├─ "enabled" → element.IsEnabled
-  ├─ "checked" → element.ToggleState == ToggleState.On
-  ├─ "value"   → element.Value != null && element.Value != ""
+  ├─ "checked" → TogglePattern state == ToggleState.On
   ├─ "visible" → !element.IsOffscreen
-  └─ "focused" → element == AutomationElement.FocusedElement
+  └─ anything else → throws "Unknown assertion state"
+       ("value" and "focused" are advertised by the tool
+        description but not implemented — parity item D-4)
         │
         ▼
   return true/false
