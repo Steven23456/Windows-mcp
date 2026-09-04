@@ -14,7 +14,16 @@ public class UIAutomationServiceTests : IClassFixture<NotepadFixture>
 {
     private readonly NotepadFixture _np;
 
-    public UIAutomationServiceTests(NotepadFixture np) => _np = np;
+    // xUnit builds this class once per test, so this hands the desktop back to Notepad before
+    // EVERY test. It matters more since D-5: get_state and the default find scope both root at the
+    // FOREGROUND window, so a test that runs while another app holds the foreground silently
+    // inspects that app instead of Notepad — under a full parallel suite run these tests were
+    // resolving VS Code's document and asserting against it.
+    public UIAutomationServiceTests(NotepadFixture np)
+    {
+        _np = np;
+        _np.BringToForeground();
+    }
 
     private static UIAutomationService NewService() => new(new InputService());
 
@@ -225,39 +234,107 @@ public class UIAutomationServiceTests : IClassFixture<NotepadFixture>
     /// three levels deep, which reaches classic Notepad's Document; modern (XAML) Notepad nests its
     /// RichEditBox deeper, so fall back to a name search, then to any Document/Edit.
     /// </summary>
+
+    // ---- D-5 / D-6 / D-7: the find path, live ------------------------------------------------
+
+    // The regression this whole item was filed for: on a busy desktop one element that dies
+    // between the walk and the property read used to fail the entire call.
+    [Theory]
+    [InlineData(FindScope.Foreground)]
+    [InlineData(FindScope.Desktop)]
+    public async Task FindElementAsync_any_survives_a_busy_desktop(FindScope scope)
+    {
+        using var svc = NewService();
+        for (int i = 0; i < 10; i++)
+        {
+            var result = await svc.FindElementAsync("", FindKind.Any, scope);
+            result.Matches.Should().NotBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task FindElementAsync_window_scope_targets_that_window_by_substring()
+    {
+        using var svc = NewService();
+
+        var scoped = await svc.FindElementAsync("", FindKind.Text, FindScope.Window, "Notepad");
+
+        scoped.Matches.Should().NotBeEmpty("'Notepad' must match 'Untitled - Notepad' by substring");
+    }
+
+    [Fact]
+    public async Task FindElementAsync_unmatched_window_names_the_open_windows()
+    {
+        using var svc = NewService();
+        Func<Task> act = () => svc.FindElementAsync("", FindKind.Any, FindScope.Window, "zzqxv-no-such-window");
+
+        (await act.Should().ThrowAsync<KeyNotFoundException>()).WithMessage("*Open windows:*");
+    }
+
+    // D-6: kind=interactive used to be Button|CheckBox|Hyperlink|MenuItem, so the editor — an Edit
+    // on classic Notepad, a Document on the modern one — was invisible to it. Foreground scope, so
+    // the assertion is about Notepad rather than whichever window the desktop walk reached first.
+    [Fact]
+    public async Task FindElementAsync_interactive_finds_the_editor()
+    {
+        using var svc = NewService();
+
+        var result = await svc.FindElementAsync("", FindKind.Interactive);
+
+        result.Matches.Should().Contain(m => m.ControlType == "Edit" || m.ControlType == "Document");
+    }
+
+    // Regression: the kind filter is pushed into the UIA condition, which only covers DESCENDANTS.
+    // The walk's own roots have to be filtered client-side, or every window Pane counts as a match
+    // for every kind and fills the 20-result cap before any real content is reached.
+    [Fact]
+    public async Task FindElementAsync_interactive_never_returns_a_window_root_pane()
+    {
+        using var svc = NewService();
+
+        var result = await svc.FindElementAsync("", FindKind.Interactive, FindScope.Desktop);
+
+        result.Matches.Should().NotContain(m => m.ControlType == "Pane" || m.ControlType == "Window");
+    }
+
+    // D-7: off-screen elements used to crowd out on-screen ones inside the 20-result cap.
+    [Fact]
+    public async Task FindElementAsync_drops_offscreen_results_by_default()
+    {
+        using var svc = NewService();
+
+        var visible = await svc.FindElementAsync("", FindKind.Text, FindScope.Desktop);
+        var all = await svc.FindElementAsync("", FindKind.Text, FindScope.Desktop, null, includeOffscreen: true);
+
+        visible.Matches.Should().OnlyContain(
+            m => !m.IsOffscreen || m.ControlType == "Edit",
+            "only the documented Edit exception may be off-screen");
+        all.Matches.Length.Should().BeGreaterThanOrEqualTo(visible.Matches.Length);
+    }
+
+    [Fact]
+    public async Task WaitForAsync_returns_text_that_appears_after_the_first_poll()
+    {
+        using var svc = NewService();
+        var id = await FindNotepadDocumentIdAsync(svc);
+        var stamp = $"d5-{Guid.NewGuid():N}"[..10];
+
+        var waiting = svc.WaitForAsync(stamp, timeoutMs: 15000, intervalMs: 250, FindKind.Text);
+        await Task.Delay(500);
+        await svc.InteractAsync(id, "type", stamp);
+
+        (await waiting).Should().NotBeNull("the text appeared while the wait was polling");
+    }
+
     private static async Task<string> FindNotepadDocumentIdAsync(UIAutomationService svc)
     {
-        static ElementInfo? Dfs(ElementTree t)
-        {
-            if (t.Root.ControlType is "Document" or "Edit") return t.Root;
-            foreach (var c in t.Children)
-                if (Dfs(c) is { } hit) return hit;
-            return null;
-        }
-
-        var state = await svc.GetStateAsync();
-        if (Dfs(state) is { } inTree) return inTree.ElementId;
-
-        // Until checklist D-5 lands, FindElementAsync walks the whole desktop with unguarded
-        // property reads and dies on the first stale element (a tooltip or closing menu in any
-        // other process). Retry a few times so that defect does not fail an unrelated test.
-        for (int attempt = 1; ; attempt++)
-        {
-            try
-            {
-                var byName = await svc.FindElementAsync("Text editor", FindKind.Text);
-                if (byName.Matches.Length > 0) return byName.Matches[0].ElementId;
-
-                var any = await svc.FindElementAsync("", FindKind.Text);
-                var doc = any.Matches.FirstOrDefault(m => m.ControlType is "Document" or "Edit")
-                    ?? throw new Xunit.Sdk.XunitException("No Document/Edit element found — is Notepad in the foreground?");
-                return doc.ElementId;
-            }
-            catch (System.Runtime.InteropServices.COMException) when (attempt < 5)
-            {
-                await Task.Delay(200);
-            }
-        }
+        // Resolve the editor inside the NOTEPAD window explicitly (D-5 scope=window) rather than
+        // trusting the foreground: if focus slipped, a foreground-scoped search returns another
+        // app's Document and the test then asserts against the wrong window.
+        var inWindow = await svc.FindElementAsync("", FindKind.Text, FindScope.Window, "Notepad");
+        var doc = inWindow.Matches.FirstOrDefault(m => m.ControlType is "Document" or "Edit")
+            ?? throw new Xunit.Sdk.XunitException("No Document/Edit element in the Notepad window");
+        return doc.ElementId;
     }
 }
 
@@ -316,5 +393,124 @@ public class UIAutomationServiceUnitTests
         var ex = new System.Runtime.InteropServices.COMException("probe", hresult);
         UIAutomationService.IsElementGone(ex).Should().Be(gone);
         UIAutomationService.IsElementGone(new InvalidOperationException()).Should().BeFalse();
+    }
+
+    // ---- D-5: the wait_for retry loop, exercised with a fake poll (no UIA, no desktop) ---------
+
+    private static readonly ElementInfo Hit =
+        new("el_1", "Ready", "Text", true, false, new Bounds(0, 0, 10, 10), null, null, null);
+
+    // THE D-5 headline: before this, the first transient UIA failure ended the wait — the one
+    // thing a wait exists to absorb.
+    [Fact]
+    public async Task PollAsync_keeps_polling_after_a_poll_throws()
+    {
+        var attempts = 0;
+        var result = await UIAutomationService.PollAsync(_ =>
+        {
+            attempts++;
+            if (attempts < 3) throw new System.Runtime.InteropServices.COMException("stale", unchecked((int)0x80040201));
+            return Task.FromResult<ElementInfo?>(Hit);
+        }, timeoutMs: 5000, intervalMs: 1, CancellationToken.None);
+
+        result.Should().BeSameAs(Hit);
+        attempts.Should().Be(3);
+    }
+
+    // "Never managed to look" must not be reported as "looked and did not find it".
+    [Fact]
+    public async Task PollAsync_throws_when_every_poll_failed()
+    {
+        Func<Task> act = () => UIAutomationService.PollAsync(
+            _ => throw new InvalidOperationException("provider exploded"),
+            timeoutMs: 60, intervalMs: 1, CancellationToken.None);
+
+        var thrown = await act.Should().ThrowAsync<TimeoutException>();
+        thrown.WithMessage("*provider exploded*");
+        thrown.And.InnerException.Should().BeOfType<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task PollAsync_returns_null_when_clean_polls_find_nothing()
+    {
+        var result = await UIAutomationService.PollAsync(
+            _ => Task.FromResult<ElementInfo?>(null), timeoutMs: 60, intervalMs: 1, CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    // timeout_ms:0 means "check now", not "do nothing" — the old loop never polled at all.
+    [Fact]
+    public async Task PollAsync_polls_at_least_once_with_a_zero_timeout()
+    {
+        var attempts = 0;
+        var result = await UIAutomationService.PollAsync(
+            _ => { attempts++; return Task.FromResult<ElementInfo?>(null); },
+            timeoutMs: 0, intervalMs: 500, CancellationToken.None);
+
+        attempts.Should().Be(1);
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PollAsync_does_not_sleep_when_the_first_poll_hits()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = await UIAutomationService.PollAsync(
+            _ => Task.FromResult<ElementInfo?>(Hit), timeoutMs: 10000, intervalMs: 5000, CancellationToken.None);
+        sw.Stop();
+
+        result.Should().BeSameAs(Hit);
+        sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public async Task PollAsync_propagates_cancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        Func<Task> act = () => UIAutomationService.PollAsync(
+            _ => Task.FromResult<ElementInfo?>(null), timeoutMs: 5000, intervalMs: 1, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    // ---- D-5: argument rules, decided before any UIA call, so they run headless ---------------
+
+    [Fact]
+    public async Task FindElementAsync_rejects_window_scope_without_a_title()
+    {
+        using var svc = new UIAutomationService(new Mock<IInputService>().Object);
+        Func<Task> act = () => svc.FindElementAsync("x", FindKind.Any, FindScope.Window);
+        await act.Should().ThrowAsync<ArgumentException>().WithMessage("*requires windowTitle*");
+    }
+
+    [Fact]
+    public async Task FindElementAsync_rejects_a_window_title_with_another_scope()
+    {
+        using var svc = new UIAutomationService(new Mock<IInputService>().Object);
+        Func<Task> act = () => svc.FindElementAsync("x", FindKind.Any, FindScope.Desktop, "Notepad");
+        await act.Should().ThrowAsync<ArgumentException>().WithMessage("*only used with scope=window*");
+    }
+
+    // ---- D-6: the interactive set is pinned, so a later edit is a visible diff ----------------
+
+    [Fact]
+    public void InteractiveControlTypes_matches_the_upstream_set_plus_Document()
+    {
+        UIAutomationService.InteractiveControlTypes.Should().BeEquivalentTo(new[]
+        {
+            ControlType.Button, ControlType.ListItem, ControlType.MenuItem, ControlType.Edit,
+            ControlType.CheckBox, ControlType.RadioButton, ControlType.ComboBox, ControlType.Hyperlink,
+            ControlType.SplitButton, ControlType.TabItem, ControlType.TreeItem, ControlType.DataItem,
+            ControlType.HeaderItem, ControlType.Spinner, ControlType.Slider, ControlType.ScrollBar,
+            ControlType.Document,
+        });
+
+        // The four types kind=interactive used to be limited to — the regression D-6 fixes.
+        UIAutomationService.InteractiveControlTypes.Should()
+            .Contain(ControlType.Edit).And.Contain(ControlType.ComboBox).And.Contain(ControlType.ListItem)
+            .And.Contain(ControlType.TabItem).And.Contain(ControlType.RadioButton)
+            .And.Contain(ControlType.Slider).And.Contain(ControlType.TreeItem);
     }
 }
