@@ -83,6 +83,10 @@ The MCP SDK (`ModelContextProtocol.Server`) handles all protocol concerns:
 
 **Critical startup requirements** (handled in `Program.cs` before host build):
 ```csharp
+// First thing in Main: fill in a host-stripped environment (PATHEXT, ProgramData, ...) so every
+// child process we spawn inherits a usable one. Host-set values are never overwritten.
+EnvironmentRepair.Apply();
+
 // stdio mode only: prevent JSON-RPC response buffering on Windows (cp1252 default encoding)
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 Console.InputEncoding = System.Text.Encoding.UTF8;
@@ -111,7 +115,7 @@ public sealed class InputTools
         _clipboard = clipboard;
     }
 
-    [McpServerTool, Description("Click at screen coordinates.")]
+    [McpServerTool, Description("Click at screen coordinates. Coordinates are physical pixels on the virtual desktop: origin = top-left of the primary monitor, so monitors left of / above it have negative values (see multi_monitor for each monitor's bounds).")]
     public async Task<string> Click(int x, int y, string button = "left", int clicks = 1)
         => JsonSerializer.Serialize(await _input.ClickAsync(x, y, ParseButton(button), clicks));
 }
@@ -257,8 +261,8 @@ Windows-mcp.slnx
 ├── src/
 │   ├── WindowsMcp/                        ← Main project
 │   │   ├── WindowsMcp.csproj              (targets net10.0-windows10.0.19041)
-│   │   ├── Program.cs                     (entry: AUMID + DPI setup, parse options, pick transport)
-│   │   ├── Hosting/                       (ServerOptions, WindowsMcpHost, CertificateLocator)
+│   │   ├── Program.cs                     (entry: env repair, AUMID + DPI setup, parse options, pick transport)
+│   │   ├── Hosting/                       (ServerOptions, WindowsMcpHost, CertificateLocator, EnvironmentRepair)
 │   │   ├── Tools/                         (19 tool classes)
 │   │   │   ├── InputTools.cs
 │   │   │   ├── UIAutomationTools.cs

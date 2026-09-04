@@ -34,9 +34,25 @@
   reads it back: a point Windows clamped (off any monitor) throws instead of clicking somewhere
   else. The four mouse tools' descriptions now state the coordinate space. An integration test
   hovers to every monitor's centre and asserts the exact position.
+- **Doc drift after D-1/D-2/D-3 and the environment repair.** `docs/architecture/OVERVIEW.md` still
+  described `interact_element` as "toggle, select, or invoke" and `key` as name-only, and
+  `COMPONENTS.md`'s tool tables said the same; `COMPONENTS.md`'s `Program.cs` startup sequence
+  predated `EnvironmentRepair`, its DTO table was missing `InteractResult`, and its NuGet table
+  said "latest" for pinned versions while omitting `System.ServiceProcess.ServiceController`;
+  `ARCHITECTURE.md` quoted the pre-D-3 `click` description and left `EnvironmentRepair` out of the
+  `Hosting/` file list; `DATAFLOW.md`'s `AssertElement` flow still claimed `value` and `focused`
+  work (they throw — parity item D-4). The item counts in `todo.md` and the parity checklist now
+  say 47 / four defects after D-4 was logged. Tool counts (64 tools, 19 classes, 36 services) were
+  already correct everywhere and are unchanged.
 
 ### Added
 
+- **`docs-agent` subagent (dev infrastructure).** `.claude/agents/docs-agent.md` — an Opus-model
+  Claude Code subagent to run after any change. It derives the facts from the code (tool count and
+  names, tool classes, services, interfaces, DTOs, CLI flags, version lockstep, publish flags) and
+  brings README, `docs/architecture/*`, this changelog's `[Unreleased]`, the windows skill, the
+  parity checklist, design notes, and tool `[Description]` strings back in line; `CLAUDE.md` drift
+  is reported, not edited. It never changes behaviour and never commits.
 - **Background PowerShell jobs** (63 → 64 tools). `powershell` gains `background: true`: instead
   of waiting, it starts the command as a job and returns `{Id, Pid, State}` immediately — the
   right pattern for silent installers, DISM, and anything longer than the foreground backstop.

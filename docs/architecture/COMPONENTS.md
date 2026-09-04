@@ -19,13 +19,17 @@ Parses the command line (`Hosting/ServerOptions`, with `WINDOWSMCP_*` env fallba
 ```csharp
 public static async Task<int> Main(string[] args)
 {
-    // 1. Register AppUserModelID for WinRT toast notifications
+    // 1. Repair a host-stripped environment (PATHEXT, ProgramData, …) before anything spawns a
+    //    child; repaired names are logged to stderr once. Host-set values are never overwritten
+    EnvironmentRepair.Apply();
+
+    // 2. Register AppUserModelID for WinRT toast notifications
     PInvoke.SetCurrentProcessExplicitAppUserModelID("org.windows-mcp.server");
 
-    // 2. Per-Monitor DPI Awareness V2 — physical pixel coordinates on HiDPI
+    // 3. Per-Monitor DPI Awareness V2 — physical pixel coordinates on HiDPI
     PInvoke.SetProcessDpiAwarenessContext(new DPI_AWARENESS_CONTEXT((nint)(-4)));
 
-    // 3. Command line / WINDOWSMCP_* env → ServerOptions (exit 2 + usage on a bad option; --help)
+    // 4. Command line / WINDOWSMCP_* env → ServerOptions (exit 2 + usage on a bad option; --help)
     var options = ServerOptions.Parse(args, Environment.GetEnvironmentVariable);
     return options.IsHttp ? await RunHttpAsync(options) : await RunStdioAsync(args);
 }
@@ -113,8 +117,8 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 | `Drag` | `(int from_x, int from_y, int to_x, int to_y, string button="left")` | Drag between two points |
 | `Hover` | `(int x, int y, int duration_ms=0)` | Hover or move cursor |
 | `Type` | `(string text)` | Type text into focused input |
-| `Key` | `(string key)` | Press a named key |
-| `Shortcut` | `(string shortcut)` | Press a key combo (e.g., `ctrl+c`) |
+| `Key` | `(string key)` | Press one key: a character (`a`, `7`, `/`), `f1`–`f24`, or a name (enter, tab, esc, win, printscreen, …) |
+| `Shortcut` | `(string shortcut)` | Press a chord (`ctrl+c`, `ctrl+shift+s`, `win+r`); a single part such as `win` is a bare key press |
 | `Scroll` | `(int x, int y, string direction, int amount=3)` | Scroll mouse wheel |
 | `Clipboard` | `(string action, string? text=null)` | `get` or `set` clipboard text |
 
@@ -132,7 +136,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 | `GetElement` | `(string element_id)` | Properties of a specific element by ID |
 | `GetText` | `(string element_id)` | Extract text content (faster than OCR) |
 | `AssertElement` | `(string element_id, string state)` | Assert element state; returns `PASS` or `FAIL: <reason>` |
-| `InteractElement` | `(string element_id, string action, string? value=null)` | toggle / select / invoke on an element via UIA patterns |
+| `InteractElement` | `(string element_id, string action, string? value=null)` | click / invoke / toggle / select / focus / type via UIA patterns, with a physical click or keyboard fallback; returns `InteractResult` JSON naming what fired |
 | `GetTable` | `(string element_id)` | Extract grid/table data via `GridPattern` |
 | `WaitFor` | `(string text, int timeout_ms=10000, int interval_ms=500)` | Poll until element appears |
 
@@ -369,7 +373,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IAudioService` | `GetAsync` → `AudioState`, `SetVolumeAsync`, `SetMutedAsync` |
 | `IPowerShellService` | `RunAsync(command)` → `PSResult` |
 | `IJobService` | `StartAsync(command)`, `GetStatus(id)`, `GetOutput(id, tailChars)`, `Cancel(id)`, `List()` |
-| `IUIAutomationService` | `GetStateAsync`, `FindElementAsync`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync`, `InteractAsync`, `GetTableAsync`, `WaitForAsync`, `FocusAsync` |
+| `IUIAutomationService` | `GetStateAsync`, `FindElementAsync`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync`, `InteractAsync` → `InteractResult`, `GetTableAsync`, `WaitForAsync`, `FocusAsync` |
 | `IFileSystemService` | `ReadTextAsync`, `ReadBytesAsync`, `WriteTextAsync`, `CopyAsync`, `MoveAsync`, `DeleteAsync`, `ListAsync`, `SearchAsync`, `GetInfoAsync`, `HashFileAsync`, `ZipAsync`, `UnzipAsync` |
 | `IFileStreamService` | `GetStreamsAsync(path)` → `FileStreamsDto` (alternate data streams + reparse target) |
 | `IRegistryService` | `GetAsync`, `SetAsync`, `EnumerateValuesAsync`, `EnumerateSubKeysAsync` |
@@ -409,7 +413,7 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 21 f
 |------|-----------|
 | `InputDtos.cs` | `ClickResult`, `DragResult`, `TypeResult`, `MouseButton` (enum) |
 | `ScreenDtos.cs` | `ScreenRegion`, `ScreenshotResult`, `ImageFormat` (enum) |
-| `UIAutomationDtos.cs` | `ElementInfo`, `Bounds`, `ElementTree`, `FindElementResult`, `FindKind` (enum), `TableData` |
+| `UIAutomationDtos.cs` | `ElementInfo`, `Bounds`, `ElementTree`, `FindElementResult`, `FindKind` (enum), `TableData`, `InteractResult` |
 | `WindowDtos.cs` | `WindowAction`, `MonitorInfo` |
 | `ProcessDtos.cs` | `ProcessDto`, `ProcessDetailDto`, `ModuleInfo`, `ProcessLineageDto`, `ProcessGroupDto` |
 | `PowerShellDtos.cs` | `PSResult` (success, stdout, stderr, exit code, parsed errors) |
@@ -521,14 +525,15 @@ v0.2.0 limitation — uses PowerShell + `SendKeys` as a backend:
 |---------|---------|---------|
 | `ModelContextProtocol` | 2.2.0 | MCP SDK — stdio transport, `[McpServerTool]` discovery, request filters |
 | `ModelContextProtocol.AspNetCore` | 2.2.0 (lockstep) | Streamable HTTP transport (`WithHttpTransport`, `MapMcp`) on Kestrel via the `Microsoft.AspNetCore.App` framework reference |
-| `FlaUI.UIA3` | latest | Windows UI Automation API (UIA3 COM wrapper) |
-| `H.InputSimulator` | latest | `SendInput`-based keyboard and mouse simulation |
-| `SkiaSharp` | latest | Screenshot capture, image encode/decode |
-| `CsWin32` | latest | Source-generated P/Invoke for Win32 APIs (DPI, AUMID, etc.) |
-| `Microsoft.Extensions.Hosting` | latest | Generic Host, DI container, configuration |
-| `ReverseMarkdown` | latest | HTML → Markdown conversion for `Scrape` tool |
-| `TaskScheduler` | latest | Windows Task Scheduler COM automation |
-| `TextCopy` | latest | Cross-platform clipboard read/write |
-| `System.Diagnostics.EventLog` | latest | Windows Event Log querying |
-| `System.Drawing.Common` | latest | GDI+ image support (legacy compat) |
-| `System.Management` | latest | WMI query execution (`ManagementObjectSearcher`) |
+| `FlaUI.UIA3` | 5.0.0 | Windows UI Automation API (UIA3 COM wrapper) |
+| `H.InputSimulator` | 1.* | `SendInput`-based keyboard and mouse simulation |
+| `SkiaSharp` | 4.151.1 | Screenshot capture, image encode/decode |
+| `Microsoft.Windows.CsWin32` | 0.3.* (`PrivateAssets=all`) | Source-generated P/Invoke for Win32 APIs (DPI, AUMID, `SetCursorPos`, `VkKeyScan`, etc.) |
+| `Microsoft.Extensions.Hosting` | shared framework | Generic Host, DI container, configuration (no `PackageReference`; comes with the runtime / `Microsoft.AspNetCore.App`) |
+| `ReverseMarkdown` | 6.2.1 | HTML → Markdown conversion for `Scrape` tool |
+| `TaskScheduler` | 2.12.2 | Windows Task Scheduler COM automation |
+| `TextCopy` | 6.* | Cross-platform clipboard read/write |
+| `System.ServiceProcess.ServiceController` | 10.* | Windows service control (`service` tool) |
+| `System.Diagnostics.EventLog` | shared framework | Windows Event Log querying (no `PackageReference`; provided by the `net10.0-windows` framework) |
+| `System.Drawing.Common` | 10.* | GDI+ image support (legacy compat) |
+| `System.Management` | 10.* | WMI query execution (`ManagementObjectSearcher`) |
