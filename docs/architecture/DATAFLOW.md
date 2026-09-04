@@ -286,7 +286,7 @@ PID reuse mid-walk). A snapshot row with no CIM date cannot be validated and is 
      │               │                  │◄────────────────────────┤
      │               │                  │ SKBitmap.Encode(PNG)    │
      │               │                  ├────────────────────────►│
-     │               │ base64 PNG str   │◄────────────────────────┤
+     │               │ file path/base64 │◄────────────────────────┤
      │◄──────────────┤◄─────────────────┤                         │
      │               │                  │                         │
      │ Ocr(region)   │                  │                         │
@@ -339,7 +339,7 @@ Host.CreateApplicationBuilder(args)
         │
         ▼
 builder.Services.AddSingleton<IInputService, InputService>()
-  ...  (24 services)
+  ...  (36 services)
         │
         ▼
 builder.AddWindowsMcp()           ← Hosting/WindowsMcpHost: AddMcpServer(...) + filter + WithToolsFromAssembly()

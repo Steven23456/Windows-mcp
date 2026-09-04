@@ -8,7 +8,7 @@ description: "Playbook for driving Windows via the windows-mcp server's 64 tools
 A judgment layer over the `windows-mcp` server's 64 atomic tools for Windows desktop automation and system inspection — UI driving, screenshots/OCR, files, registry, services, processes, disk, network, and security/startup analysis. This skill adds no tools of its own: every action below is one of the server's existing MCP tools, composed into the right order with the right safety checks. Its job is to steer tool selection (MCP vs. raw PowerShell), sequence multi-step workflows correctly, and flag which tools are destructive enough to need confirmation first.
 
 **Skill root**: this skill ships inside the `windows-mcp` plugin (repo
-`danielsimonjr/windows-mcp`, `skills/windows/`). Slash trigger: `/windows`.
+`Steven23456/Windows-mcp`, `skills/windows/`). Slash trigger: `/windows`.
 
 ## When to use this skill
 
@@ -31,7 +31,7 @@ Do NOT use this skill for:
 
 **Default to the MCP tool.** It is faster than a PowerShell cold-start, returns structured JSON instead of text to parse, and runs unelevated in one consistent place. Reach for raw PowerShell only when none of the 64 tools express what's needed.
 
-**Fall back to the `powershell` tool** only for one-off scripting the 64 tools don't cover. Gotcha: the `powershell` tool's stdin can arrive empty — pass the script via a temp `.ps1` file and invoke that, rather than piping a heredoc or inline multi-line string.
+**Fall back to the `powershell` tool** only for one-off scripting the 64 tools don't cover. Multi-line scripts are fine — the tool passes the script as one unit. For anything that may run longer than a few minutes (installers, `DISM`, bulk hashes) pass `background: true` and poll with `job`.
 
 The MCP server **runs unelevated**. Admin-only operations — `registry_set` under `HKLM`, `service` start/stop, some `scheduled_task` actions — can return access-denied. Recognize that signature and surface it to the user instead of retrying blindly; the skill cannot grant elevation it doesn't have.
 
@@ -42,13 +42,13 @@ The MCP server **runs unelevated**. Admin-only operations — `registry_set` und
 | Read/search/hash a file | `file_read`, `file_search`, `file_hash`, `file_info` |
 | Read a registry value | `registry_get` |
 | Drive a GUI app | `get_state` → `click`/`type` → `assert_element` |
-| One-off scripting no tool covers | `powershell` (temp `.ps1`) |
+| One-off scripting no tool covers | `powershell` (`background: true` for long runs, then `job`) |
 
 If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mcp__plugin_windows-mcp_Windows-mcp__<tool>`.
 
 ## The 64 tools, grouped by domain
 
-**UI automation / input (24)** — drive and read a foreground GUI application: `click`, `drag`, `hover`, `key`, `type`, `scroll`, `focus`, `get_state`, `get_element`, `get_text`, `get_table`, `find_element`, `assert_element`, `interact_element`, `wait_for`, `switch_to_window`, `window`, `multi_monitor`, `screenshot`, `ocr`, `clipboard`, `file_dialog`, `notification`, `launch`
+**UI automation / input (25)** — drive and read a foreground GUI application: `click`, `drag`, `hover`, `key`, `shortcut`, `type`, `scroll`, `focus`, `get_state`, `get_element`, `get_text`, `get_table`, `find_element`, `assert_element`, `interact_element`, `wait_for`, `switch_to_window`, `window`, `multi_monitor`, `screenshot`, `ocr`, `clipboard`, `file_dialog`, `notification`, `launch`
 
 **Processes / shell (5)** — enumerate, inspect, start, or kill processes; run arbitrary scripts: `process`, `process_inspect`, `start_process`, `powershell` (with `background: true` for long-running jobs), `job`
 
@@ -68,9 +68,9 @@ If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mc
 
 **Monitoring / integrity (3)** — file-integrity tripwire, NTFS USN change journal, and live directory watching: `integrity`, `fs_changes`, `watch`
 
-**Misc (3)** — utility operations: `shortcut`, `archive`, `audio`
+**Misc (2)** — utility operations: `archive`, `audio`
 
-(24+4+7+7+2+2+2+4+5+3+3 = 63.) If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mcp__plugin_windows-mcp_Windows-mcp__<tool>`.
+(25+5+7+7+2+2+2+4+5+3+2 = 64.) If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mcp__plugin_windows-mcp_Windows-mcp__<tool>`.
 
 ## Workflow playbooks
 
@@ -132,5 +132,5 @@ Locate the file(s) first, then layer on metadata, a hash suitable for IOC/VirusT
 - **`storage_health` can wedge on external / USB drives.** Its default mode is fast and never wakes sleeping drives, but `include_usage: true` wakes sleeping/USB drives to collect SMART data — scope to internal disks by default, or warn the user before running it with `include_usage: true` against removable media.
 - **Runs unelevated.** Admin-only operations (`registry_set` under `HKLM`, `service` start/stop, some `scheduled_task` actions) fail with access-denied. Surface that signature to the user; don't loop retrying.
 - **UIAutomation tools need the target app foregrounded** on an interactive desktop — they fail headless or against a backgrounded window.
-- **`powershell` stdin can arrive empty** — write the script to a temp `.ps1` and invoke that file rather than piping a heredoc (see Section "Tool selection" above).
+- **Multi-line PowerShell is passed whole.** The `powershell` tool sends the script as a single `-EncodedCommand` unit (temp-`.ps1` fallback only for oversized scripts), so heredocs and multi-line strings work as-is — no temp-file workaround is needed.
 - **Long jobs are fine; disk-saturation storms are not.** A single long `powershell`/heavy tool call (>~120s — e.g. `DISM`, a big hash, a bulk delete) is safe: the Claude Code harness "moves it to the background" (benign) and the result is delivered on completion, and the server allows a 15-min PowerShell backstop (long foreground calls also emit MCP progress heartbeats so spec-compliant clients keep the request alive). What *does* break it is running several heavy ops (`DISM` + a `service` stop + bulk deletes) **while the disk is already saturated** by a concurrent large hash/copy — the MCP call can fail transiently with `"An error occurred invoking 'powershell'"`. That is **I/O starvation, not a timeout or a 120s limit** (verified 2026-07-17: lone 150s and two concurrent ~135s calls all succeeded; the only failures came during a 42 GB SHA-256 storm, with no server crash). Mitigation: for the heaviest/longest ops (installers, `DISM`, big hashes), prefer `powershell` with `background: true` — it returns a job id immediately and runs outside the serialization gate; poll with the `job` tool (`status`/`output`/`cancel`/`list`). Claude Code's own `run_in_background` remains a fallback, and don't stack heavy windows-mcp ops during a saturation storm. Raising `MCP_TOOL_TIMEOUT` is **not** the fix — its default is ~28 h, not 120s.

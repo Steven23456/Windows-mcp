@@ -132,7 +132,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 | `GetElement` | `(string element_id)` | Properties of a specific element by ID |
 | `GetText` | `(string element_id)` | Extract text content (faster than OCR) |
 | `AssertElement` | `(string element_id, string state)` | Assert element state; returns `PASS` or `FAIL: <reason>` |
-| `InteractElement` | `(string element_id, string action, string? value=null)` | click/toggle/select/focus/type on element |
+| `InteractElement` | `(string element_id, string action, string? value=null)` | toggle / select / invoke on an element via UIA patterns |
 | `GetTable` | `(string element_id)` | Extract grid/table data via `GridPattern` |
 | `WaitFor` | `(string text, int timeout_ms=10000, int interval_ms=500)` | Poll until element appears |
 
@@ -141,15 +141,15 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 ### `WindowTools` — 5 tools
 `src/WindowsMcp/Tools/WindowTools.cs`
 
-**Injected:** `IWindowService`, `IProcessService`
+**Injected:** `IWindowService`
 
 | Method | Description |
 |--------|-------------|
-| `SwitchToWindow` | Focus a window by title pattern |
-| `Window` | Get window position, size, and state |
-| `MultiMonitor` | Enumerate all monitors with resolution and DPI |
-| `Launch` | Launch an application by name |
-| `StartProcess` | Start a detached process |
+| `Window` | `minimize` / `maximize` / `restore` / `close` a window found by exact title (`FindWindow`) |
+| `SwitchToWindow` | Bring a window to the foreground by exact title (`SetForegroundWindow`) |
+| `Focus` | Alias of `SwitchToWindow` |
+| `Launch` | Launch an application by name or path via ShellExecute; returns the PID |
+| `MultiMonitor` | Enumerate monitors: index, device name, bounds, primary flag |
 
 ---
 
@@ -160,15 +160,15 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 | Method | Description |
 |--------|-------------|
-| `FileRead` | Read file contents (text or binary) |
-| `FileWrite` | Write or append to a file |
-| `FileManage` | Copy, move, delete, or create files/directories |
+| `FileRead` | Read a file as text (`max_bytes`, `encoding` auto/utf-8/utf-16/ascii) |
+| `FileWrite` | Write text to a file (`confirm:true`) |
+| `FileManage` | `copy` / `move` / `delete` (`confirm:true`) / `list` |
 | `FileInfo` | Get file or directory metadata |
 | `FileSearch` | Search for files by glob pattern |
 | `FileHash` | Compute a file's SHA256/SHA1/MD5 hex digest |
 | `FileStreams` | NTFS alternate data streams + reparse (symlink/junction) target |
 | `FileDialog` | Interact with a native open/save dialog |
-| `Archive` | Create, extract, or list zip/tar archives |
+| `Archive` | `zip` a directory or `unzip` an archive |
 
 ---
 
@@ -227,7 +227,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 | Method | Description |
 |--------|-------------|
-| `Screenshot` | Capture full screen or a region; returns base64 PNG |
+| `Screenshot` | Capture the primary display or a `x,y,w,h` region as PNG/JPEG; saves to `%TEMP%\WindowsMcp` and returns the path (`output="file"`, default) or inlines base64 JSON (`output="base64"`) |
 | `Ocr` | Extract text from a screen region |
 
 ---
@@ -261,8 +261,8 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 | Method | Description |
 |--------|-------------|
-| `RegistryGet` | Read a registry key or named value |
-| `RegistrySet` | Write a registry value (REG_SZ, DWORD, etc.) |
+| `RegistryGet` | Read a named value, or list the key's value names when `value_name` is omitted |
+| `RegistrySet` | Write a value (String / DWord / QWord / Binary / MultiString / ExpandString); `confirm:true` |
 
 ---
 
@@ -273,8 +273,8 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 | Method | Description |
 |--------|-------------|
-| `Network` | Get adapter info, IP, gateway, DNS |
-| `HttpRequest` | Make an HTTP request (GET/POST/PUT/DELETE) |
+| `Network` | Adapters, listening ports (with owning process), Wi-Fi, DNS lookup, ping |
+| `Firewall` | `list` / `add` / `remove` firewall rules (`confirm:true` for add/remove) |
 
 ---
 
@@ -285,8 +285,8 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 | Method | Description |
 |--------|-------------|
-| `Scrape` | Fetch a URL and convert HTML to Markdown |
-| `Shortcut` | Create or read a Windows .lnk shell shortcut |
+| `Scrape` | Fetch a URL and convert HTML to Markdown (private address ranges rejected, DNS-rebinding aware) |
+| `HttpRequest` | HTTP request (GET/POST/PUT/DELETE/PATCH) with optional JSON headers and body; same private-range rejection |
 
 ---
 
@@ -323,6 +323,39 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 ---
 
+### `IntegrityTools` — 1 tool
+`src/WindowsMcp/Tools/IntegrityTools.cs`
+
+**Injected:** `IIntegrityService`
+
+| Method | Description |
+|--------|-------------|
+| `Integrity` | File-integrity tripwire over a curated watch-list (hosts file, user + machine Startup folders, `~/.claude/settings.json`, `~/.gitconfig`, the `C:\` governance files). `mode`: `baseline` (SHA-256 snapshot to `%LOCALAPPDATA%\windows-mcp\integrity`, survives plugin upgrades) / `check` (added / removed / modified vs. baseline) / `list` (default watch-list + current baseline). `paths` adds extra semicolon-separated paths on `baseline` |
+
+---
+
+### `UsnTools` — 1 tool
+`src/WindowsMcp/Tools/UsnTools.cs`
+
+**Injected:** `IUsnService`
+
+| Method | Description |
+|--------|-------------|
+| `FsChanges` | NTFS USN change journal — whole-volume file-change tracking from the OS journal. `mode`: `status` (journal id + `FirstUsn` / `NextUsn` / `LowestValidUsn`; record `NextUsn` now, query `since` it later) / `since` (records from `start_usn` forward, `max` default 200). `volume` default `C`. Requires elevation |
+
+---
+
+### `WatchTools` — 1 tool
+`src/WindowsMcp/Tools/WatchTools.cs`
+
+**Injected:** `IWatchService`
+
+| Method | Description |
+|--------|-------------|
+| `Watch` | Live directory watching (`FileSystemWatcher`) with server-side buffering. `mode`: `start` (`path`, `filter` glob, `subdirs`; returns a session id) / `poll` (drain buffered created/changed/deleted/renamed events, `max` default 500) / `stop` / `list` (sessions with buffered/dropped counts). Events sit in a bounded ring (`EventRingBuffer`) between polls; oldest dropped when full |
+
+---
+
 ## Service Interfaces (`WindowsMcp.Abstractions`)
 
 Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
@@ -330,31 +363,38 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | Interface | Key Methods |
 |-----------|-------------|
 | `IInputService` | `ClickAsync`, `DragAsync`, `HoverAsync`, `TypeAsync`, `PressKeyAsync`, `PressShortcutAsync`, `ScrollAsync` |
-| `IScreenshotService` | `CaptureAsync(region?)`, `CaptureRegionAsync` |
-| `IOcrService` | `RecognizeAsync(region)` |
+| `IScreenshotService` | `CaptureAsync(region?, format)` → `ScreenshotResult` |
+| `IOcrService` | `ExtractTextAsync(region?)` → text |
 | `IClipboardService` | `GetTextAsync`, `SetTextAsync` |
-| `IAudioService` | `GetAsync`, `SetVolumeAsync`, `SetMutedAsync` |
-| `IPowerShellService` | `RunAsync(command)` |
+| `IAudioService` | `GetAsync` → `AudioState`, `SetVolumeAsync`, `SetMutedAsync` |
+| `IPowerShellService` | `RunAsync(command)` → `PSResult` |
 | `IJobService` | `StartAsync(command)`, `GetStatus(id)`, `GetOutput(id, tailChars)`, `Cancel(id)`, `List()` |
-| `IUIAutomationService` | `GetStateAsync`, `FindElementAsync`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync`, `InteractAsync`, `GetTableAsync`, `WaitForAsync` |
-| `IFileSystemService` | `ReadAsync`, `WriteAsync`, `ManageAsync`, `InfoAsync`, `SearchAsync`, `ArchiveAsync` |
+| `IUIAutomationService` | `GetStateAsync`, `FindElementAsync`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync`, `InteractAsync`, `GetTableAsync`, `WaitForAsync`, `FocusAsync` |
+| `IFileSystemService` | `ReadTextAsync`, `ReadBytesAsync`, `WriteTextAsync`, `CopyAsync`, `MoveAsync`, `DeleteAsync`, `ListAsync`, `SearchAsync`, `GetInfoAsync`, `HashFileAsync`, `ZipAsync`, `UnzipAsync` |
+| `IFileStreamService` | `GetStreamsAsync(path)` → `FileStreamsDto` (alternate data streams + reparse target) |
 | `IRegistryService` | `GetAsync`, `SetAsync`, `EnumerateValuesAsync`, `EnumerateSubKeysAsync` |
-| `IServiceControlService` | `ListAsync`, `StartAsync`, `StopAsync`, `RestartAsync` |
+| `IServiceControlService` | `ListAsync`, `GetStatusAsync`, `StartAsync`, `StopAsync`, `RestartAsync` |
 | `IEventLogService` | `QueryAsync` |
 | `ITaskSchedulerService` | `ListAsync`, `ListDetailedAsync`, `GetAsync`, `CreateAsync`, `DeleteAsync`, `RunAsync` |
 | `IProcessService` | `ListAsync`, `InspectAsync`, `StartDetachedAsync`, `KillAsync`, `ListLineageAsync`, `GroupByRootAsync`, `KillGuardedAsync`, `KillTreeAsync` |
-| `IWindowService` | `ListAsync`, `FocusAsync`, `GetAsync`, `LaunchAsync` |
-| `IWmiService` | `QueryAsync(wql)` |
+| `IWindowService` | `ExecuteAsync(action, title)`, `SwitchToAsync(title)`, `LaunchAsync(app)`, `EnumerateMonitorsAsync` |
+| `IWmiService` | `QueryAsync(className, properties?, where?)` → rows |
 | `IStorageService` | `GetHealthAsync(driveLetter?, includeUsage, timeoutSeconds)` → `StorageHealthReport` |
 | `IDiskService` | `GetUsageAsync`, `GetFileTypesAsync`, `GetStaleAsync`, `GetReclaimableAsync` |
-| `ISecurityService` | `AuditAsync()` → `SecurityAuditDto` |
+| `ISecurityService` | `AuditAsync()` → `SecurityAuditDto`, `GetDefenderStatusAsync()` → `DefenderStatusDto` |
+| `ICertStoreService` | `ListAsync` → `CertInfoDto[]` (flags self-signed and expired) |
+| `IReliabilityService` | `GetAsync(maxRecords)` → `ReliabilityReport` |
+| `IDriverService` | `ListAsync()` → `DriverInfo[]` |
 | `IFirewallService` | `ListAsync`, `AddAsync`, `RemoveAsync` |
 | `IEnvService` | `GetAsync`, `SetAsync`, `ListAsync` |
-| `IPowerService` | `SleepAsync`, `HibernateAsync`, `LockAsync`, `SignOutAsync` |
-| `INotificationService` | `ShowAsync` |
-| `INetworkService` | `GetAdaptersAsync`, `GetConnectionsAsync`, `GetFirewallRulesAsync` |
-| `IWebService` | `FetchMarkdownAsync`, `RequestAsync` |
-| `IAuthenticodeInspector` | `Inspect(path)` → catalog-aware trust + signer |
+| `IPowerService` | `ExecuteAsync(action)` — shutdown / reboot / logoff / lock / sleep / hibernate |
+| `INotificationService` | `ShowAsync(title, message)` |
+| `INetworkService` | `ListAdaptersAsync`, `ListPortsAsync`, `GetWifiAsync`, `DnsLookupAsync`, `PingAsync` |
+| `IWebService` | `ScrapeAsync(url)`, `RequestAsync(url, method, headers, body)` → `HttpResponseDto` |
+| `IIntegrityService` | `BaselineAsync`, `CheckAsync`, `GetBaseline`, `DefaultWatchList` |
+| `IUsnService` | `StatusAsync(volume)` → `UsnStatus`, `ReadAsync(volume, startUsn, max)` → `UsnReadResult` |
+| `IWatchService` | `Start(path, filter, subdirs)` → `WatchSession`, `Poll(id, max)` → `WatchEvent[]`, `Stop(id)`, `List()` |
+| `IAuthenticodeInspector` | `Inspect(path)` → `AuthenticodeInfo` (catalog-aware trust + signer) |
 | `ILspEnumerator` | `Enumerate()` → Winsock catalog providers |
 | `IShortcutResolver` | `ResolveTarget(lnk)` → `.lnk` target via IShellLink |
 | `IStartupReportService` | `BuildAsync()` → aggregated `StartupReportDto` |
@@ -363,30 +403,40 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 
 ## Data Models (`WindowsMcp.Abstractions.Models`)
 
-Located in `src/WindowsMcp.Abstractions/` alongside the interfaces (one DTOs file per domain):
+Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 21 files):
 
 | File | Key Types |
 |------|-----------|
 | `InputDtos.cs` | `ClickResult`, `DragResult`, `TypeResult`, `MouseButton` (enum) |
-| `ScreenDtos.cs` | `ScreenshotResult`, `OcrResult`, `Region` |
-| `UIAutomationDtos.cs` | `UiState`, `UiElement`, `FindKind` (enum), `TableData` |
-| `ProcessDtos.cs` | `ProcessInfo`, `ProcessStartResult` |
-| `WindowDtos.cs` | `WindowInfo`, `MonitorInfo` |
-| `NetworkDtos.cs` | `AdapterInfo`, `ConnectionInfo`, `FirewallRule` |
-| `FileSystemDtos.cs` | `FileEntry`, `ArchiveEntry`, `SearchResult` |
-| `SystemDtos.cs` | `ServiceInfo`, `ScheduledTaskInfo`, `EventLogEntry`, `SystemInfoResult` |
-| `PowerShellDtos.cs` | `PowerShellResult(string Stdout, string Stderr, int ExitCode)` |
-| `WebDtos.cs` | `HttpResponse`, `ShortcutInfo` |
-| `SecurityDtos.cs` | `AuthenticodeInfo`, `LspProviderDto` |
-| `StartupReportDtos.cs` | `StartupReportDto` + section records (`RunEntry`, `StartupTaskEntry`, `StartupServiceEntry`, `LspProviderEntry`, `ShellExtensionEntry`, …) |
+| `ScreenDtos.cs` | `ScreenRegion`, `ScreenshotResult`, `ImageFormat` (enum) |
+| `UIAutomationDtos.cs` | `ElementInfo`, `Bounds`, `ElementTree`, `FindElementResult`, `FindKind` (enum), `TableData` |
+| `WindowDtos.cs` | `WindowAction`, `MonitorInfo` |
+| `ProcessDtos.cs` | `ProcessDto`, `ProcessDetailDto`, `ModuleInfo`, `ProcessLineageDto`, `ProcessGroupDto` |
+| `PowerShellDtos.cs` | `PSResult` (success, stdout, stderr, exit code, parsed errors) |
+| `JobDtos.cs` | `JobInfo`, `JobOutput` |
+| `FileSystemDtos.cs` | `FileInfoDto`, `FileSearchHit`, `AlternateStreamInfo`, `FileStreamsDto`, `RegistryValueDto`, `ServiceDto`, `ScheduledTaskDto`, `ScheduledTaskDetailDto`, `EventLogEntryDto` |
+| `SystemDtos.cs` | `WmiResultDto` |
+| `NetworkDtos.cs` | `NetworkAdapterDto`, `PortInfoDto`, `WifiInfoDto`, `PingResult` |
+| `FirewallDtos.cs` | `FirewallRuleDto` |
+| `WebDtos.cs` | `HttpResponseDto` |
+| `DiskDtos.cs` | `DiskUsageEntry`, `FileTypeEntry`, `StaleFileEntry`, `ReclaimableSpace` |
+| `StorageDtos.cs` | `StorageHealthReport`, `PhysicalDiskInfo`, `DiskInfo`, `VolumeInfo`, `ReliabilityInfo`, `DiskEventInfo` |
+| `SecurityDtos.cs` | `AuthenticodeInfo`, `LspProviderDto`, `SecurityAuditDto`, `DefenderStatusDto`, `CertInfoDto` |
+| `ReliabilityDtos.cs` | `ReliabilityReport`, `MinidumpInfo`, `ReliabilityRecord` |
+| `DriverDtos.cs` | `DriverInfo` |
+| `StartupReportDtos.cs` | `StartupReportDto`, `StartupHeader` + one record per section (`RunEntry`, `StartupFolderEntry`, `StartupTaskEntry`, `StartupServiceEntry`, `HostsEntry`, `DnsEntry`, `LspProviderEntry`, `ShellExtensionEntry`, `ControlPanelAppletEntry`, `AccessibilityToolEntry`, `IfeoEntry`, `WinlogonHookEntry`, `AppInitDllEntry`, `ActiveSetupEntry`, `BrowserProxyEntry`, `TrustedZoneEntry`, `ProcessEntry`) |
+| `IntegrityDtos.cs` | `IntegrityItem`, `IntegrityBaseline`, `IntegrityChange`, `IntegrityCheckResult` |
+| `UsnDtos.cs` | `UsnStatus`, `UsnChange`, `UsnReadResult` |
+| `WatchDtos.cs` | `WatchSession`, `WatchEvent` |
 
 **Model pattern** — all DTOs are C# records:
 ```csharp
-// Example from IAudioService.cs
-public record AudioState(int Level, bool Muted);
+// Models/ScreenDtos.cs
+public record ScreenRegion(int X, int Y, int Width, int Height);
+public record ScreenshotResult(byte[] Bytes, int Width, int Height, ImageFormat Format);
 
-// Example from IPowerShellService.cs
-public record PowerShellResult(string Stdout, string Stderr, int ExitCode);
+// IAudioService.cs (small result types may sit next to their interface)
+public record AudioState(int Level, bool Muted);
 ```
 
 ---
@@ -396,8 +446,9 @@ public record PowerShellResult(string Stdout, string Stderr, int ExitCode);
 ### `UIAutomationService`
 
 Uses **FlaUI.UIA3** to walk the Windows Accessibility (UIA3) tree:
-- `GetStateAsync()` — enumerates all elements in the foreground window's UIA3 tree
+- `GetStateAsync()` — builds a three-level `ElementTree` rooted at the foreground window (falls back to the focused element, then the desktop); every element gets a cached `el_N` id
 - `FindElementAsync()` — searches by name/value with optional kind filter
+- `InteractAsync()` — toggle / select / invoke via UIA patterns; `FocusAsync()` sets keyboard focus
 - `WaitForAsync()` — polls at `interval_ms` until element appears or `timeout_ms` elapses
 - `GetTableAsync()` — reads cells via `IGridPattern`
 - `AssertElementAsync()` — checks element properties: exists / enabled / checked / value / visible / focused
@@ -442,16 +493,16 @@ capacity is exceeded and counts trimmed chars — the unit-testable core of job 
 
 ### `ScreenshotService`
 
-Uses **SkiaSharp** for capture and encoding:
-- `CaptureAsync()` — captures the full virtual screen (all monitors) via `BitBlt` + `SkiaSharp` PNG encode
-- `CaptureRegionAsync(Region)` — clips to specified bounding box before encode
-- Returns base64-encoded PNG strings
+GDI capture + **SkiaSharp** encode:
+- `CaptureAsync(region?, format)` — `Graphics.CopyFromScreen` of the primary display (or the given `ScreenRegion`), wrapped zero-copy into an `SKBitmap` and encoded as PNG or JPEG
+- Returns `ScreenshotResult(Bytes, Width, Height, Format)`; the `screenshot` tool writes it to `%TEMP%\WindowsMcp` and returns the path by default (`output="base64"` inlines it as JSON)
+- Multi-display selection, downscaling and MCP image-content responses are tracked in `docs/upstream-parity-checklist.md` (A-7 to A-9)
 
 ### `OcrService`
 
 Uses the **Windows.Media.Ocr** WinRT API:
 - Calls `OcrEngine.TryCreateFromUserProfileLanguages()` for language detection
-- Returns word-level bounding boxes and recognized text
+- `ExtractTextAsync(region?)` returns the recognized text
 
 ### `AudioService`
 
@@ -467,8 +518,8 @@ v0.2.0 limitation — uses PowerShell + `SendKeys` as a backend:
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `ModelContextProtocol` | 1.4.x | MCP SDK — stdio transport, `[McpServerTool]` discovery, request filters |
-| `ModelContextProtocol.AspNetCore` | 1.4.x (lockstep) | Streamable HTTP transport (`WithHttpTransport`, `MapMcp`) on Kestrel via the `Microsoft.AspNetCore.App` framework reference |
+| `ModelContextProtocol` | 2.2.0 | MCP SDK — stdio transport, `[McpServerTool]` discovery, request filters |
+| `ModelContextProtocol.AspNetCore` | 2.2.0 (lockstep) | Streamable HTTP transport (`WithHttpTransport`, `MapMcp`) on Kestrel via the `Microsoft.AspNetCore.App` framework reference |
 | `FlaUI.UIA3` | latest | Windows UI Automation API (UIA3 COM wrapper) |
 | `H.InputSimulator` | latest | `SendInput`-based keyboard and mouse simulation |
 | `SkiaSharp` | latest | Screenshot capture, image encode/decode |

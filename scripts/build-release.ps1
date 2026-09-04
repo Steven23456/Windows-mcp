@@ -1,0 +1,1 @@
+dotnet publish ../src/WindowsMcp -c Release -o dist -r win-x64 --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true

@@ -54,6 +54,16 @@
 
 ### Changed
 
+- **Docs consolidated (2026-09-04).** Removed the executed `docs/superpowers/` specs and plans,
+  the Python-era `docs/plans/` testing design, the generated dependency-graph / unused-analysis
+  artifacts, and the Python-era `security-reviewer` agent. The feature backlog against the
+  upstream Python server now lives in `docs/upstream-parity-checklist.md`. README, `CLAUDE.md`
+  and `docs/architecture/*` re-aligned to the current surface (64 tools incl. `process_inspect`,
+  `integrity`, `fs_changes`, `watch`; 36 service interfaces; `Hosting/` layout; SDK 2.2.0), the
+  `CLAUDE.md` redeploy recipe rewritten around an explicit MCP registration instead of the
+  upstream maintainer's marketplace clone, `version-bump` skill rewritten for the C# release
+  flow, and the `windows` skill's obsolete temp-`.ps1` gotcha replaced (multi-line PowerShell has
+  been passed whole via `-EncodedCommand` since 0.7.1).
 - **Foreground PowerShell execution backstop 10 → 15 minutes** (`PowerShellService`). The
   backstop still arms only after the serialization gate is acquired, so it bounds execution,
   not queue-wait.

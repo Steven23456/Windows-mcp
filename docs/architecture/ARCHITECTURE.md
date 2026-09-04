@@ -15,44 +15,41 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Tool Layer                                         │
 │                 (19 [McpServerToolType] classes, 64 tools)                   │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ │
-│  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │ │
-│  │  8 tools   │ │  8 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │ │
-│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘ │
-│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ │
-│  │ProcessTools│ │ScreenTools │ │  WebTools  │ │RegistryTls │ │NetworkTls  │ │
-│  │  6 tools   │ │  2 tools   │ │  2 tools   │ │  2 tools   │ │  2 tools   │ │
-│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘ │
-│   ┌─────────────┐ ┌────────────┐ ┌──────────────┐                           │
-│   │ShellTools(1)│ │ DiskTools(1)│ │StorageTools(1)│                          │
-│   └─────────────┘ └────────────┘ └──────────────┘                           │
-│            ┌───────────────────┐                                            │
-│            │ SecurityTools (3) │                                            │
-│            └───────────────────┘                                            │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐  │
+│  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │  │
+│  │  8 tools   │ │  8 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │  │
+│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘  │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐  │
+│  │ProcessTools│ │ScreenTools │ │  WebTools  │ │RegistryTls │ │NetworkTls  │  │
+│  │  6 tools   │ │  2 tools   │ │  2 tools   │ │  2 tools   │ │  2 tools   │  │
+│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘  │
+│  ShellTools(1) · JobTools(1) · DiskTools(1) · StorageTools(1)                │
+│  SecurityTools(3) · StartupTools(1) · IntegrityTools(1)                      │
+│  UsnTools(1) · WatchTools(1)                                                 │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │ constructor injection
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                      Service Abstraction Layer                                │
+│                      Service Abstraction Layer                               │
 │                    (WindowsMcp.Abstractions assembly)                        │
-│  IInputService · IScreenshotService · IOcrService · IClipboardService       │
+│  IInputService · IScreenshotService · IOcrService · IClipboardService        │
 │  IAudioService · IPowerShellService · IUIAutomationService · IFileSystemSvc  │
-│  IRegistryService · IServiceControlService · IEventLogService               │
-│  ITaskSchedulerService · IProcessService · IWindowService · IWmiService     │
-│  IEnvService · IPowerService · INotificationService · INetworkService       │
-│  IWebService   (32 interfaces total)                                        │
+│  IRegistryService · IServiceControlService · IEventLogService                │
+│  ITaskSchedulerService · IProcessService · IWindowService · IWmiService      │
+│  IEnvService · IPowerService · INotificationService · INetworkService        │
+│  IWebService   (36 interfaces total)                                         │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │ implemented by
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                    Service Implementation Layer                               │
+│                    Service Implementation Layer                              │
 │                     (WindowsMcp.Services namespace)                          │
-│  InputService · ScreenshotService · OcrService · ClipboardService           │
+│  InputService · ScreenshotService · OcrService · ClipboardService            │
 │  AudioService · PowerShellService · UIAutomationService · FileSystemService  │
-│  RegistryService · ServiceControlService · EventLogService                  │
-│  TaskSchedulerService · ProcessService · WindowService · WmiService         │
-│  EnvService · PowerService · NotificationService · NetworkService           │
-│  WebService   (32 singletons — all registered in Program.cs via DI)         │
+│  RegistryService · ServiceControlService · EventLogService                   │
+│  TaskSchedulerService · ProcessService · WindowService · WmiService          │
+│  EnvService · PowerService · NotificationService · NetworkService            │
+│  WebService   (36 singletons — registered in Hosting/WindowsMcpHost)         │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -128,23 +125,28 @@ public sealed class InputTools
 | `UIAutomationTools` | 8 | `IUIAutomationService` |
 | `FileTools` | 9 | `IFileSystemService`, `IInputService`, `IFileStreamService` |
 | `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService` |
-| `WindowTools` | 5 | `IWindowService`, `IProcessService` |
+| `WindowTools` | 5 | `IWindowService` |
 | `ProcessTools` | 6 | `IProcessService`, `IServiceControlService`, `ITaskSchedulerService`, `IEventLogService` |
 | `ScreenTools` | 2 | `IScreenshotService`, `IOcrService` |
 | `WebTools` | 2 | `IWebService` |
 | `RegistryTools` | 2 | `IRegistryService` |
 | `NetworkTools` | 2 | `INetworkService`, `IFirewallService` |
-| `ShellTools` | 1 | `IPowerShellService` |
+| `ShellTools` | 1 | `IPowerShellService`, `IJobService` |
+| `JobTools` | 1 | `IJobService` |
 | `DiskTools` | 1 | `IDiskService` |
 | `StorageTools` | 1 | `IStorageService` |
 | `SecurityTools` | 3 | `IAuthenticodeInspector`, `ISecurityService`, `ICertStoreService` |
+| `StartupTools` | 1 | `IStartupReportService` |
+| `IntegrityTools` | 1 | `IIntegrityService` |
+| `UsnTools` | 1 | `IUsnService` |
+| `WatchTools` | 1 | `IWatchService` |
 
 ---
 
 ### 3. Service Abstraction Layer (`WindowsMcp.Abstractions`)
 
 A separate assembly (`WindowsMcp.Abstractions.csproj`) containing:
-- **32 `IXxxService` interfaces** — define the contract for each domain
+- **36 `IXxxService` interfaces** — define the contract for each domain
 - **Model DTOs** in `WindowsMcp.Abstractions.Models` — records/classes shared between tools and services
 
 The abstraction layer exists so tool classes compile against interfaces, not concrete types. This enforces the dependency inversion principle and makes services independently testable.
@@ -167,12 +169,12 @@ public interface IInputService
 
 ### 4. Service Implementation Layer
 
-All 24 services are registered as **singletons** in `Program.cs`:
+All 36 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp`, which both transports call:
 
 ```csharp
-builder.Services.AddSingleton<IInputService, InputService>();
-builder.Services.AddSingleton<IScreenshotService, ScreenshotService>();
-// ... (24 services total)
+services.AddSingleton<IInputService, InputService>();
+services.AddSingleton<IScreenshotService, ScreenshotService>();
+// ... (36 registrations)
 ```
 
 Services contain all business logic and directly call Windows APIs through platform packages. They are constructed once at host startup and shared across all tool invocations.
@@ -255,12 +257,14 @@ Windows-mcp.slnx
 ├── src/
 │   ├── WindowsMcp/                        ← Main project
 │   │   ├── WindowsMcp.csproj              (targets net10.0-windows10.0.19041)
-│   │   ├── Program.cs                     (host + DI wiring)
+│   │   ├── Program.cs                     (entry: AUMID + DPI setup, parse options, pick transport)
+│   │   ├── Hosting/                       (ServerOptions, WindowsMcpHost, CertificateLocator)
 │   │   ├── Tools/                         (19 tool classes)
 │   │   │   ├── InputTools.cs
 │   │   │   ├── UIAutomationTools.cs
 │   │   │   ├── FileTools.cs
 │   │   │   ├── SystemTools.cs
+│   │   │   ├── SecurityTools.cs
 │   │   │   ├── WindowTools.cs
 │   │   │   ├── ProcessTools.cs
 │   │   │   ├── ScreenTools.cs
@@ -271,21 +275,27 @@ Windows-mcp.slnx
 │   │   │   ├── WebTools.cs
 │   │   │   ├── DiskTools.cs
 │   │   │   ├── StorageTools.cs
-│   │   │   └── StartupTools.cs
-│   │   └── Services/                      (32 service implementations)
-│   │       ├── InputService.cs
-│   │       ├── UIAutomationService.cs
-│   │       └── ...
+│   │   │   ├── StartupTools.cs
+│   │   │   ├── IntegrityTools.cs
+│   │   │   ├── UsnTools.cs
+│   │   │   └── WatchTools.cs
+│   │   ├── Services/                      (36 service implementations + helpers)
+│   │   │   ├── InputService.cs
+│   │   │   ├── UIAutomationService.cs
+│   │   │   └── ...
+│   │   └── Startup/                       (startup-report renderer + approval decoding)
 │   └── WindowsMcp.Abstractions/           ← Contracts assembly
 │       ├── WindowsMcp.Abstractions.csproj
 │       ├── IInputService.cs
 │       ├── IUIAutomationService.cs
-│       ├── ... (20 interfaces)
-│       └── Models/                        (10 DTO files)
-│           ├── InputModels.cs
+│       ├── ... (36 interfaces)
+│       └── Models/                        (21 DTO files)
+│           ├── InputDtos.cs
 │           └── ...
+├── tests/WindowsMcp.Tests/                (xUnit + Moq + FluentAssertions)
 └── docs/
-    └── architecture/
+    ├── architecture/
+    └── upstream-parity-checklist.md
 ```
 
 ---
@@ -303,6 +313,6 @@ The `Program.cs` static `Main` returns `Task<int>`. It parses `ServerOptions` fi
 ## Security Considerations
 
 1. **Transport exposure** — by default (stdio) no network port is opened; only the MCP client process can communicate. `--transport http` deliberately opens one, and every tool is reachable through it, so: the server refuses to start on a non-loopback bind without `--api-key`/`WINDOWSMCP_API_KEY` (constant-time bearer check applied to every path, 401 otherwise); `--cert-thumbprint` makes the port HTTPS-only; plain HTTP off-loopback is allowed but warned about at startup. Kestrel endpoints are configured explicitly, so `ASPNETCORE_URLS` cannot add an unauthenticated listener.
-2. **PowerShell sandboxing** — `PowerShellService` filters dangerous commands and injection-risk flags before execution (blocklist in implementation)
+2. **PowerShell execution guards** — there is no command blocklist. `PowerShellService` serializes foreground calls through a gate, kills the process tree at a 15-minute execution backstop, redirects and closes stdin, and passes scripts whole via `-EncodedCommand`. Destructive *tools* are gated by `confirm:true` (README "Safety rails"); `scrape`/`http_request` reject private address ranges.
 3. **DPI-aware coordinates** — `SetProcessDpiAwarenessContext` ensures coordinates are in physical pixels, preventing misclicks on HiDPI displays
-4. **Async-isolated services** — services are never shared across concurrent requests; the MCP SDK serializes tool calls
+4. **Concurrency** — services are singletons shared across concurrent tool calls; the ones that hold state (`UIAutomationService` STA queue, `PowerShellService` gate, `JobService`/`WatchService` registries) synchronize internally

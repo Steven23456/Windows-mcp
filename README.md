@@ -2,18 +2,12 @@
 
 An MCP server for Windows desktop automation, written in C# on the official
 [`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol)
-SDK. **64 tools** across input, screen, window, UI automation, process/shell,
-file, disk, system, security, startup, network, registry, and web categories.
-
-> **History:** Versions 0.x through 0.8.5 were written in Python. v0.2.0 (2026-05-26)
-> is a complete C# rewrite — see [CHANGELOG.md](CHANGELOG.md) for the migration
-> notes. The Python source tree is preserved in
-> `legacy/python-pre-csharp-conversion-archive-2026-05-26.zip`.
+SDK. See [Tool reference](#tool-reference) for the 64 tools.
 
 ## Build
 
 ```powershell
-git clone https://github.com/danielsimonjr/Windows-mcp.git
+git clone https://github.com/Steven23456/Windows-mcp.git
 cd Windows-mcp
 dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained `
     -p:PublishSingleFile=true `
@@ -29,22 +23,33 @@ Windows 7+ at `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`).
 
 ## Register with Claude Code (or any MCP host)
 
-Add to your MCP host config (e.g.,
-`~/.claude/local-marketplace/mcp-host/.mcp.json`):
+Point your MCP host at the published exe. With Claude Code:
+
+```powershell
+claude mcp add --transport stdio Windows-mcp -- C:\path\to\Windows-mcp\dist\WindowsMcp.exe
+```
+
+or in a `.mcp.json`:
+
+I modified this so that the PATH works correctly
 
 ```json
-{
-  "mcpServers": {
-    "Windows-mcp": {
-      "type": "stdio",
-      "command": "C:/path/to/Windows-mcp/dist/WindowsMcp.exe",
-      "args": []
-    }
+"Windows-mcp": {
+  "type": "stdio",
+  "command": "C:/Development/Windows-mcp/bundle/WindowsMcp.exe",
+  "args": [],
+  "env": {
+    "PATHEXT": ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.CPL"
   }
 }
 ```
 
-Run `/reload-plugins`. Tools appear as `mcp__Windows-mcp__*`.
+Reconnect (`/mcp`) or start a new session. Tools appear as `mcp__Windows-mcp__*`.
+
+The `.mcp.json` at the repo root is the **plugin** manifest: its
+`${CLAUDE_PLUGIN_ROOT}` path only resolves when the repo is installed as a Claude Code
+plugin, so opening this repo as a plain project shows that server as disconnected.
+Register the exe explicitly as above instead.
 
 ## Run over HTTP/HTTPS (remote)
 
@@ -137,7 +142,7 @@ operations. See [`skills/windows/SKILL.md`](skills/windows/SKILL.md).
 | Screen | `screenshot`, `ocr` |
 | Window | `window`, `switch_to_window`, `launch`, `focus`, `multi_monitor` |
 | UI Automation | `get_state`, `find_element`, `get_element`, `get_text`, `assert_element`, `interact_element`, `get_table`, `wait_for` |
-| Process / Shell | `process`, `start_process`, `powershell` (with `background: true` for jobs), `job`, `service`, `scheduled_task`, `event_log` |
+| Process / Shell | `process`, `process_inspect`, `start_process`, `powershell` (with `background: true` for jobs), `job`, `service`, `scheduled_task`, `event_log` |
 | File | `file_search`, `file_manage`, `file_dialog`, `file_read`, `file_write`, `file_info`, `file_hash`, `file_streams`, `archive` |
 | Disk | `disk_inspect`, `storage_health` |
 | System | `system_info`, `audio`, `notification`, `security_audit`, `reliability`, `driver_list`, `wmi_query`, `env`, `power_action` |
@@ -146,6 +151,7 @@ operations. See [`skills/windows/SKILL.md`](skills/windows/SKILL.md).
 | Network | `network`, `firewall` |
 | Registry | `registry_get`, `registry_set` |
 | Web | `scrape`, `http_request` |
+| Monitoring | `integrity` (file-integrity tripwire), `fs_changes` (NTFS USN journal), `watch` (live directory watch) |
 
 ## Safety rails
 
@@ -181,16 +187,15 @@ for the `dist/` folder.
 
 ```powershell
 dotnet build                                       # incremental
-dotnet test --filter "Category=Unit"               # fast loop (29 tests, ~1s)
+dotnet test --filter "Category=Unit"               # fast loop (mocked, seconds)
 dotnet test --filter "Category=Integration"        # exercises real Windows APIs
 dotnet test --filter "Category=UIAutomation"       # launches Notepad fixture
 dotnet test                                        # full suite
 ```
 
-See `docs/superpowers/specs/2026-05-24-windows-mcp-csharp-conversion-design.md`
-for the architecture spec and
-`docs/superpowers/plans/2026-05-24-windows-mcp-csharp-conversion.md` for the
-22-task implementation plan that produced this version.
+Architecture docs live in [`docs/architecture/`](docs/architecture/) (OVERVIEW,
+ARCHITECTURE, COMPONENTS, DATAFLOW). The feature backlog against the upstream
+Python server is [`docs/upstream-parity-checklist.md`](docs/upstream-parity-checklist.md).
 
 ## License
 

@@ -11,9 +11,6 @@ over HTTP/HTTPS") — covering UI automation, input, screen/OCR, windows, files,
 processes/shell, services, scheduled tasks, registry, network, web, system, and a
 HiJackThis-style startup report.
 
-> History: v0.x–0.8.5 were Python; **v0.2.0 (2026-05-26) is a full C# rewrite**. The Python
-> tree is archived in `legacy/`. Do not edit `legacy/`. See `CHANGELOG.md` for versions.
-
 ## Architecture (4 layers)
 
 ```
@@ -32,7 +29,8 @@ MCP protocol  →  Tool classes  →  Service abstractions  →  Service impleme
 - Tools are **source-generated/discovered** via `.WithToolsFromAssembly()` — you do **not**
   register tool classes manually, only the services they inject.
 - Detailed, current design docs live in `docs/architecture/` (ARCHITECTURE / OVERVIEW /
-  COMPONENTS / DATAFLOW). Feature specs live in `docs/superpowers/specs/`.
+  COMPONENTS / DATAFLOW). The feature backlog against the upstream Python server is
+  `docs/upstream-parity-checklist.md`; design notes for items taken from it go in `docs/design/`.
 
 ## Build / run / test
 
@@ -68,30 +66,31 @@ dist/WindowsMcp.exe --help
 
 ### Testing a change against the LIVE MCP server (Claude Code)
 
-**This plugin is url-sourced** (registered in `~/Github/skills/.claude-plugin/marketplace.json`
-as `source: url → github.com/danielsimonjr/Windows-mcp`). Claude Code does **not** run
-`dist/WindowsMcp.exe` from this repo, nor `~/.claude/local-marketplace/windows-mcp/` (a dead
-pre-2026-07-02 location). It runs a **committed bundle from a per-version cache clone**:
-`~/.claude/plugins/cache/local-marketplace/windows-mcp/<version>/bundle/WindowsMcp.exe`. So a
-`dotnet publish -o dist` + `_RETRY` bump deploys **nothing** — verify the running image path
-before believing a deploy landed (`Get-CimInstance Win32_Process -Filter "Name='WindowsMcp.exe'"
-| Select ProcessId, ExecutablePath, CreationDate`).
+The server Claude Code talks to is whatever its MCP registration points at — **never** the build
+output by itself. Before trusting any live result, verify which image is running:
 
-**Correct redeploy of a rebuilt exe:**
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='WindowsMcp.exe'" | Select ProcessId, ExecutablePath, CreationDate
+```
+
+**Redeploy a rebuilt exe:**
 1. `dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained
    -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true`.
-2. Copy `dist/WindowsMcp.exe` over the **committed** `bundle/WindowsMcp.exe` (it is git-tracked;
-   a plain `git add bundle/WindowsMcp.exe` works — it is not gitignored).
-3. Bump the version in **both** `.claude-plugin/plugin.json` **and** the `windows-mcp` entry in
-   `~/Github/skills/.claude-plugin/marketplace.json` (an unchanged marketplace version
-   short-circuits `/plugin marketplace update`, so the re-clone never happens).
-4. Commit + push this repo (bundle + plugin.json + CHANGELOG) and `~/Github/skills`
-   (marketplace.json).
-5. User runs **`/plugin marketplace update local-marketplace`** (re-clones into a fresh
-   `<version>/` cache dir with the new bundle) → **`/kill-plugins`** (clears the accumulated
-   stale `WindowsMcp.exe` instances — one per prior session) → **`/reload-plugins`** (binds the
-   new process). Confirm via the running process `ExecutablePath` pointing at the new `<version>`
-   cache dir and `CreationDate` later than the update.
+2. Make sure the registration points at that exe: `claude mcp add --transport stdio Windows-mcp
+   -- <repo>\dist\WindowsMcp.exe`, or the `command` in the relevant `.mcp.json` (README
+   "Register with Claude Code"). For a remote host, copy the exe over and restart it there
+   (README "Run over HTTP/HTTPS").
+3. Reconnect (`/mcp`) or start a new session — a running `WindowsMcp.exe` keeps serving the old
+   image until its process exits. Instances from earlier sessions can accumulate; if the
+   `ExecutablePath`/`CreationDate` above is not the build you just made, kill them and reconnect.
+4. Bump `<Version>` in `Directory.Build.props` **and** `.claude-plugin/plugin.json` together
+   (`ServerInfoTests` fails when they drift) and record the change in `CHANGELOG.md`.
+
+The repo-root `.mcp.json` is the **plugin** manifest: it launches
+`${CLAUDE_PLUGIN_ROOT}/bundle/WindowsMcp.exe`, which only resolves when the repo is installed as
+a Claude Code plugin **and** a `bundle/WindowsMcp.exe` is committed. Opened as a plain project,
+that entry shows as disconnected — expected, not a bug. Plugin-based delivery needs a committed
+bundle (or a changed manifest); until that is settled, register `dist/WindowsMcp.exe` directly.
 
 ## Conventions (enforced)
 

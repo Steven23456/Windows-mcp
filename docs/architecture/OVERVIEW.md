@@ -20,7 +20,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 | Feature | Description |
 |---------|-------------|
 | **Native Windows Integration** | Direct access to Windows UI Automation API via `FlaUI.UIA3` |
-| **Dependency Injection** | All 32 services are singleton-scoped, wired via `Microsoft.Extensions.Hosting` |
+| **Dependency Injection** | All 36 services are singleton-scoped, registered in `Hosting/WindowsMcpHost.AddWindowsMcp` via `Microsoft.Extensions.Hosting` |
 | **Source-Generated Tool Discovery** | `[McpServerTool]` attributes are discovered at compile time by the MCP SDK source generator |
 | **Interface-Driven Architecture** | Every service backed by an `IXxxService` interface in a separate Abstractions assembly |
 | **DPI-Aware** | Per-Monitor DPI Awareness V2 enabled at startup for correct multi-monitor coordinate handling |
@@ -49,28 +49,30 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 │  │         ModelContextProtocol SDK (Stdio or Streamable-HTTP) ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │        MCP Tool Layer  (15 [McpServerToolType] classes)     ││
+│  │        MCP Tool Layer  (19 [McpServerToolType] classes)     ││
 │  │   InputTools · UIAutomationTools · FileTools · ShellTools   ││
 │  │   SystemTools · WindowTools · ProcessTools · ScreenTools    ││
 │  │   NetworkTools · RegistryTools · WebTools · DiskTools       ││
+│  │   StorageTools · StartupTools · SecurityTools · JobTools    ││
+│  │   IntegrityTools · UsnTools · WatchTools                    ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Abstraction Layer  (WindowsMcp.Abstractions)      ││
-│  │        32 IXxxService interfaces + Model DTOs               ││
+│  │        36 IXxxService interfaces + Model DTOs               ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Implementation Layer  (WindowsMcp.Services)       ││
-│  │        32 XxxService singletons registered via DI           ││
+│  │        36 XxxService singletons registered via DI           ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                   Windows Operating System                      │
-│  ┌────────────────┐  ┌───────────────┐  ┌─────────────────────┐ │
-│  │  FlaUI.UIA3    │  │H.InputSimulator│  │  CsWin32 / WinAPI   │ │
-│  │ (UI Automation)│  │(keyboard/mouse)│  │   (DPI, WMI, etc.)  │ │
-│  └────────────────┘  └───────────────┘  └─────────────────────┘ │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────────────┐ │
+│  │  FlaUI.UIA3    │  │H.InputSimulator│  │  CsWin32 / WinAPI  │ │
+│  │ (UI Automation)│  │(keyboard/mouse)│  │  (DPI, WMI, etc.)  │ │
+│  └────────────────┘  └────────────────┘  └────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -93,36 +95,36 @@ Windows-MCP exposes **64 MCP tools** across 19 tool classes:
 ### UI Automation Tools (`UIAutomationTools` — 8 tools)
 | Tool | Purpose |
 |------|---------|
-| `GetState` | Capture full UI element tree of the foreground window |
-| `FindElement` | Find a UI element by name, control type, or automation ID |
-| `GetElement` | Get properties of a specific UI element |
-| `InteractElement` | Invoke, toggle, select, or expand a UI element |
+| `GetState` | Capture the UI element tree of the foreground window (three levels deep) |
+| `FindElement` | Find elements whose name/value contains text (kind: any / interactive / text / scrollable) |
+| `GetElement` | Get properties of a specific UI element by id |
+| `InteractElement` | Toggle, select, or invoke a UI element by id |
 | `GetText` | Extract text content from a UI element |
 | `GetTable` | Extract tabular data from a grid/table element |
-| `AssertElement` | Assert element state with PASS/FAIL result |
-| `WaitFor` | Wait until a condition on a UI element is met |
+| `AssertElement` | Assert element state (exists / enabled / checked / value / visible / focused) with PASS/FAIL result |
+| `WaitFor` | Poll until an element whose name/value contains text appears |
 
 ### Window Tools (`WindowTools` — 5 tools)
 | Tool | Purpose |
 |------|---------|
-| `SwitchToWindow` | Focus a window by title pattern |
-| `Window` | Get window info (position, size, state) |
-| `MultiMonitor` | Get all monitor layouts and resolutions |
-| `Launch` | Launch an application by name |
-| `StartProcess` | Start a detached process that survives independently |
+| `Window` | Minimize, maximize, restore, or close a window by exact title |
+| `SwitchToWindow` | Bring a window to the foreground by exact title |
+| `Focus` | Alias of `SwitchToWindow` |
+| `Launch` | Launch an application by name or path (ShellExecute); returns the PID |
+| `MultiMonitor` | Enumerate monitors with geometry and primary flag |
 
 ### File Tools (`FileTools` — 9 tools)
 | Tool | Purpose |
 |------|---------|
-| `FileRead` | Read file contents |
-| `FileWrite` | Write or append file contents |
-| `FileManage` | Copy, move, delete, or create files/directories |
+| `FileRead` | Read a file as text (`max_bytes`, `encoding`) |
+| `FileWrite` | Write text to a file (`confirm:true`) |
+| `FileManage` | Copy, move, delete (`confirm:true`), or list |
 | `FileInfo` | Get file/directory metadata |
 | `FileSearch` | Search for files by pattern |
 | `FileHash` | Compute SHA256/SHA1/MD5 hex digest |
 | `FileStreams` | NTFS alternate data streams + reparse target |
 | `FileDialog` | Interact with open/save dialogs |
-| `Archive` | Create, extract, or inspect zip/tar archives |
+| `Archive` | Zip a directory or unzip an archive |
 
 ### System Tools (`SystemTools` — 9 tools)
 | Tool | Purpose |
@@ -173,20 +175,20 @@ Windows-MCP exposes **64 MCP tools** across 19 tool classes:
 ### Registry Tools (`RegistryTools` — 2 tools)
 | Tool | Purpose |
 |------|---------|
-| `RegistryGet` | Read a registry key or value |
-| `RegistrySet` | Write a registry value |
+| `RegistryGet` | Read a named value, or list value names when no name is given |
+| `RegistrySet` | Write a value (String / DWord / QWord / Binary / MultiString / ExpandString); `confirm:true` |
 
 ### Network Tools (`NetworkTools` — 2 tools)
 | Tool | Purpose |
 |------|---------|
-| `Network` | Get network adapter info and IP configuration |
-| `HttpRequest` | Make HTTP requests (GET/POST/etc.) |
+| `Network` | Adapters, listening ports (with owning process), Wi-Fi, DNS lookup, ping |
+| `Firewall` | List, add, or remove firewall rules (`confirm:true` for add/remove) |
 
-### Web Tool (`WebTools` — 2 tools)
+### Web Tools (`WebTools` — 2 tools)
 | Tool | Purpose |
 |------|---------|
-| `Scrape` | Fetch a webpage and convert to Markdown |
-| `Shortcut` | Create or read a Windows shell shortcut (.lnk) |
+| `Scrape` | Fetch a URL and convert HTML to Markdown (private address ranges rejected) |
+| `HttpRequest` | HTTP request (GET/POST/PUT/DELETE/PATCH) with optional headers and body (private address ranges rejected) |
 
 ### Disk Tool (`DiskTools` — 1 tool)
 | Tool | Purpose |
@@ -202,6 +204,21 @@ Windows-MCP exposes **64 MCP tools** across 19 tool classes:
 | Tool | Purpose |
 |------|---------|
 | `StartupReport` | HiJackThis-style boot/persistence report. Sections: Run/RunOnce (all hives incl. per-user SIDs, with enabled state), Startup folders, scheduled tasks, auto-start services, hosts, DNS, Winsock LSP, shell extensions, Control Panel applets (registry + `System32`/`SysWOW64` `*.cpl`), accessibility ATs, Image File Execution Options, Winlogon hooks, AppInit_DLLs, Active Setup, browser proxy, trusted-zone sites. Every file-backed entry has a catalog-aware code-signing trust flag. `format=summary` (default — counts + only flagged entries, inline) \| `json` \| `text` \| `both`; `includeProcesses` opt-in |
+
+### Integrity Tool (`IntegrityTools` — 1 tool)
+| Tool | Purpose |
+|------|---------|
+| `Integrity` | File-integrity tripwire over a curated watch-list (hosts file, Startup folders, `~/.claude/settings.json`, `~/.gitconfig`, `C:\` governance files): `baseline` (SHA-256 snapshot to `%LOCALAPPDATA%\windows-mcp\integrity`), `check` (added / removed / modified vs. baseline), `list`; extra `paths` can be added |
+
+### USN Tool (`UsnTools` — 1 tool)
+| Tool | Purpose |
+|------|---------|
+| `FsChanges` | NTFS USN change journal: `status` (journal id + USN range) and `since` (change records from a USN forward). Requires elevation |
+
+### Watch Tool (`WatchTools` — 1 tool)
+| Tool | Purpose |
+|------|---------|
+| `Watch` | Live directory watching via `FileSystemWatcher`: `start` (returns a session id), `poll` (drain buffered events), `stop`, `list`; events buffer in a bounded ring between polls |
 
 ## Core NuGet Dependencies
 
