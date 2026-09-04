@@ -98,6 +98,30 @@ and the plugin entry shows as disconnected — expected, not a bug. Register `bu
 directly (README "Register with Claude Code"); plugin delivery from a clone still needs either a
 build step before install or a changed manifest (see `todo.md`).
 
+## Test-first workflow (`test-agent`)
+
+Tests come **before** the implementation. `.claude/agents/test-agent.md` is an Opus subagent that
+owns `tests/WindowsMcp.Tests`; use it for every feature, fix, parity item, and refactor, not just
+the large ones:
+
+1. **RED — before writing any production code**, delegate to `test-agent` with the requirements
+   (the user's ask, the `docs/design/<ID>-*.md` note, the parity-checklist item's "Tests." /
+   "Done when." lines, the tool `[Description]` that must become true). It returns a
+   requirement → test matrix, the failing tests, and the minimal `Abstractions` stubs
+   (interface members, DTO records, `NotImplementedException` bodies) that keep the tree
+   compiling. Read the matrix: it is the acceptance contract for the implementation.
+2. **Implement** against those tests. Replace the stubs; do not edit the tests to fit the code.
+   If a test is wrong, say why and send it back to `test-agent` rather than weakening it.
+3. **GREEN — after the implementation**, delegate to `test-agent` again. It measures coverage of
+   the changed files, closes every open row in the matrix, checks the tests bite (a deliberate
+   one-line break must turn something red), and flags mocked-only paths that need an
+   `Integration` sibling.
+4. Then `docs-agent` for the doc surfaces, then commit.
+
+The agent never writes feature logic, never edits this file, and never commits. Skipping RED is
+the exception, not the default, and needs a stated reason (a pure doc change, a rename with no
+behaviour, a one-line typo).
+
 ## Conventions (enforced)
 
 `Directory.Build.props` sets `Nullable=enable`, `ImplicitUsings=enable`,
@@ -110,13 +134,17 @@ build step before install or a changed manifest (see `todo.md`).
 
 ## Adding a tool
 
-1. Add a `sealed [McpServerToolType]` class in `Tools/`, constructor-inject the service
+1. **Tests first:** hand the tool's requirements to `test-agent` (see "Test-first workflow"). It
+   writes the failing `Tools/<X>ToolsTests.cs` / `Services/<X>ServiceTests.cs` and stubs the
+   `IXxxService` members and DTO records the tests need.
+2. Add a `sealed [McpServerToolType]` class in `Tools/`, constructor-inject the service
    interfaces, add `[McpServerTool, Description("…")]` methods.
-2. Put real logic behind an `IXxxService` in `Abstractions` + impl in `Services/` (keeps the
+3. Put real logic behind an `IXxxService` in `Abstractions` + impl in `Services/` (keeps the
    tool thin and the logic unit-testable with Moq).
-3. Register any **new** service singleton in `Hosting/WindowsMcpHost.AddWindowsMcp` (tools
+4. Register any **new** service singleton in `Hosting/WindowsMcpHost.AddWindowsMcp` (tools
    auto-register; both transports pick it up from there).
-4. Update `docs/architecture/*` counts and `CHANGELOG.md` under `## [Unreleased]`.
+5. `test-agent` again for the coverage close-out, then `docs-agent` for `docs/architecture/*`
+   counts and `CHANGELOG.md` under `## [Unreleased]`.
 
 ## Key technical notes (still true in C#)
 
