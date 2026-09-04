@@ -23,8 +23,15 @@ public sealed class UIAutomationService : IUIAutomationService
     private int _nextId;
     private int _disposed;   // 0 = alive, 1 = disposed; treat atomically via Interlocked
 
-    public UIAutomationService()
+    private readonly IInputService _input;
+
+    /// <param name="input">
+    /// Physical input for the two <c>interact_element</c> paths that have no UIA pattern to use:
+    /// a click at the element's centre, and keyboard entry when there is no writable ValuePattern.
+    /// </param>
+    public UIAutomationService(IInputService input)
     {
+        _input = input;
         _automation = new UIA3Automation();
         _staThread = new Thread(WorkerLoop) { IsBackground = true, Name = "WindowsMcp-UA-STA" };
         _staThread.SetApartmentState(ApartmentState.STA);
@@ -234,30 +241,111 @@ public sealed class UIAutomationService : IUIAutomationService
         }, ct);
     }
 
-    public Task InteractAsync(string elementId, string action, string? value, CancellationToken ct = default)
+    /// <summary>
+    /// Outcome of the STA half of <see cref="InteractAsync"/>: the result to report, plus any input
+    /// the caller must inject <b>off</b> the STA thread (a blocked SendInput must never stall the UIA
+    /// queue). At most one of the pending members is set.
+    /// </summary>
+    private sealed record InteractStep(InteractResult Result, (int X, int Y)? PendingClick = null, string? PendingText = null);
+
+    public async Task<InteractResult> InteractAsync(string elementId, string action, string? value, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        return OnStaAsync<int>(() =>
-        {
-            var el = ResolveCached(elementId);
-            switch (action.ToLowerInvariant())
-            {
-                case "toggle":
-                    el.Patterns.Toggle.PatternOrDefault?.Toggle();
-                    break;
-                case "select":
-                    if (value is null) throw new ArgumentException("'select' requires a value");
-                    el.Patterns.SelectionItem.PatternOrDefault?.Select();
-                    break;
-                case "invoke":
-                    el.Patterns.Invoke.PatternOrDefault?.Invoke();
-                    break;
-                default:
-                    throw new ArgumentException($"Unknown interact action: '{action}'");
-            }
-            return 0;
-        }, ct);
+        var step = await OnStaAsync(() => InteractOnSta(elementId, action, value), ct).ConfigureAwait(false);
+
+        if (step.PendingClick is { } point)
+            await _input.ClickAsync(point.X, point.Y, MouseButton.Left, 1, ct).ConfigureAwait(false);
+        else if (step.PendingText is { } text)
+            await _input.TypeAsync(text, ct).ConfigureAwait(false);
+
+        return step.Result;
     }
+
+    // D-2: every branch either acts through a UIA pattern or fails naming the pattern and the
+    // control — never a silent no-op — and the result says which pattern or fallback fired.
+    private InteractStep InteractOnSta(string elementId, string action, string? value)
+    {
+        var el = ResolveCached(elementId);
+        var a = action.ToLowerInvariant();
+        InteractResult Done(string method, string? detail = null) => new(elementId, a, method, detail);
+
+        switch (a)
+        {
+            case "click":
+            {
+                if (el.Patterns.Invoke.PatternOrDefault is { } invoke) { invoke.Invoke(); return new(Done("InvokePattern")); }
+                if (el.Patterns.SelectionItem.PatternOrDefault is { } selection) { selection.Select(); return new(Done("SelectionItemPattern")); }
+                if (el.Patterns.Toggle.PatternOrDefault is { } toggle) { toggle.Toggle(); return new(Done("TogglePattern", ToggleDetail(toggle))); }
+                var (x, y) = ClickPoint(el);
+                return new(Done("PhysicalClick", $"({x},{y})"), PendingClick: (x, y));
+            }
+            case "invoke":
+            {
+                var invoke = el.Patterns.Invoke.PatternOrDefault ?? throw NotSupported(el, "InvokePattern");
+                invoke.Invoke();
+                return new(Done("InvokePattern"));
+            }
+            case "toggle":
+            {
+                var toggle = el.Patterns.Toggle.PatternOrDefault ?? throw NotSupported(el, "TogglePattern");
+                toggle.Toggle();
+                return new(Done("TogglePattern", ToggleDetail(toggle)));
+            }
+            case "select":
+            {
+                if (value is null)
+                {
+                    var selection = el.Patterns.SelectionItem.PatternOrDefault ?? throw NotSupported(el, "SelectionItemPattern");
+                    selection.Select();
+                    return new(Done("SelectionItemPattern"));
+                }
+
+                // With a value the element is a container (combo box, list): open it if it can be
+                // opened, then select the child item by name.
+                el.Patterns.ExpandCollapse.PatternOrDefault?.Expand();
+                var item = el.FindFirstDescendant(cf => cf.ByName(value))
+                    ?? throw new KeyNotFoundException($"No item named '{value}' under {Describe(el)}.");
+                if (item.Patterns.SelectionItem.PatternOrDefault is { } itemSelection) { itemSelection.Select(); return new(Done("SelectionItemPattern", $"item '{value}'")); }
+                if (item.Patterns.Invoke.PatternOrDefault is { } itemInvoke) { itemInvoke.Invoke(); return new(Done("InvokePattern", $"item '{value}'")); }
+                throw NotSupported(item, "SelectionItemPattern");
+            }
+            case "focus":
+                el.Focus();
+                return new(Done("Focus"));
+            case "type":
+            {
+                if (value is null) throw new ArgumentException("'type' requires a value: the text to enter.", nameof(value));
+                el.Focus();
+                var valuePattern = el.Patterns.Value.PatternOrDefault;
+                if (valuePattern is not null && !valuePattern.IsReadOnly.ValueOrDefault)
+                {
+                    valuePattern.SetValue(value);
+                    return new(Done("ValuePattern", "replaced the whole value"));
+                }
+                return new(Done("Keyboard", "typed at the caret"), PendingText: value);
+            }
+            default:
+                throw new ArgumentException($"Unknown interact action '{action}'; expected click|invoke|toggle|select|focus|type.", nameof(action));
+        }
+    }
+
+    private static (int X, int Y) ClickPoint(AutomationElement el)
+    {
+        var r = el.BoundingRectangle;
+        if (TryGetIsOffscreen(el) || r.IsEmpty)
+            throw new InvalidOperationException($"{Describe(el)} supports no Invoke/SelectionItem/Toggle pattern and has no on-screen bounds to click.");
+        return (r.Left + r.Width / 2, r.Top + r.Height / 2);
+    }
+
+    private static string? ToggleDetail(FlaUI.Core.Patterns.ITogglePattern toggle)
+    {
+        try { return $"now {toggle.ToggleState.ValueOrDefault}"; } catch { return null; }
+    }
+
+    private static string Describe(AutomationElement el) => $"{TryGetControlType(el)} '{TryGetName(el)}'";
+
+    private static NotSupportedException NotSupported(AutomationElement el, string pattern)
+        => new($"{pattern} not supported on {Describe(el)}.");
 
     public Task<TableData> GetTableAsync(string elementId, CancellationToken ct = default)
     {

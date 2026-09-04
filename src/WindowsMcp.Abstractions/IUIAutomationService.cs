@@ -9,7 +9,7 @@ public interface IUIAutomationService : IDisposable
     Task<ElementInfo> GetElementAsync(string elementId, CancellationToken ct = default);
     Task<string> GetTextAsync(string elementId, CancellationToken ct = default);
     Task<bool> AssertElementAsync(string elementId, string state, CancellationToken ct = default);
-    Task InteractAsync(string elementId, string action, string? value, CancellationToken ct = default);
+    Task<InteractResult> InteractAsync(string elementId, string action, string? value, CancellationToken ct = default);
     Task<TableData> GetTableAsync(string elementId, CancellationToken ct = default);
     Task<ElementInfo?> WaitForAsync(string text, int timeoutMs, int intervalMs, CancellationToken ct = default);
     Task FocusAsync(string elementId, CancellationToken ct = default);

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Windows.Win32;
 using Windows.Win32.UI.WindowsAndMessaging;
 using WindowsInput;
@@ -13,51 +14,44 @@ public sealed class InputService : IInputService
 {
     private readonly InputSimulator _sim = new();
 
-    private static readonly Dictionary<string, VirtualKeyCode> KeyMap = new(StringComparer.OrdinalIgnoreCase)
+    /// <summary>
+    /// Places the cursor at (<paramref name="x"/>, <paramref name="y"/>): physical pixels on the
+    /// virtual desktop, origin at the primary monitor's top-left, so monitors left of / above it
+    /// have negative coordinates. The button and wheel events sent afterwards carry no position of
+    /// their own (H.InputSimulator's LeftButtonClick etc.), so they act wherever this put the cursor.
+    /// </summary>
+    /// <remarks>
+    /// SetCursorPos rather than an absolute SendInput move (D-3): the process is Per-Monitor-V2 DPI
+    /// aware (Program.cs), so this, UIA BoundingRectangle and multi_monitor share one physical-pixel
+    /// space, and there is no 0..65535 normalisation to get wrong — the previous code scaled by the
+    /// primary monitor's size, so every secondary-monitor click landed somewhere else.
+    /// SetCursorPos silently clamps a point outside the virtual screen to the nearest edge, which is
+    /// that same failure in a different coat, so the position is read back and a mismatch throws.
+    /// </remarks>
+    private static void MoveCursor(int x, int y)
     {
-        ["enter"]     = VirtualKeyCode.RETURN,
-        ["tab"]       = VirtualKeyCode.TAB,
-        ["esc"]       = VirtualKeyCode.ESCAPE,
-        ["escape"]    = VirtualKeyCode.ESCAPE,
-        ["space"]     = VirtualKeyCode.SPACE,
-        ["backspace"] = VirtualKeyCode.BACK,
-        ["delete"]    = VirtualKeyCode.DELETE,
-        ["up"]        = VirtualKeyCode.UP,
-        ["down"]      = VirtualKeyCode.DOWN,
-        ["left"]      = VirtualKeyCode.LEFT,
-        ["right"]     = VirtualKeyCode.RIGHT,
-        ["home"]      = VirtualKeyCode.HOME,
-        ["end"]       = VirtualKeyCode.END,
-        ["pageup"]    = VirtualKeyCode.PRIOR,
-        ["pagedown"]  = VirtualKeyCode.NEXT,
-        ["ctrl"]      = VirtualKeyCode.CONTROL,
-        ["alt"]       = VirtualKeyCode.MENU,
-        ["shift"]     = VirtualKeyCode.SHIFT,
-        ["win"]       = VirtualKeyCode.LWIN,
-    };
+        if (!PInvoke.SetCursorPos(x, y))
+            throw new InvalidOperationException($"SetCursorPos({x},{y}) failed (Win32 error {Marshal.GetLastPInvokeError()}).");
 
-    static InputService()
-    {
-        for (int i = 1; i <= 12; i++)
-            KeyMap[$"f{i}"] = (VirtualKeyCode)((int)VirtualKeyCode.F1 + i - 1);
-    }
+        if (!PInvoke.GetCursorPos(out var actual))
+            throw new InvalidOperationException($"GetCursorPos failed (Win32 error {Marshal.GetLastPInvokeError()}).");
 
-    // Use CsWin32 GetSystemMetrics instead of System.Windows.Forms.Screen to avoid
-    // adding a WinForms dependency to a console/stdio server.
-    private static int ScreenWidth  => PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CXSCREEN);
-    private static int ScreenHeight => PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CYSCREEN);
+        if (actual.X == x && actual.Y == y) return;
 
-    private void MoveCursorToVirtualDesktop(int x, int y)
-    {
-        _sim.Mouse.MoveMouseToPositionOnVirtualDesktop(
-            x * (65535.0 / ScreenWidth),
-            y * (65535.0 / ScreenHeight));
+        int left   = PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_XVIRTUALSCREEN);
+        int top    = PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_YVIRTUALSCREEN);
+        int width  = PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CXVIRTUALSCREEN);
+        int height = PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CYVIRTUALSCREEN);
+        throw new ArgumentOutOfRangeException(nameof(x),
+            $"({x},{y}) is not on any monitor: the cursor landed at ({actual.X},{actual.Y}). The virtual screen spans " +
+            $"x {left}..{left + width - 1}, y {top}..{top + height - 1} in physical pixels with the origin at the " +
+            "primary monitor's top-left; see multi_monitor for each monitor's bounds.");
     }
 
     public Task<ClickResult> ClickAsync(int x, int y, MouseButton button = MouseButton.Left, int clicks = 1, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        MoveCursorToVirtualDesktop(x, y);
+        MoveCursor(x, y);
         for (int i = 0; i < clicks; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -80,7 +74,7 @@ public sealed class InputService : IInputService
         if (button == MouseButton.Middle)
             throw new NotSupportedException("Middle-button drag is not supported by H.InputSimulator");
 
-        MoveCursorToVirtualDesktop(fromX, fromY);
+        MoveCursor(fromX, fromY);
 
         switch (button)
         {
@@ -88,7 +82,7 @@ public sealed class InputService : IInputService
             case MouseButton.Right: _sim.Mouse.RightButtonDown(); break;
         }
 
-        MoveCursorToVirtualDesktop(toX, toY);
+        MoveCursor(toX, toY);
 
         switch (button)
         {
@@ -102,7 +96,7 @@ public sealed class InputService : IInputService
     public Task HoverAsync(int x, int y, int durationMs = 0, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        MoveCursorToVirtualDesktop(x, y);
+        MoveCursor(x, y);
         if (durationMs > 0) return Task.Delay(durationMs, ct);
         return Task.CompletedTask;
     }
@@ -117,30 +111,22 @@ public sealed class InputService : IInputService
     public Task PressKeyAsync(string key, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        if (!KeyMap.TryGetValue(key, out var vk))
-            throw new ArgumentException($"Unknown key: '{key}'", nameof(key));
-        _sim.Keyboard.KeyPress(vk);
+        var token = ShortcutParser.ResolveKey(key);
+        if (token.ImpliedModifiers.Length == 0)
+            _sim.Keyboard.KeyPress(token.Key);
+        else
+            _sim.Keyboard.ModifiedKeyStroke(token.ImpliedModifiers, token.Key);   // e.g. key("+") on a US layout = Shift + OEM_PLUS
         return Task.CompletedTask;
     }
 
     public Task PressShortcutAsync(string shortcut, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var parts = shortcut.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 2)
-            throw new ArgumentException($"Invalid shortcut format: '{shortcut}'", nameof(shortcut));
-
-        var vks = new List<VirtualKeyCode>();
-        foreach (var part in parts)
-        {
-            if (!KeyMap.TryGetValue(part, out var vk))
-                throw new ArgumentException($"Unknown key in shortcut: '{part}'", nameof(shortcut));
-            vks.Add(vk);
-        }
-
-        var mods = vks.Take(vks.Count - 1).ToArray();
-        var final = vks[^1];
-        _sim.Keyboard.ModifiedKeyStroke(mods, final);
+        var chord = ShortcutParser.Parse(shortcut);
+        if (chord.Modifiers.Length == 0)
+            _sim.Keyboard.KeyPress(chord.Key);                                     // bare key: "win" opens Start, "esc" dismisses
+        else
+            _sim.Keyboard.ModifiedKeyStroke(chord.Modifiers, chord.Key);
         return Task.CompletedTask;
     }
 

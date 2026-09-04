@@ -26,10 +26,10 @@ public sealed class InputTools
         _ => throw new ArgumentException($"Unknown button '{s}'; expected left|right|middle")
     };
 
-    [McpServerTool, Description("Click at screen coordinates.")]
+    [McpServerTool, Description("Click at screen coordinates. Coordinates are physical pixels on the virtual desktop: origin = top-left of the primary monitor, so monitors left of / above it have negative values (see multi_monitor for each monitor's bounds).")]
     public async Task<string> Click(
-        [Description("X coordinate in pixels")] int x,
-        [Description("Y coordinate in pixels")] int y,
+        [Description("X coordinate in physical pixels (virtual desktop)")] int x,
+        [Description("Y coordinate in physical pixels (virtual desktop)")] int y,
         [Description("Mouse button: left, right, or middle")] string button = "left",
         [Description("Number of clicks (1=single, 2=double, 3=triple)")] int clicks = 1)
     {
@@ -37,11 +37,11 @@ public sealed class InputTools
         return JsonSerializer.Serialize(result);
     }
 
-    [McpServerTool, Description("Drag from one point to another.")]
+    [McpServerTool, Description("Drag from one point to another. Same coordinate space as click: physical virtual-desktop pixels, primary monitor's top-left = (0,0).")]
     public async Task<string> Drag(int from_x, int from_y, int to_x, int to_y, string button = "left")
         => JsonSerializer.Serialize(await _input.DragAsync(from_x, from_y, to_x, to_y, ParseButton(button)));
 
-    [McpServerTool, Description("Hover cursor at coordinates (or move cursor with duration_ms=0).")]
+    [McpServerTool, Description("Move the cursor to coordinates and optionally hold it there (duration_ms). Same coordinate space as click: physical virtual-desktop pixels.")]
     public async Task<string> Hover(int x, int y, int duration_ms = 0)
     {
         await _input.HoverAsync(x, y, duration_ms);
@@ -52,21 +52,21 @@ public sealed class InputTools
     public async Task<string> Type([Description("Text to type")] string text)
         => JsonSerializer.Serialize(await _input.TypeAsync(text));
 
-    [McpServerTool, Description("Press a single key by name (enter, tab, F1-F12, arrows, etc.)")]
-    public async Task<string> Key([Description("Key name")] string key)
+    [McpServerTool, Description("Press one key: a character (a, 7, /), f1-f24, or a name (enter, tab, esc, backspace, delete, up/down/left/right, home, end, pageup, pagedown, insert, win, printscreen). For chords use shortcut.")]
+    public async Task<string> Key([Description("Key: a character, f1-f24, or a key name")] string key)
     {
         await _input.PressKeyAsync(key);
         return $"pressed {key}";
     }
 
-    [McpServerTool, Description("Press a keyboard shortcut like ctrl+c, alt+tab, ctrl+shift+s.")]
-    public async Task<string> Shortcut([Description("Shortcut, e.g. 'ctrl+c'")] string shortcut)
+    [McpServerTool, Description("Press a chord: ctrl+c, ctrl+shift+s, win+r, alt+f4, ctrl+1. A single key such as win (opens Start) also works. Join parts with '+'; write plus for the + key.")]
+    public async Task<string> Shortcut([Description("Chord, e.g. 'ctrl+c' or 'win+r'; a bare key like 'win' is allowed")] string shortcut)
     {
         await _input.PressShortcutAsync(shortcut);
         return $"pressed {shortcut}";
     }
 
-    [McpServerTool, Description("Scroll the mouse wheel at coordinates.")]
+    [McpServerTool, Description("Scroll the mouse wheel at coordinates. Same coordinate space as click: physical virtual-desktop pixels.")]
     public async Task<string> Scroll(int x, int y, [Description("up|down|left|right")] string direction, int amount = 3)
     {
         await _input.ScrollAsync(x, y, direction, amount);

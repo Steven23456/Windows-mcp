@@ -33,4 +33,19 @@ public class UIAutomationToolsTests
         Func<Task> act = () => tools.FindElement("text", "unknown_kind");
         await act.Should().ThrowAsync<ArgumentException>().WithMessage("*kind*");
     }
+
+    // D-2: the tool forwards the action and value untouched and reports what actually fired.
+    [Fact]
+    public async Task InteractElement_forwards_arguments_and_reports_what_fired()
+    {
+        var mock = new Mock<IUIAutomationService>();
+        mock.Setup(s => s.InteractAsync("el-1", "type", "hi", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InteractResult("el-1", "type", "Keyboard", "typed at the caret"));
+        var tools = new UIAutomationTools(mock.Object);
+
+        var result = await tools.InteractElement("el-1", "type", "hi");
+
+        result.Should().Contain("\"Method\":\"Keyboard\"").And.Contain("el-1");
+        mock.VerifyAll();
+    }
 }

@@ -106,13 +106,15 @@ Run all four and compose the results into one health summary with a per-area ver
 ### 4. UI-automation loop
 
 ```
-get_state                      (read the element tree)
-  → click / type / key         (act)
-  → assert_element / wait_for  (confirm the state changed)
+get_state                                   (read the element tree)
+  → interact_element / click / type / key   (act)
+  → assert_element / wait_for               (confirm the state changed)
   → repeat
 ```
 
 Read the tree before acting, act, then confirm the action landed before moving on — don't chain blind actions. **The target app must be foregrounded on an interactive desktop; these tools fail headless or when the app is in the background.** Prefer `find_element`/`get_element` to locate targets by name/role over hardcoded coordinates, which break when the window moves or resizes.
+
+Prefer `interact_element` over a coordinate `click` for a named control: it acts through the UIA pattern (Invoke, SelectionItem, Toggle, Value) and falls back to a physical click at the element's centre, reports which one fired in `Method`, and errors — instead of silently doing nothing — when a pattern is unsupported. Keyboard chords go through `shortcut` (`ctrl+c`, `ctrl+shift+s`, `win+r`, `alt+f4`, a bare `win`); a single key through `key` (`a`, `enter`, `f5`). Coordinates for `click`/`drag`/`hover`/`scroll` are physical pixels on the virtual desktop with the origin at the primary monitor's top-left, so a monitor left of or above it has negative coordinates — take them from `multi_monitor` or an element's `Bounds`.
 
 ### 5. File forensics
 

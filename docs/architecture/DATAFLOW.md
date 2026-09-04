@@ -118,8 +118,8 @@ public async Task<string> ToolName(/* parameters */)
 
 ```
 ┌──────────┐   ┌────────────┐   ┌──────────────────┐   ┌────────────────────┐
-│ AI Agent │   │InputTools  │   │  InputService    │   │ H.InputSimulator   │
-│          │   │            │   │                  │   │ (SendInput Win32)  │
+│ AI Agent │   │InputTools  │   │  InputService    │   │ Win32 (user32) +   │
+│          │   │            │   │                  │   │ H.InputSimulator   │
 └────┬─────┘   └─────┬──────┘   └────────┬─────────┘   └─────────┬──────────┘
      │               │                   │                        │
      │ Click(x,y,    │                   │                        │
@@ -132,10 +132,10 @@ public async Task<string> ToolName(/* parameters */)
      │               │  MouseButton,     │                        │
      │               │  clicks)          │                        │
      │               ├──────────────────►│                        │
-     │               │                   │ MoveMouse(x, y)        │
+     │               │                   │ SetCursorPos(x, y)     │
      │               │                   ├───────────────────────►│
-     │               │                   │                        │ SendInput(MOUSEMOVE)
-     │               │                   │                        ├──────────────►
+     │               │                   │ GetCursorPos read-back │ (throws if Windows
+     │               │                   │◄───────────────────────┤  clamped the point)
      │               │                   │ ButtonDown/Up × clicks │
      │               │                   ├───────────────────────►│
      │               │                   │                        │ SendInput(MOUSECLICK)
@@ -154,8 +154,8 @@ Input:  x=800, y=400, button="right", clicks=1
 Processing:
   ParseButton("right") → MouseButton.Right
   InputService.ClickAsync(800, 400, MouseButton.Right, 1):
-    ├─► IMouseSimulator.MoveTo(800, 400)    // absolute physical pixels
-    └─► IMouseSimulator.RightButtonClick()  // SendInput(MOUSE_RIGHT_DOWN + MOUSE_RIGHT_UP)
+    ├─► SetCursorPos(800, 400) + GetCursorPos   // physical virtual-desktop pixels; throws if clamped
+    └─► IMouseSimulator.RightButtonClick()      // SendInput(MOUSE_RIGHT_DOWN + MOUSE_RIGHT_UP) at the cursor
 
 Output: ClickResult { X=800, Y=400, Button="Right", Clicks=1 }
         → JSON: {"X":800,"Y":400,"Button":"Right","Clicks":1}
@@ -509,8 +509,7 @@ All tool methods return `Task<string>` where the string is either:
 | Location | Behavior | Notes |
 |----------|----------|-------|
 | `WaitFor` | Polls every `interval_ms` (default 500ms) up to `timeout_ms` (default 10s) | Only tool with a loop |
-| `InputService` click | `Thread.Sleep` between multi-clicks | Prevents double-click collapse |
-| `InputService` type | Delay between keystrokes | Simulates human typing cadence |
+| `InputService` | No delays: clicks are back-to-back `SendInput`; the cursor is placed with `SetCursorPos` and read back before any button event | A clamped (off-monitor) point throws rather than clicking elsewhere |
 | `PowerShellService` | Async wait on process exit | 15-min execution backstop (armed after the serialization gate); caller cancellation kills the process tree |
 | `ShellTools` heartbeat | Progress notification every 10s during a foreground `powershell` call | Lets spec-compliant clients reset their request timeout |
 | `JobService` | Background jobs poll-based; per-job 60-min backstop | Runs outside the PowerShell serialization gate |

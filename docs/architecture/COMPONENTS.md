@@ -448,16 +448,17 @@ public record AudioState(int Level, bool Muted);
 Uses **FlaUI.UIA3** to walk the Windows Accessibility (UIA3) tree:
 - `GetStateAsync()` — builds a three-level `ElementTree` rooted at the foreground window (falls back to the focused element, then the desktop); every element gets a cached `el_N` id
 - `FindElementAsync()` — searches by name/value with optional kind filter
-- `InteractAsync()` — toggle / select / invoke via UIA patterns; `FocusAsync()` sets keyboard focus
+- `InteractAsync()` — click / invoke / toggle / select / focus / type. Each acts through a UIA pattern (Invoke, SelectionItem, Toggle, Value) or a physical fallback via `IInputService` (a click at the element's centre; keyboard entry when there is no writable ValuePattern) and returns an `InteractResult` naming what fired; an unsupported pattern throws `NotSupportedException` with the control type — never a silent no-op. `FocusAsync()` sets keyboard focus
 - `WaitForAsync()` — polls at `interval_ms` until element appears or `timeout_ms` elapses
 - `GetTableAsync()` — reads cells via `IGridPattern`
-- `AssertElementAsync()` — checks element properties: exists / enabled / checked / value / visible / focused
+- `AssertElementAsync()` — checks element properties: exists / enabled / checked / visible (`value` and `focused` are advertised by the tool but not yet implemented — parity checklist D-4)
 
 ### `InputService`
 
-Uses **H.InputSimulator** (`WindowsInput` namespace) which calls `SendInput` directly:
-- Mouse events: `MoveMouse`, `LeftButtonClick`, `RightButtonClick`, `MiddleButtonClick`
-- Keyboard events: `KeyPress`, `KeyDown`, `KeyUp`, `TextEntry`
+Uses **H.InputSimulator** (`WindowsInput` namespace) for `SendInput` button, wheel and key events, and Win32 `SetCursorPos` for cursor placement:
+- Cursor: `SetCursorPos(x, y)` in physical virtual-desktop pixels (origin = the primary monitor's top-left; monitors left of / above it have negative coordinates), then a `GetCursorPos` read-back — a point Windows clamped (off any monitor) throws `ArgumentOutOfRangeException` instead of clicking somewhere else. Button and wheel events carry no position, so they act at that cursor
+- Mouse events: `LeftButtonClick` / `RightButtonClick` / `MiddleButtonClick`, `…ButtonDown/Up` for drags, `VerticalScroll` / `HorizontalScroll`
+- Keyboard events: `KeyPress`, `ModifiedKeyStroke`, `TextEntry`. Key names and chords are resolved by the pure `ShortcutParser`: named keys and aliases, `f1`–`f24`, numpad and media keys, single characters (`a`–`z` / `0`–`9` directly, anything else through `VkKeyScan` with the layout's implied Shift), `plus` for the `+` key, and bare keys such as `win`
 - Note: `MouseButton` enum disambiguation required — `H.InputSimulator` also exports `WindowsInput.MouseButton`; the abstractions define `WindowsMcp.Abstractions.Models.MouseButton` to avoid ambiguity
 
 ### `PowerShellService`

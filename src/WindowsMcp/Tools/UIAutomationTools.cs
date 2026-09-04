@@ -65,14 +65,14 @@ public sealed class UIAutomationTools
         return pass ? "PASS" : $"FAIL: {state}";
     }
 
-    [McpServerTool, Description("Interact with a UI element (click, toggle, select, focus, type).")]
+    [McpServerTool, Description("Act on a UI element by id. action: click (InvokePattern, else SelectionItem, else Toggle, else a physical click at the element's centre), invoke, toggle, select (no value: select this item; value: pick the child item with that name in a combo/list), focus, type (value = text; a writable ValuePattern replaces the whole value, otherwise it is typed at the caret). Returns {ElementId, Action, Method, Detail} saying which pattern or fallback fired; an unsupported pattern errors naming the control type.")]
     public async Task<string> InteractElement(
-        [Description("Element ID to interact with")] string element_id,
-        [Description("Action: click, toggle, select, focus, type")] string action,
-        [Description("Value for 'type' or 'select' actions")] string? value = null)
+        [Description("Element ID from find_element or get_state")] string element_id,
+        [Description("click | invoke | toggle | select | focus | type")] string action,
+        [Description("Text for 'type'; child item name for 'select' (optional)")] string? value = null)
     {
-        await _uia.InteractAsync(element_id, action, value);
-        return "interacted";
+        var result = await _uia.InteractAsync(element_id, action, value);
+        return JsonSerializer.Serialize(result);
     }
 
     [McpServerTool, Description("Extract tabular data from a UI element via GridPattern.")]

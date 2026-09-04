@@ -51,9 +51,10 @@ function names are the stable anchor.
 
 | ID | Item | Pri | Effort | Depends on | Status |
 |---|---|---|---|---|---|
-| D-1 | `shortcut`/`key` reject letters, digits, bare keys | P1 | S | — | ☐ |
-| D-2 | `interact_element` missing click / focus / type | P1 | S | — | ☐ |
-| D-3 | Cursor placement wrong on secondary monitors | P1 | S | — | ☐ |
+| D-1 | `shortcut`/`key` reject letters, digits, bare keys | P1 | S | — | ☑ |
+| D-2 | `interact_element` missing click / focus / type | P1 | S | D-3 | ☑ |
+| D-3 | Cursor placement wrong on secondary monitors | P1 | S | — | ☑ |
+| D-4 | `assert_element` advertises `value` / `focused` but implements neither | P2 | S | — | ☐ |
 | A-1 | Whole-desktop window inventory | P1 | M | — | ☐ |
 | A-2 | Desktop-wide labeled interactive-element snapshot | P1 | L | A-1 | ☐ |
 | A-3 | Scrollable regions with scroll percentages | P2 | S | A-2 | ☐ |
@@ -98,7 +99,7 @@ function names are the stable anchor.
 | S-9 | Claude Desktop Extension (`.mcpb`) + registry `server.json` | P3 | M | — | ☐ |
 | S-10 | Per-tool black-box tester skill | P3 | S | — | ☐ |
 
-**Suggested order.** D-1 → D-3 first (bugs, each < 1 day). Then the screenshot cluster
+**Suggested order.** D-3 → D-1 → D-2 first (bugs, each < 1 day; the D-2 physical-click fallback needs D-3 — design notes in `docs/design/`), D-4 whenever convenient. Then the screenshot cluster
 (A-7, A-9, A-8, A-11) because every agent loop starts with a screenshot. Then A-1 → A-2 → A-4,
 which unlock B-6, B-8, B-10, A-3, A-6. Quick wins B-5, B-1, B-2, B-3, C-2, C-7, S-8, S-1 can be
 interleaved anywhere. A-5, A-12, S-4 last.
@@ -108,7 +109,7 @@ interleaved anywhere. A-5, A-12, S-4 last.
 ## D — Defects exposed by the comparison
 
 ### D-1 — `shortcut` and `key` reject letters, digits, and bare keys  `P1 · S`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/D-1-shortcut-parser.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream behaviour.** `Shortcut` splits on `+`; single-character parts are sent literally and
 multi-character parts go through `_KEY_ALIASES` (`backspace`, `capslock`, `scrolllock`,
@@ -140,7 +141,7 @@ throws with the offending token named; case-insensitive.
 `("ctrl+1")` all succeed; `key("a")` works; error text for a bad token names the token.
 
 ### D-2 — `interact_element` advertises click / focus / type but only implements toggle / select / invoke  `P1 · S`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/D-2-interact-element-actions.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream behaviour.** Not a single tool upstream — but label-targeted `Click`/`Type` are the
 primary way agents act on elements there, so this is the closest equivalent and must work.
@@ -169,7 +170,7 @@ handles only `toggle`, `select`, `invoke`; anything else throws `Unknown interac
 "pattern X not supported on <controlType>" message; the description and implementation agree.
 
 ### D-3 — Cursor placement is wrong on secondary monitors  `P1 · S`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/D-3-cursor-virtual-desktop.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream behaviour.** All coordinates are virtual-desktop pixels; `uia.Click(x,y)`/`MoveTo`
 call `SetCursorPos` directly, so negative and beyond-primary coordinates land correctly.
@@ -195,6 +196,24 @@ call `SetCursorPos` directly, so negative and beyond-primary coordinates land co
 
 **Done when.** A unit test proves the normalisation for a monitor left of / above primary; a
 manual check clicks a target on a secondary monitor via `multi_monitor` bounds.
+
+### D-4 — `assert_element` advertises `value` and `focused` but implements neither  `P2 · S`
+- [ ] Not started
+
+**Found while planning D-2** (`docs/design/D-2-interact-element-actions.md`). `Tools/UIAutomationTools.cs`
+`AssertElement` lists `exists, enabled, checked, value, visible, focused`;
+`Services/UIAutomationService.cs:220` `AssertElementAsync` handles `exists`, `enabled`, `checked`,
+`visible` and throws `Unknown assertion state` for `value` and `focused`.
+`docs/architecture/COMPONENTS.md` also claims both work.
+
+**Sketch.** `focused` → `el.Properties.HasKeyboardFocus`. `value` needs something to compare
+against: add an optional `expected` parameter (`value` passes when `ValuePattern.Value == expected`),
+or drop `value` from the description. Either way put the observed state in the `FAIL:` text.
+
+**Touches.** `Services/UIAutomationService.cs`, `Tools/UIAutomationTools.cs`,
+`tests/.../Tools/UIAutomationToolsTests.cs`, `docs/architecture/COMPONENTS.md`.
+
+**Done when.** Every state named in the description is implemented; `FAIL:` names the observed state.
 
 ---
 

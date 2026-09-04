@@ -33,8 +33,9 @@ internal static class Program
 
         // Per-monitor DPI awareness V2: screen geometry and screenshots use physical pixels.
         // Required for correct HiDPI behavior across multi-monitor setups.
-        // Must be called before any window/screen API. Affects ScreenshotService default
-        // region AND InputService coordinate normalization (both call GetSystemMetrics).
+        // Must be called before any window/screen API. It keeps ScreenshotService's default
+        // region, InputService's SetCursorPos placement, UIA bounding rectangles and multi_monitor
+        // in ONE physical-pixel coordinate space (virtual desktop, origin = primary's top-left).
         // CsWin32 exposes DPI_AWARENESS_CONTEXT as a HANDLE-typed struct, not an enum;
         // the documented sentinel values (per Win32 docs / windef.h) are negative
         // integers cast to the handle type. -4 == PER_MONITOR_AWARE_V2.

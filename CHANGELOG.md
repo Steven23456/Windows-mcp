@@ -10,6 +10,30 @@
   well-known folder defaults, and corrects `PATHEXT` when it cannot resolve an `.exe`. Values the
   host did set are never overwritten (only `PATHEXT` is corrected). Repaired names are logged to
   stderr once at startup. Unit-tested in `EnvironmentRepairTests`.
+- **`shortcut` / `key` accept letters, digits, punctuation, and bare keys** (parity D-1). The
+  19-name key map is replaced by `Services/ShortcutParser`: named keys and aliases (`win`/`windows`/
+  `super`, `return`, `del`, `printscreen`, `capslock`, numpad and media keys, `f1`–`f24`), single
+  characters (`a`–`z` and `0`–`9` directly; anything else through `VkKeyScan`, which also supplies
+  the layout's Shift state), `plus` for the `+` key, and single-part chords (`win` opens Start). So
+  `ctrl+c`, `ctrl+shift+s`, `win+r`, `ctrl+1` and `key("a")` all work, and an unknown token is named
+  in the error. The parser is pure and unit-tested (`ShortcutParserTests`).
+- **`interact_element` implements every action it advertises** (parity D-2). `click` (Invoke →
+  SelectionItem → Toggle → physical click at the element's centre), `invoke`, `toggle`, `select`
+  (with a value: expand the container and pick the child item by name), `focus`, and `type` (a
+  writable ValuePattern replaces the value, otherwise keyboard entry at the caret). Every branch
+  either acts or throws `NotSupportedException` naming the pattern and control — the old code
+  silently no-op'd when a pattern was missing and still answered `"interacted"` — and the tool now
+  returns `{ElementId, Action, Method, Detail}` saying which pattern or fallback fired.
+  `IInputService` is injected into `UIAutomationService`; input is sent off the UIA STA thread.
+  Verified live against Notepad (`UIAutomationServiceTests`).
+- **Cursor placement on secondary monitors** (parity D-3). `InputService` scaled coordinates by the
+  primary monitor's size but sent them as virtual-desktop absolutes, so every `click`/`drag`/`hover`/
+  `scroll` on a second monitor landed elsewhere and negative coordinates were unreachable. It now
+  places the cursor with `SetCursorPos` (physical virtual-desktop pixels, origin = the primary's
+  top-left — one coordinate space with UIA bounds and `multi_monitor` under Per-Monitor-V2) and
+  reads it back: a point Windows clamped (off any monitor) throws instead of clicking somewhere
+  else. The four mouse tools' descriptions now state the coordinate space. An integration test
+  hovers to every monitor's centre and asserts the exact position.
 
 ### Added
 

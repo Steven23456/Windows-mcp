@@ -2,6 +2,7 @@ SendInput
 SetCursorPos
 GetCursorPos
 GetSystemMetrics
+VkKeyScan
 SetProcessDpiAwarenessContext
 SetProcessDpiAwareness
 FindWindow
