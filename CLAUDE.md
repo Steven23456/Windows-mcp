@@ -52,6 +52,9 @@ dotnet test --filter "Category!=UIAutomation"   # headless-safe subset
 $env:WINDOWSMCP_API_KEY = "<16+ chars>"
 bundle/WindowsMcp.exe --transport http --port 8765 [--bind <ip>] [--cert-thumbprint <sha1>]
 bundle/WindowsMcp.exe --help
+
+# Shrink every capture process-wide (both transports; 0.1-1.0, multiplies each call's own scale):
+bundle/WindowsMcp.exe --screenshot-scale 0.5      # or $env:WINDOWSMCP_SCREENSHOT_SCALE = "0.5"
 ```
 
 - **`[Trait("Category","UIAutomation")]` tests need an interactive desktop** with the target
@@ -130,7 +133,9 @@ behaviour, a one-line typo).
   `#pragma warning disable <ID>` + a comment naming the reason (see `AuthenticodeInspector.cs`
   for the `SYSLIB0057` precedent), or add to `NoWarn` only for a genuinely global case.
 - DTOs are `record`s; services are `sealed`; tool methods are `async Task<string>` returning
-  JSON (and/or text) and carry a `[McpServerTool, Description(...)]` attribute.
+  JSON (and/or text) — or `async Task<CallToolResult>` when the result carries non-text content,
+  as `screenshot` does (a text metadata block plus an image block) — and carry a
+  `[McpServerTool, Description(...)]` attribute.
 
 ## Adding a tool
 
@@ -142,7 +147,9 @@ behaviour, a one-line typo).
 3. Put real logic behind an `IXxxService` in `Abstractions` + impl in `Services/` (keeps the
    tool thin and the logic unit-testable with Moq).
 4. Register any **new** service singleton in `Hosting/WindowsMcpHost.AddWindowsMcp` (tools
-   auto-register; both transports pick it up from there).
+   auto-register; both transports pick it up from there). A process-level option from
+   `ServerOptions` crosses into the tool layer as a registered public options record (see
+   `ScreenshotOptions`), never read from the environment inside a service.
 5. `test-agent` again for the coverage close-out, then `docs-agent` for `docs/architecture/*`
    counts and `CHANGELOG.md` under `## [Unreleased]`.
 

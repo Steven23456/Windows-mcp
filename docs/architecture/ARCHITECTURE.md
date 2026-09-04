@@ -79,7 +79,7 @@ The MCP SDK (`ModelContextProtocol.Server`) handles all protocol concerns:
   - **Streamable HTTP** (`--transport http`): `WithHttpTransport(o => o.Stateless = true)` + `MapMcp("/mcp")` on Kestrel, built by `Hosting/WindowsMcpHost.BuildHttpApp`. `--port`/`--bind` choose the endpoint, `--cert-thumbprint` (resolved by `Hosting/CertificateLocator`) makes it HTTPS-only, and `--api-key` installs a constant-time bearer gate ahead of every route. Stateless because no tool issues server→client requests, and a restart then stays invisible to clients.
 - **Tool Discovery**: `WithToolsFromAssembly()` — discovers all `[McpServerTool]` methods, registering them with their parameter schemas automatically
 - **Server Info**: `ServerInfo = new() { Name = "Windows-mcp", Version = Program.ServerVersion }` — the version comes from `<Version>` in `Directory.Build.props`
-- **Shared wiring**: `WindowsMcpHost.AddWindowsMcp()` holds the service registrations, server identity, caller-facing error filter and tool discovery, so both transports are configured identically; only the transport call differs.
+- **Shared wiring**: `WindowsMcpHost.AddWindowsMcp(options)` holds the service registrations, server identity, caller-facing error filter and tool discovery, so both transports are configured identically; only the transport call differs.
 
 **Critical startup requirements** (handled in `Program.cs` before host build):
 ```csharp
@@ -131,7 +131,7 @@ public sealed class InputTools
 | `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService` |
 | `WindowTools` | 5 | `IWindowService` |
 | `ProcessTools` | 6 | `IProcessService`, `IServiceControlService`, `ITaskSchedulerService`, `IEventLogService` |
-| `ScreenTools` | 2 | `IScreenshotService`, `IOcrService` |
+| `ScreenTools` | 2 | `IScreenshotService`, `IOcrService`, `IWindowService`, `IInputService` (+ the `ScreenshotOptions` record) |
 | `WebTools` | 2 | `IWebService` |
 | `RegistryTools` | 2 | `IRegistryService` |
 | `NetworkTools` | 2 | `INetworkService`, `IFirewallService` |
@@ -166,6 +166,7 @@ public interface IInputService
     Task PressKeyAsync(string key);
     Task PressShortcutAsync(string shortcut);
     Task ScrollAsync(int x, int y, string direction, int amount);
+    Task<CursorPosition> GetCursorPositionAsync();
 }
 ```
 
@@ -173,9 +174,10 @@ public interface IInputService
 
 ### 4. Service Implementation Layer
 
-All 36 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp`, which both transports call:
+All 36 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as the `ScreenshotOptions` record the screen tools read:
 
 ```csharp
+services.AddSingleton(new ScreenshotOptions(options.ScreenshotScale));  // --screenshot-scale
 services.AddSingleton<IInputService, InputService>();
 services.AddSingleton<IScreenshotService, ScreenshotService>();
 // ... (36 registrations)
@@ -191,7 +193,7 @@ Services contain all business logic and directly call Windows APIs through platf
 |---------|-------------|-------------|
 | `FlaUI.UIA3` | UI Automation COM | Walk the accessibility tree, find/inspect/interact with elements |
 | `H.InputSimulator` | `SendInput` Win32 | Inject keyboard and mouse events at driver level |
-| `SkiaSharp` | GDI+/DirectX | Capture screenshots, crop regions, encode PNG |
+| `SkiaSharp` | GDI+/DirectX | Capture screenshots, downscale (Mitchell cubic), encode PNG/JPEG |
 | `CsWin32` | P/Invoke gen | Auto-generates interop for `SetProcessDpiAwareness`, `SetCurrentProcessExplicitAppUserModelID`, etc. |
 | `TaskScheduler` | Task Scheduler COM | Create, read, update, delete scheduled tasks |
 | `System.Management` | WMI | Query hardware, driver, and configuration data |
@@ -208,8 +210,9 @@ All services follow the DI pattern — no static state, no singletons instantiat
 
 ```csharp
 // Hosting/WindowsMcpHost.cs — shared by both transports
-public static IMcpServerBuilder AddWindowsMcp(this IHostApplicationBuilder builder)
+public static IMcpServerBuilder AddWindowsMcp(this IHostApplicationBuilder builder, ServerOptions options)
 {
+    builder.Services.AddSingleton(new ScreenshotOptions(options.ScreenshotScale));
     builder.Services.AddSingleton<IInputService, InputService>();
     // ...
     return builder.Services.AddMcpServer(...).WithRequestFilters(...).WithToolsFromAssembly(...);
@@ -217,12 +220,12 @@ public static IMcpServerBuilder AddWindowsMcp(this IHostApplicationBuilder build
 
 // Program.cs — stdio
 var builder = Host.CreateApplicationBuilder(args);
-builder.AddWindowsMcp().WithStdioServerTransport();
+builder.AddWindowsMcp(options).WithStdioServerTransport();
 await builder.Build().RunAsync();
 
 // Program.cs — HTTP (WindowsMcpHost.BuildHttpApp)
 var web = WebApplication.CreateBuilder();
-web.AddWindowsMcp().WithHttpTransport(o => o.Stateless = true);
+web.AddWindowsMcp(options).WithHttpTransport(o => o.Stateless = true);
 app.MapMcp("/mcp");
 ```
 

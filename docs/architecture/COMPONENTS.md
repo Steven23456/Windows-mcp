@@ -31,10 +31,10 @@ public static async Task<int> Main(string[] args)
 
     // 4. Command line / WINDOWSMCP_* env → ServerOptions (exit 2 + usage on a bad option; --help)
     var options = ServerOptions.Parse(args, Environment.GetEnvironmentVariable);
-    return options.IsHttp ? await RunHttpAsync(options) : await RunStdioAsync(args);
+    return options.IsHttp ? await RunHttpAsync(options) : await RunStdioAsync(args, options);
 }
 
-static async Task<int> RunStdioAsync(string[] args)
+static async Task<int> RunStdioAsync(string[] args, ServerOptions options)
 {
     // Force UTF-8 to prevent JSON-RPC response buffering on Windows (cp1252 default)
     Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -42,7 +42,7 @@ static async Task<int> RunStdioAsync(string[] args)
 
     var builder = Host.CreateApplicationBuilder(args);
     WindowsMcpHost.ConfigureStderrLogging(builder.Logging, http: false);
-    builder.AddWindowsMcp()             // Hosting/WindowsMcpHost: all singletons + AddMcpServer(ServerInfo)
+    builder.AddWindowsMcp(options)      // Hosting/WindowsMcpHost: all singletons + AddMcpServer(ServerInfo)
         .WithStdioServerTransport();    //   + ToolErrors call-tool filter + WithToolsFromAssembly()
     await builder.Build().RunAsync();
     return 0;
@@ -102,7 +102,7 @@ static async Task<int> RunHttpAsync(ServerOptions options)
 
 ## Tool Classes
 
-Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except for injected service references). All tool methods are `async Task<string>` and return JSON-serialized results or plain strings.
+Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except for injected service references). All tool methods are `async Task<string>` and return JSON-serialized results or plain strings — except `screenshot`, which returns `async Task<CallToolResult>` so it can carry an image content block.
 
 ---
 
@@ -227,12 +227,12 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 ### `ScreenTools` — 2 tools
 `src/WindowsMcp/Tools/ScreenTools.cs`
 
-**Injected:** `IScreenshotService`, `IOcrService`
+**Injected:** `IScreenshotService`, `IOcrService`, `IWindowService` (monitor inventory), `IInputService` (cursor position), plus the `ScreenshotOptions` record (`--screenshot-scale`)
 
 | Method | Description |
 |--------|-------------|
-| `Screenshot` | Capture the primary display or a `x,y,w,h` region as PNG/JPEG; saves to `%TEMP%\WindowsMcp` and returns the path (`output="file"`, default) or inlines base64 JSON (`output="base64"`) |
-| `Ocr` | Extract text from a screen region |
+| `Screenshot` | Capture the primary display, selected monitors (`display="all"`/`"0,2"`) or an `x,y,w,h` region (virtual-desktop pixels, validated against the virtual screen). Returns a `CallToolResult`: a JSON metadata text block (encoded and original size, captured `region`, `displays`, `cursor`, `cursorDrawn?`, `coordinateScale?`/`note?`) plus an `ImageContentBlock` (`output="inline"`, default; `"base64"` is an alias). `output="file"` saves to `%TEMP%\WindowsMcp` and returns the path in the metadata instead. Downscaled to fit `max_width`×`max_height` (1920×1080), with `scale`/`quality` on top; jpeg inline, png to file |
+| `Ocr` | Extract text from the primary display, a `display` selection, or a region — same parser, always captured at full resolution |
 
 ---
 
@@ -366,8 +366,8 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 
 | Interface | Key Methods |
 |-----------|-------------|
-| `IInputService` | `ClickAsync`, `DragAsync`, `HoverAsync`, `TypeAsync`, `PressKeyAsync`, `PressShortcutAsync`, `ScrollAsync` |
-| `IScreenshotService` | `CaptureAsync(region?, format)` → `ScreenshotResult` |
+| `IInputService` | `ClickAsync`, `DragAsync`, `HoverAsync`, `TypeAsync`, `PressKeyAsync`, `PressShortcutAsync`, `ScrollAsync`, `GetCursorPositionAsync` → `CursorPosition` |
+| `IScreenshotService` | `CaptureAsync(region?, options?)` → `ScreenshotResult` (`CaptureOptions`: format, max size, scale, quality, cursor) |
 | `IOcrService` | `ExtractTextAsync(region?)` → text |
 | `IClipboardService` | `GetTextAsync`, `SetTextAsync` |
 | `IAudioService` | `GetAsync` → `AudioState`, `SetVolumeAsync`, `SetMutedAsync` |
@@ -411,8 +411,8 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 21 f
 
 | File | Key Types |
 |------|-----------|
-| `InputDtos.cs` | `ClickResult`, `DragResult`, `TypeResult`, `MouseButton` (enum) |
-| `ScreenDtos.cs` | `ScreenRegion`, `ScreenshotResult`, `ImageFormat` (enum) |
+| `InputDtos.cs` | `ClickResult`, `DragResult`, `TypeResult`, `CursorPosition`, `MouseButton` (enum) |
+| `ScreenDtos.cs` | `ScreenRegion`, `CaptureOptions`, `ScreenshotResult`, `ScreenshotOptions`, `ImageFormat` (enum) |
 | `UIAutomationDtos.cs` | `ElementInfo`, `Bounds`, `ElementTree`, `FindElementResult`, `FindKind` (enum), `FindScope` (enum), `TableData`, `InteractResult`, `AssertResult` |
 | `WindowDtos.cs` | `WindowAction`, `MonitorInfo` |
 | `ProcessDtos.cs` | `ProcessDto`, `ProcessDetailDto`, `ModuleInfo`, `ProcessLineageDto`, `ProcessGroupDto` |
@@ -437,7 +437,8 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 21 f
 ```csharp
 // Models/ScreenDtos.cs
 public record ScreenRegion(int X, int Y, int Width, int Height);
-public record ScreenshotResult(byte[] Bytes, int Width, int Height, ImageFormat Format);
+public record ScreenshotResult(byte[] Bytes, int Width, int Height, ImageFormat Format,
+    int OriginalWidth, int OriginalHeight, double CoordinateScale, string? CursorDrawn = null);
 
 // IAudioService.cs (small result types may sit next to their interface)
 public record AudioState(int Level, bool Muted);
@@ -454,7 +455,7 @@ Uses **FlaUI.UIA3** to walk the Windows Accessibility (UIA3) tree:
 - `FindElementAsync()` — walks one window root at a time (foreground by default; `scope=window` resolves a title exact-then-substring against the top-level windows and names the open windows when nothing matches; `scope=desktop` walks them all). Every property read is guarded and each element is evaluated inside a catch, so an element that dies mid-walk is skipped rather than failing the call; the kind filter is pushed into a UIA `OrCondition` for descendants and applied client-side to the root. `kind=interactive` is upstream's control-type set plus `Document` (`InteractiveControlTypes`). Off-screen elements and empty bounds are dropped before the 20-result cap unless `includeOffscreen` — an `Edit` with real bounds is kept either way, because browsers over-report it as off-screen
 - `InteractAsync()` — click / invoke / toggle / select / focus / type. Each acts through a UIA pattern (Invoke, SelectionItem, Toggle, Value) or a physical fallback via `IInputService` (a click at the element's centre; keyboard entry when there is no writable ValuePattern) and returns an `InteractResult` naming what fired; an unsupported pattern throws `NotSupportedException` with the control type — never a silent no-op. `FocusAsync()` sets keyboard focus
 - `WaitForAsync()` — polls `FindElementAsync` (same kind/scope/window/off-screen filters, the window re-resolved each poll) via the pure `PollAsync` loop: polls at least once, retries a poll that throws, clamps the sleep to the remaining budget, returns `null` when clean polls found nothing, and throws `TimeoutException` when *every* poll failed
-- `GetTableAsync()` — reads cells via `IGridPattern`
+- `GetTableAsync()` — reads cells via `IGridPattern` and column headers via the `TablePattern`; the raw strings are projected by the unit-testable `BuildTable`, so every header and cell is sanitised and a column with no header element is `""` rather than null
 - `AssertElementAsync()` — exists / enabled / checked / visible / focused / value (`expected`: ordinal match against the ValuePattern value, else the Name — the same read as `get_text`); returns `AssertResult` with the observed state (focus owner, actual value, toggle state). A stale element (ProcessId 0, or UIA_E_ELEMENTNOTAVAILABLE / an RPC failure on a read — `IsElementGone`) fails with `element no longer available` instead of throwing; optional properties a provider omits (modern Notepad's document has no `IsOffscreen`) fall back to UIA's defaults
 
 ### `InputService`
@@ -463,6 +464,7 @@ Uses **H.InputSimulator** (`WindowsInput` namespace) for `SendInput` button, whe
 - Cursor: `SetCursorPos(x, y)` in physical virtual-desktop pixels (origin = the primary monitor's top-left; monitors left of / above it have negative coordinates), then a `GetCursorPos` read-back — a point Windows clamped (off any monitor) throws `ArgumentOutOfRangeException` instead of clicking somewhere else. Button and wheel events carry no position, so they act at that cursor
 - Mouse events: `LeftButtonClick` / `RightButtonClick` / `MiddleButtonClick`, `…ButtonDown/Up` for drags, `VerticalScroll` / `HorizontalScroll`
 - Keyboard events: `KeyPress`, `ModifiedKeyStroke`, `TextEntry`. Key names and chords are resolved by the pure `ShortcutParser`: named keys and aliases, `f1`–`f24`, numpad and media keys, single characters (`a`–`z` / `0`–`9` directly, anything else through `VkKeyScan` with the layout's implied Shift), `plus` for the `+` key, and bare keys such as `win`
+- `GetCursorPositionAsync()` — `GetCursorPos` in those same virtual-desktop pixels; `screenshot` reads it once and hands it to the capture, so the reported position and the drawn mark cannot disagree
 - Note: `MouseButton` enum disambiguation required — `H.InputSimulator` also exports `WindowsInput.MouseButton`; the abstractions define `WindowsMcp.Abstractions.Models.MouseButton` to avoid ambiguity
 
 ### `PowerShellService`
@@ -510,16 +512,27 @@ capacity is exceeded and counts trimmed chars — the unit-testable core of job 
 
 ### `ScreenshotService`
 
-GDI capture + **SkiaSharp** encode:
-- `CaptureAsync(region?, format)` — `Graphics.CopyFromScreen` of the primary display (or the given `ScreenRegion`), wrapped zero-copy into an `SKBitmap` and encoded as PNG or JPEG
-- Returns `ScreenshotResult(Bytes, Width, Height, Format)`; the `screenshot` tool writes it to `%TEMP%\WindowsMcp` and returns the path by default (`output="base64"` inlines it as JSON)
-- Multi-display selection, downscaling and MCP image-content responses are tracked in `docs/upstream-parity-checklist.md` (A-7 to A-9)
+GDI capture + **SkiaSharp** downscale and encode:
+- `CaptureAsync(region?, options?)` — `Graphics.CopyFromScreen` of the given `ScreenRegion` (null = the primary display). With `CaptureOptions.IncludeCursor` the pointer is composited onto the full-resolution GDI bitmap first (real cursor icon through `DrawIconEx`, else `CursorOverlay.DrawRing`); the buffer is then wrapped zero-copy into an `SKBitmap`, resized to `ScaleMath.Fit(...)` with a Mitchell cubic filter when that changes the size, and encoded as PNG or JPEG at `Quality`. Resize and encode both run before `UnlockBits` — the `SKBitmap` points into the GDI buffer
+- Returns `ScreenshotResult(Bytes, Width, Height, Format, OriginalWidth, OriginalHeight, CoordinateScale, CursorDrawn)`; the `screenshot` tool turns that into an image content block plus a metadata text block (`output="file"` writes to `%TEMP%\WindowsMcp` and returns the path instead)
+- Which rect to capture is the tool's decision (`RegionMath` over `IWindowService.EnumerateMonitorsAsync`); the service captures whatever rect it is handed
+
+### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `UiText`)
+
+`internal static` classes in `Services/` with no Win32, no screen and no UIA dependency, so every
+rule is unit-tested headless:
+- `ScaleMath.Fit(origW, origH, maxW, maxH, userScale)` — fit inside the cap (cap ≤ 0 = ignored), apply the user scale, never upscale; returns the output size and `CoordinateScale` = origW / Width
+- `RegionMath` — `ParseRegion("x,y,w,h")`, `ParseDisplays("all" | "0,2")`, `Union`, `VirtualScreen`, `Primary`, and `Validate`, which **rejects** a region outside the virtual screen rather than clipping it. Shared by `screenshot` and `ocr` so the two cannot drift
+- `CursorMath.MonitorIndexOf(x, y, monitors)` — the monitor a virtual-desktop point sits on, `-1` for none
+- `CursorOverlay` — `RingPoint` (cursor rebased onto the captured rect, null when outside) and `DrawRing` (white 3 px ring at radius 12, black 2 px at radius 8)
+- `UiText.Sanitize` — strips Private Use Area code points, replaces lone UTF-16 surrogates with U+FFFD, drops C0/C1 controls except tab/LF/CR, trims; returns the same instance when nothing needed changing
 
 ### `OcrService`
 
 Uses the **Windows.Media.Ocr** WinRT API:
 - Calls `OcrEngine.TryCreateFromUserProfileLanguages()` for language detection
 - `ExtractTextAsync(region?)` returns the recognized text
+- Captures through `IScreenshotService` with `MaxWidth`/`MaxHeight` of 0, so OCR always reads a full-resolution PNG whatever the `screenshot` defaults are
 
 ### `AudioService`
 

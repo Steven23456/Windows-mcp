@@ -5,7 +5,9 @@ of the parity checklist. This is the implementation plan; each item still gets i
 `docs/design/<ID>-<slug>.md` note when it is picked up (checklist rule 1), and this file is the
 place those notes link back to for the cross-item decisions. ·
 **Status:** planned 2026-09-04 against `main` @ `cb3b488` (64 tools, v0.7.3, all nine D items
-closed). Nothing in section A has started. ·
+closed). Phase 1 has since shipped — A-7, A-9, A-8, A-11 and A-13, still 64 tools; where the
+code deviates from the plan below, the item carries a **Shipped as** line and its design note has
+the reasoning. The rest of section A has not started. ·
 **Baseline facts** used below were read from the code on that commit; the `file:line` anchors
 will drift, the member names will not.
 
@@ -91,6 +93,9 @@ checklist unless corrected.
   block; `output:"base64"` behaves as `inline`; unknown `output` throws naming the choices;
   `HttpTransportTests` round-trips an image block through the HTTP transport (real host,
   ephemeral port); `ScreenToolsTests` uses a `Mock<IScreenshotService>` returning a 2×2 PNG.
+- **Shipped as** ([note](A-7-screenshot-image-content.md)): as planned, except the inline JPEG
+  default is quality **90** (A-9 made `quality` an argument, so 85 had no reason to be the
+  default), and the metadata block filled out over A-8/A-9/A-11 rather than in one step.
 - **Done when.** Claude Code shows the screenshot inline from one `screenshot` call.
 
 #### A-9 — Auto-downscale, scale env, coordinate-scale report  `P1 · S · ~1 day`
@@ -109,6 +114,11 @@ checklist unless corrected.
   portrait 1080×1920 → 607×1080; user scale 0.5 on top; env value out of range rejected at
   `ServerOptions.Parse` with the range named; capture of a synthetic bitmap resizes and reports
   the original size; JPEG `quality` honoured (size ordering test on the same bitmap).
+- **Shipped as** ([note](A-9-screenshot-downscale.md)): `CaptureOptions(Format, MaxWidth,
+  MaxHeight, Scale, Quality, …)`; the result carries `CoordinateScale` (= OriginalWidth / Width)
+  instead of an "effective Scale"; the resize is `SKBitmap.ScalePixels` with a Mitchell cubic
+  filter (not `SKBitmap.Resize`); and C7's options record ships as `ScreenshotOptions(Scale)`
+  only — the other knobs arrive with the items that need them.
 - **Done when.** A 4K capture comes back ≤ 1920 wide with `coordinateScale: 2` in the text.
 
 #### A-8 — Multi-display capture and virtual-desktop coordinates  `P1 · M · ~1½ days`
@@ -133,6 +143,11 @@ checklist unless corrected.
   naming the valid indices; `region` given with `display` → region wins and the text says so;
   `ocr` shares the parser (same error text). `Integration`: `CaptureAsync(display:"all")` returns
   a bitmap whose size equals the virtual screen.
+- **Shipped as** ([note](A-8-multi-display-capture.md)): `display` is a **string** argument on
+  both tools (`"all"` or `"0,2"`), parsed by `RegionMath.ParseDisplays` (not `ParseIndices`), and
+  the virtual screen validated against is the union of `EnumerateMonitorsAsync` rather than the
+  `SM_*VIRTUALSCREEN` metrics — one inventory behind `display`, `displays` and the bounds in the
+  error message.
 - **Done when.** `screenshot(display:[1])` captures the second monitor; a straddling region is
   correct; an out-of-bounds region errors.
 
@@ -151,6 +166,12 @@ checklist unless corrected.
   ring drawn at `(x−left)×scale`; `include_cursor:false` leaves the bitmap byte-identical to a
   capture without; metadata always carries `cursor` even when not drawn. `Integration`:
   `GetCursorAsync` returns a point inside the virtual screen.
+- **Shipped as** ([note](A-11-cursor.md)): `IInputService.GetCursorPositionAsync() →
+  CursorPosition(X, Y)` — no `CursorInfo`, and the monitor index stays in the tool layer
+  (`CursorMath.MonitorIndexOf` over the same inventory A-8 already reads). `CursorOverlay.DrawRing(
+  SKBitmap, x, y)` takes **no** scale: the ring is painted on the full-resolution bitmap before
+  A-9's downscale, so it shrinks with the picture. The metadata field is a top-level
+  `cursorDrawn` (`"icon"`/`"ring"`, absent when nothing was drawn), not `cursor.drawn`.
 - **Done when.** Metadata reports the cursor and the image shows it.
 
 #### A-13 — Unicode hygiene  `P2 · S · ~½ day` (anywhere; before A-1)
@@ -163,6 +184,10 @@ checklist unless corrected.
 - **RED matrix seed.** Each rule as its own `[Theory]` row; a VS Code-style codicon string
   (`" Explorer"` → `"Explorer"`); an emoji pair survives; a lone high surrogate becomes
   U+FFFD; the sanitised string round-trips through `JsonSerializer` without throwing; null → "".
+- **Shipped as** ([note](A-13-unicode-hygiene.md)): applied in `TryGetName`, `TryGetValue`,
+  `GetTextAsync`, `get_table` (via the unit-testable `BuildTable`) and the `assert_element
+  state=value` observation; `TryGetControlType` is an enum name and was left alone. Window titles
+  follow with A-1. The measurement: `System.Text.Json` writes U+FFFD silently, it does not throw.
 - **Done when.** An emoji window title and a codicon element name both serialise cleanly.
 
 ### Phase 2 — window inventory

@@ -278,25 +278,33 @@ PID reuse mid-walk). A snapshot row with no CIM date cannot be validated and is 
 └────┬─────┘   └─────┬─────┘   └────────┬─────────┘   └──────────┬──────────┘
      │               │                  │                         │
      │ Screenshot()  │                  │                         │
-     ├──────────────►│                  │                         │
-     │               │ CaptureAsync()   │                         │
+     ├──────────────►│ resolve rect:    │                         │
+     │               │ monitors, region │                         │
+     │               │ or display; then │                         │
+     │               │ read the cursor  │                         │
+     │               │ CaptureAsync(r,  │                         │
+     │               │  CaptureOptions) │                         │
      │               ├─────────────────►│                         │
-     │               │                  │ BitBlt(screen)          │
+     │               │                  │ CopyFromScreen(r)       │
      │               │                  ├────────────────────────►│
      │               │                  │◄────────────────────────┤
-     │               │                  │ SKBitmap.Encode(PNG)    │
+     │               │                  │ cursor: icon or ring    │
+     │               │                  │ ScaleMath.Fit → resize  │
+     │               │                  │ SKBitmap.Encode(jpg/png)│
      │               │                  ├────────────────────────►│
-     │               │ file path/base64 │◄────────────────────────┤
-     │◄──────────────┤◄─────────────────┤                         │
+     │               │ ScreenshotResult │◄────────────────────────┤
+     │ metadata text │◄─────────────────┤                         │
+     │ + image block │                  │                         │
+     │◄──────────────┤                  │                         │
      │               │                  │                         │
      │ Ocr(region)   │                  │                         │
-     ├──────────────►│                  │                         │
-     │               │ RecognizeAsync() │                         │
+     ├──────────────►│ same resolver,   │                         │
+     │               │ ExtractTextAsync │                         │
      │               ├─────────────────►│                         │
      │               │                  │ OcrEngine.RecognizeAsync│
      │               │                  ├────────────────────────►│
      │               │                  │  (Windows.Media.Ocr)    │
-     │               │ OcrResult JSON   │◄────────────────────────┤
+     │               │ recognised text  │◄────────────────────────┤
      │◄──────────────┤◄─────────────────┤                         │
 ```
 
@@ -354,10 +362,10 @@ Host.CreateApplicationBuilder(args)
         │
         ▼
 builder.Services.AddSingleton<IInputService, InputService>()
-  ...  (36 services)
+  ...  (36 services + the ScreenshotOptions record from --screenshot-scale)
         │
         ▼
-builder.AddWindowsMcp()           ← Hosting/WindowsMcpHost: AddMcpServer(...) + filter + WithToolsFromAssembly()
+builder.AddWindowsMcp(options)    ← Hosting/WindowsMcpHost: AddMcpServer(...) + filter + WithToolsFromAssembly()
     .WithStdioServerTransport()   ← or .WithHttpTransport(stateless) + MapMcp("/mcp") with --transport http
         │
         ▼
@@ -504,9 +512,14 @@ WaitFor — timeout path:
 
 ### Tool Response Shape
 
-All tool methods return `Task<string>` where the string is either:
+All tool methods return `Task<string>` — except `screenshot`, which returns
+`Task<CallToolResult>` so it can carry an image block — where the string is either:
 - **JSON** — from `JsonSerializer.Serialize(result)`
 - **Plain string** — for simple acknowledgements (`"pressed ctrl+c"`, `"PASS"`, `"null"`)
+
+`screenshot`'s `CallToolResult` is a `TextContentBlock` of metadata JSON followed by an
+`ImageContentBlock`; with `output="file"` the image block is omitted and the metadata carries
+the path.
 
 ### JSON Response Examples
 

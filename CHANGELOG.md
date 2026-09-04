@@ -4,8 +4,9 @@
 
 - **`screenshot` returns the image as MCP image content** (parity A-7). The tool result is now a
   text block with one JSON metadata object (`{width, height, format, coordinateSpace:
-  "virtual-desktop", region?, path?}`) followed by an `ImageContentBlock`, so Claude Code and
-  Claude Desktop render the capture inline and the model can look at it in the same call.
+  "virtual-desktop", region, path?}` — A-8/A-9/A-11 below add `displays`, `originalWidth`/
+  `originalHeight`, `cursor` and the scale fields) followed by an `ImageContentBlock`, so Claude
+  Code and Claude Desktop render the capture inline and the model can look at it in the same call.
   **Migration:** `output` defaults to `inline` (was `file`; ask for `file` explicitly to get a
   path, `base64` is an alias of `inline` for one release), `format` defaults to `auto` (jpeg for
   inline, png for file; was always png), and the old `data_base64` JSON key is gone. Arguments
@@ -16,7 +17,8 @@
 - **`screenshot` downscales to 1920×1080 by default and reports the coordinate scale** (parity
   A-9). A 4K capture was a ~10 MB PNG; it is now fitted inside `max_width` × `max_height`
   (default 1920×1080, 0 = no limit) with a Mitchell cubic resample, then shrunk further by the
-  call's `scale` (0–1] and the server's `--screenshot-scale`. Metadata always carries
+  call's `scale` (0–1] and the server's new `--screenshot-scale` / `WINDOWSMCP_SCREENSHOT_SCALE`
+  (0.1–1.0, honoured by both transports). Metadata always carries
   `originalWidth`/`originalHeight`; when anything was scaled it adds `coordinateScale` and a
   `note` telling the model to multiply image pixel coordinates by that factor before `click`/
   `drag`/`scroll`, and omits both otherwise. New `quality` argument (1–100, default 90) for JPEG.
