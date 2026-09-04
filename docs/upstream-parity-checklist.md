@@ -109,6 +109,8 @@ function names are the stable anchor.
 screenshot cluster (A-7, A-9, A-8, A-11) because every agent loop starts with a screenshot.
 Then A-1 → A-2 → A-4, which unlock B-6, B-8, B-10, A-3, A-6. Quick wins B-5, B-1, B-2, B-3,
 C-2, C-7, S-8, S-1 can be interleaved anywhere. A-5, A-12, S-4 last.
+The section-A sequencing, cross-item decisions (coordinate space, defaults, tool count, element
+ids, env vars) and per-item test seeds are in [`docs/design/A-roadmap.md`](design/A-roadmap.md).
 
 ---
 
