@@ -27,3 +27,11 @@ public record TableData(string[] Headers, string[][] Rows);
 /// (PhysicalClick, Keyboard); <paramref name="Detail"/> adds the click point, toggle state, or item name.
 /// </summary>
 public record InteractResult(string ElementId, string Action, string Method, string? Detail);
+
+/// <summary>
+/// Outcome of <c>assert_element</c>. <paramref name="Observed"/> is what the element actually
+/// showed — on FAIL the reason (<c>disabled</c>, <c>toggle state Off</c>, <c>focus is on Button
+/// 'Save'</c>, <c>value is 'x' (from ValuePattern)</c>, <c>element no longer available</c>), on
+/// PASS the matching observation.
+/// </summary>
+public record AssertResult(string ElementId, string State, bool Pass, string Observed);

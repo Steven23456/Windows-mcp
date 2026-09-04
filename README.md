@@ -44,7 +44,8 @@ claude mcp add --transport stdio Windows-mcp -- C:\path\to\Windows-mcp\bundle\Wi
 
 or in a `.mcp.json`:
 
-I modified this so that the PATH works correctly
+The `env` block is belt-and-braces: `Hosting/EnvironmentRepair` already repairs a host-stripped
+`PATHEXT` at startup, so setting it here is no longer required.
 
 ```json
 "Windows-mcp": {

@@ -101,7 +101,7 @@ Windows-MCP exposes **64 MCP tools** across 19 tool classes:
 | `InteractElement` | Act on a UI element by id: click / invoke / toggle / select / focus / type, through the UIA pattern or a physical fallback; returns which one fired |
 | `GetText` | Extract text content from a UI element |
 | `GetTable` | Extract tabular data from a grid/table element |
-| `AssertElement` | Assert element state (exists / enabled / checked / visible) with PASS/FAIL result; the tool also advertises `value` and `focused`, which are not implemented (parity checklist D-4) |
+| `AssertElement` | Assert element state (exists / enabled / checked / visible / focused / value with `expected`); `PASS` or `FAIL: <state> — observed <what was found>` |
 | `WaitFor` | Poll until an element whose name/value contains text appears |
 
 ### Window Tools (`WindowTools` — 5 tools)

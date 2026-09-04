@@ -224,21 +224,127 @@ public sealed class UIAutomationService : IUIAutomationService
         }, ct);
     }
 
-    public Task<bool> AssertElementAsync(string elementId, string state, CancellationToken ct = default)
+    public Task<AssertResult> AssertElementAsync(string elementId, string state, string? expected = null, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        return OnStaAsync(() =>
+        return OnStaAsync(() => AssertOnSta(elementId, state, expected), ct);
+    }
+
+    private static readonly string[] AssertStates = ["exists", "enabled", "checked", "value", "visible", "focused"];
+
+    // D-4: every advertised state is implemented, the result says what was observed, and a stale
+    // element (its window closed since the id was issued) is a FAIL, never an exception.
+    private AssertResult AssertOnSta(string elementId, string state, string? expected)
+    {
+        var s = state.ToLowerInvariant();
+        if (Array.IndexOf(AssertStates, s) < 0)
+            throw new ArgumentException($"Unknown assertion state '{state}'; expected exists|enabled|checked|value|visible|focused.", nameof(state));
+        if (s == "value" && expected is null)
+            throw new ArgumentException("'value' requires expected: the text to compare against.", nameof(expected));
+        if (s != "value" && expected is not null)
+            throw new ArgumentException("expected is only used with state=value.", nameof(expected));
+
+        AutomationElement? el;
+        lock (_cacheLock) _elementCache.TryGetValue(elementId, out el);
+        if (el is null)
         {
-            var el = ResolveCached(elementId);
-            return state.ToLowerInvariant() switch
+            // "exists" is the one question where "I don't know that id" is the answer; for every
+            // other state an unknown id is a caller bug (ids only come from find_element/get_state).
+            if (s == "exists") return new AssertResult(elementId, s, false, "unknown element id");
+            throw new KeyNotFoundException($"Element '{elementId}' not in cache");
+        }
+
+        AssertResult Result(bool pass, string observed) => new(elementId, s, pass, observed);
+
+        try
+        {
+            // Liveness probe for every state. Providers that raise UIA_E_ELEMENTNOTAVAILABLE for a
+            // destroyed element are handled by the catch below; the Win32 proxy instead keeps
+            // answering with defaults (ControlType Pane, empty Name, ProcessId 0), so a ProcessId of
+            // 0 is the reliable "gone" signal for a closed HWND.
+            if (el.Properties.ProcessId.ValueOrDefault <= 0)
+                return Result(false, "element no longer available");
+
+            switch (s)
             {
-                "exists"  => true,
-                "enabled" => el.IsEnabled,
-                "checked" => TryGetChecked(el) == true,
-                "visible" => !el.IsOffscreen,
-                _ => throw new ArgumentException($"Unknown assertion state: '{state}'")
-            };
-        }, ct);
+                case "exists":
+                    return Result(true, Describe(el));
+                case "enabled":
+                    {
+                        // Providers may omit optional properties (FlaUI then throws
+                        // PropertyNotSupportedException on .Value); use UIA's documented defaults.
+                        bool enabled = el.Properties.IsEnabled.TryGetValue(out bool isEnabled) ? isEnabled : true;
+                        return Result(enabled, enabled ? "enabled" : "disabled");
+                    }
+                case "checked":
+                    {
+                        var toggle = el.Patterns.Toggle.PatternOrDefault;
+                        if (toggle is null) return Result(false, $"no TogglePattern on {Describe(el)}");
+                        var toggleState = toggle.ToggleState.ValueOrDefault;
+                        return Result(toggleState == ToggleState.On, $"toggle state {toggleState}");
+                    }
+                case "visible":
+                    {
+                        // IsOffscreen is optional (modern Notepad's document omits it): unsupported
+                        // means "not offscreen", and the bounds decide.
+                        if (el.Properties.IsOffscreen.ValueOrDefault) return Result(false, "offscreen");
+                        var r = el.Properties.BoundingRectangle.ValueOrDefault;
+                        if (r.IsEmpty) return Result(false, "empty bounds");
+                        return Result(true, $"on screen at ({r.X},{r.Y}) {r.Width}x{r.Height}");
+                    }
+                case "focused":
+                    {
+                        if (el.Properties.HasKeyboardFocus.ValueOrDefault) return Result(true, "has keyboard focus");
+                        // Some frameworks report focus on the element UIA returns as focused without
+                        // setting HasKeyboardFocus on the cached instance; compare identities too.
+                        var focused = TryGetFocusedElement();
+                        if (focused is not null && SameElement(focused, el)) return Result(true, "has keyboard focus");
+                        return Result(false, focused is null ? "nothing has focus" : $"focus is on {Describe(focused)}");
+                    }
+                case "value":
+                    {
+                        // Same read as get_text: the ValuePattern value, else the Name.
+                        var actual = el.Patterns.Value.PatternOrDefault?.Value.ValueOrDefault;
+                        var source = "ValuePattern";
+                        if (actual is null) { actual = el.Properties.Name.ValueOrDefault ?? ""; source = "Name"; }
+                        return Result(string.Equals(actual, expected, StringComparison.Ordinal), $"value is '{actual}' (from {source})");
+                    }
+                default:
+                    throw new InvalidOperationException($"Unhandled assertion state '{s}'.");
+            }
+        }
+        catch (Exception ex) when (IsElementGone(ex))
+        {
+            return Result(false, "element no longer available");
+        }
+    }
+
+    private AutomationElement? TryGetFocusedElement()
+    {
+        try { return _automation.FocusedElement(); } catch { return null; }
+    }
+
+    // CompareElements fails (0x80040201) when either side has gone stale; that is "not the same".
+    private static bool SameElement(AutomationElement a, AutomationElement b)
+    {
+        try { return a.Equals(b); } catch { return false; }
+    }
+
+    /// <summary>
+    /// True when <paramref name="ex"/> means the element was destroyed after its id was issued:
+    /// FlaUI's <see cref="FlaUI.Core.Exceptions.ElementNotAvailableException"/> (its conversion of
+    /// UIA_E_ELEMENTNOTAVAILABLE), the raw HRESULT on paths FlaUI does not wrap, or the RPC failures
+    /// UIA raises once the owning process has exited. Shared with the find/wait path (checklist D-5).
+    /// </summary>
+    internal static bool IsElementGone(Exception ex)
+    {
+        if (ex is FlaUI.Core.Exceptions.ElementNotAvailableException) return true;
+        if (ex is not COMException com) return false;
+        return com.HResult is
+            unchecked((int)0x80040201)   // UIA_E_ELEMENTNOTAVAILABLE
+            or unchecked((int)0x80010108)   // RPC_E_DISCONNECTED
+            or unchecked((int)0x800706BA)   // RPC_S_SERVER_UNAVAILABLE
+            or unchecked((int)0x800706BE);  // RPC_S_CALL_FAILED
     }
 
     /// <summary>
@@ -272,58 +378,58 @@ public sealed class UIAutomationService : IUIAutomationService
         switch (a)
         {
             case "click":
-            {
-                if (el.Patterns.Invoke.PatternOrDefault is { } invoke) { invoke.Invoke(); return new(Done("InvokePattern")); }
-                if (el.Patterns.SelectionItem.PatternOrDefault is { } selection) { selection.Select(); return new(Done("SelectionItemPattern")); }
-                if (el.Patterns.Toggle.PatternOrDefault is { } toggle) { toggle.Toggle(); return new(Done("TogglePattern", ToggleDetail(toggle))); }
-                var (x, y) = ClickPoint(el);
-                return new(Done("PhysicalClick", $"({x},{y})"), PendingClick: (x, y));
-            }
-            case "invoke":
-            {
-                var invoke = el.Patterns.Invoke.PatternOrDefault ?? throw NotSupported(el, "InvokePattern");
-                invoke.Invoke();
-                return new(Done("InvokePattern"));
-            }
-            case "toggle":
-            {
-                var toggle = el.Patterns.Toggle.PatternOrDefault ?? throw NotSupported(el, "TogglePattern");
-                toggle.Toggle();
-                return new(Done("TogglePattern", ToggleDetail(toggle)));
-            }
-            case "select":
-            {
-                if (value is null)
                 {
-                    var selection = el.Patterns.SelectionItem.PatternOrDefault ?? throw NotSupported(el, "SelectionItemPattern");
-                    selection.Select();
-                    return new(Done("SelectionItemPattern"));
+                    if (el.Patterns.Invoke.PatternOrDefault is { } invoke) { invoke.Invoke(); return new(Done("InvokePattern")); }
+                    if (el.Patterns.SelectionItem.PatternOrDefault is { } selection) { selection.Select(); return new(Done("SelectionItemPattern")); }
+                    if (el.Patterns.Toggle.PatternOrDefault is { } toggle) { toggle.Toggle(); return new(Done("TogglePattern", ToggleDetail(toggle))); }
+                    var (x, y) = ClickPoint(el);
+                    return new(Done("PhysicalClick", $"({x},{y})"), PendingClick: (x, y));
                 }
+            case "invoke":
+                {
+                    var invoke = el.Patterns.Invoke.PatternOrDefault ?? throw NotSupported(el, "InvokePattern");
+                    invoke.Invoke();
+                    return new(Done("InvokePattern"));
+                }
+            case "toggle":
+                {
+                    var toggle = el.Patterns.Toggle.PatternOrDefault ?? throw NotSupported(el, "TogglePattern");
+                    toggle.Toggle();
+                    return new(Done("TogglePattern", ToggleDetail(toggle)));
+                }
+            case "select":
+                {
+                    if (value is null)
+                    {
+                        var selection = el.Patterns.SelectionItem.PatternOrDefault ?? throw NotSupported(el, "SelectionItemPattern");
+                        selection.Select();
+                        return new(Done("SelectionItemPattern"));
+                    }
 
-                // With a value the element is a container (combo box, list): open it if it can be
-                // opened, then select the child item by name.
-                el.Patterns.ExpandCollapse.PatternOrDefault?.Expand();
-                var item = el.FindFirstDescendant(cf => cf.ByName(value))
-                    ?? throw new KeyNotFoundException($"No item named '{value}' under {Describe(el)}.");
-                if (item.Patterns.SelectionItem.PatternOrDefault is { } itemSelection) { itemSelection.Select(); return new(Done("SelectionItemPattern", $"item '{value}'")); }
-                if (item.Patterns.Invoke.PatternOrDefault is { } itemInvoke) { itemInvoke.Invoke(); return new(Done("InvokePattern", $"item '{value}'")); }
-                throw NotSupported(item, "SelectionItemPattern");
-            }
+                    // With a value the element is a container (combo box, list): open it if it can be
+                    // opened, then select the child item by name.
+                    el.Patterns.ExpandCollapse.PatternOrDefault?.Expand();
+                    var item = el.FindFirstDescendant(cf => cf.ByName(value))
+                        ?? throw new KeyNotFoundException($"No item named '{value}' under {Describe(el)}.");
+                    if (item.Patterns.SelectionItem.PatternOrDefault is { } itemSelection) { itemSelection.Select(); return new(Done("SelectionItemPattern", $"item '{value}'")); }
+                    if (item.Patterns.Invoke.PatternOrDefault is { } itemInvoke) { itemInvoke.Invoke(); return new(Done("InvokePattern", $"item '{value}'")); }
+                    throw NotSupported(item, "SelectionItemPattern");
+                }
             case "focus":
                 el.Focus();
                 return new(Done("Focus"));
             case "type":
-            {
-                if (value is null) throw new ArgumentException("'type' requires a value: the text to enter.", nameof(value));
-                el.Focus();
-                var valuePattern = el.Patterns.Value.PatternOrDefault;
-                if (valuePattern is not null && !valuePattern.IsReadOnly.ValueOrDefault)
                 {
-                    valuePattern.SetValue(value);
-                    return new(Done("ValuePattern", "replaced the whole value"));
+                    if (value is null) throw new ArgumentException("'type' requires a value: the text to enter.", nameof(value));
+                    el.Focus();
+                    var valuePattern = el.Patterns.Value.PatternOrDefault;
+                    if (valuePattern is not null && !valuePattern.IsReadOnly.ValueOrDefault)
+                    {
+                        valuePattern.SetValue(value);
+                        return new(Done("ValuePattern", "replaced the whole value"));
+                    }
+                    return new(Done("Keyboard", "typed at the caret"), PendingText: value);
                 }
-                return new(Done("Keyboard", "typed at the caret"), PendingText: value);
-            }
             default:
                 throw new ArgumentException($"Unknown interact action '{action}'; expected click|invoke|toggle|select|focus|type.", nameof(action));
         }

@@ -25,9 +25,17 @@ public sealed class NotepadFixture : IDisposable
         Automation = new UIA3Automation();
         Thread.Sleep(800);   // Allow notepad startup time
 
-        // Bring Notepad to the foreground so foreground-rooted state queries observe it.
-        // Best effort: modern (XAML) Notepad may hand off to a different process and time
-        // out here — that's fine, the service falls back to whatever window is foreground.
+        BringToForeground();
+    }
+
+    /// <summary>
+    /// Bring Notepad to the foreground so foreground-rooted state queries observe it. Also used
+    /// by tests that open another window and must hand the desktop back afterwards.
+    /// Best effort: modern (XAML) Notepad may hand off to a different process and time out
+    /// here — that's fine, the service falls back to whatever window is foreground.
+    /// </summary>
+    public void BringToForeground()
+    {
         try
         {
             var window = App.GetMainWindow(Automation, TimeSpan.FromSeconds(5));

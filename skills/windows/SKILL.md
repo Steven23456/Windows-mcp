@@ -116,6 +116,8 @@ Read the tree before acting, act, then confirm the action landed before moving o
 
 Prefer `interact_element` over a coordinate `click` for a named control: it acts through the UIA pattern (Invoke, SelectionItem, Toggle, Value) and falls back to a physical click at the element's centre, reports which one fired in `Method`, and errors — instead of silently doing nothing — when a pattern is unsupported. Keyboard chords go through `shortcut` (`ctrl+c`, `ctrl+shift+s`, `win+r`, `alt+f4`, a bare `win`); a single key through `key` (`a`, `enter`, `f5`). Coordinates for `click`/`drag`/`hover`/`scroll` are physical pixels on the virtual desktop with the origin at the primary monitor's top-left, so a monitor left of or above it has negative coordinates — take them from `multi_monitor` or an element's `Bounds`.
 
+`assert_element` checks exists / enabled / checked / visible / focused, and `value` with `expected` (an exact match against the element's ValuePattern value, else its Name). A `FAIL:` names what was observed — the focus owner, the actual value, the toggle state, or `element no longer available` when the window closed since the id was issued — so choose the next action from that instead of re-reading the tree.
+
 ### 5. File forensics
 
 ```
