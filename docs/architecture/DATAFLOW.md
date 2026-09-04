@@ -307,28 +307,43 @@ PID reuse mid-walk). A snapshot row with no CIM date cannot be validated and is 
 `WaitFor` is the only tool with internal retry logic — all other tools are single-pass:
 
 ```
-UIAutomationTools.WaitFor(text, timeout_ms, interval_ms)
+UIAutomationTools.WaitFor(text, timeout_ms, interval_ms, kind, scope, window, include_offscreen)
         │
         ▼
-UIAutomationService.WaitForAsync(text, timeout_ms, interval_ms)
+UIAutomationService.WaitForAsync(...)  →  PollAsync(poll, timeout_ms, interval_ms, ct)
         │
         ▼
-  ┌─────────────────────────────────────────────────┐
-  │ start = DateTime.UtcNow                         │
-  │                                                 │
-  │  ┌─────────────────────────────┐                │
-  │  │ FindElementAsync(text, Any) │◄───────────┐   │
-  │  └──────────────┬──────────────┘            │   │
-  │                 │                           │   │
-  │         found? ─┤                           │   │
-  │           YES   │    NO                     │   │
-  │           ▼     │    ▼                      │   │
-  │       return    │  elapsed > timeout_ms?    │   │
-  │       element   │    YES → return null      │   │
-  │                 │    NO  → await Task.Delay │   │
-  │                 │          (interval_ms) ───┘   │
-  └─────────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────────────────────┐
+  │ deadline = UtcNow + timeout_ms   lastFailure = null           │
+  │ anyCleanPoll = false                                          │
+  │                                                               │
+  │  ┌──────────────────────────────────────────┐                 │
+  │  │ FindElementAsync(text, kind, scope, …)   │◄────────────┐   │
+  │  │  (window re-resolved on EVERY poll)      │             │   │
+  │  └──────────────┬───────────────────────────┘             │   │
+  │                 │                                          │   │
+  │        threw? ──┤ YES → lastFailure = ex ─────┐            │   │
+  │           NO    │                             │            │   │
+  │                 ▼                             │            │   │
+  │        anyCleanPoll = true                    │            │   │
+  │           found? ─┬── YES → return element    │            │   │
+  │                   │                           │            │   │
+  │                   NO ◄────────────────────────┘            │   │
+  │                   ▼                                        │   │
+  │        remaining = deadline − UtcNow                       │   │
+  │           ≤ 0 ? ─┬── NO → await Task.Delay(               │   │
+  │                  │        min(interval_ms, remaining)) ────┘   │
+  │                 YES                                            │
+  │                  ▼                                             │
+  │        anyCleanPoll ? return null                              │
+  │                     : throw TimeoutException(lastFailure)      │
+  └──────────────────────────────────────────────────────────────┘
 ```
+
+A poll that throws is **retried**, never fatal — absorbing transient UIA failure is the whole
+point of a wait (checklist D-5). The loop polls at least once, so `timeout_ms: 0` means "check
+now". It distinguishes two outcomes the old loop conflated: polls ran and found nothing (`null`),
+versus every poll failed (`TimeoutException` carrying the last error).
 
 ---
 
@@ -519,7 +534,7 @@ All tool methods return `Task<string>` where the string is either:
 
 | Location | Behavior | Notes |
 |----------|----------|-------|
-| `WaitFor` | Polls every `interval_ms` (default 500ms) up to `timeout_ms` (default 10s) | Only tool with a loop |
+| `WaitFor` | Polls every `interval_ms` (default 500ms) up to `timeout_ms` (default 10s); sleep clamped to the remaining budget, minimum 10ms | Only tool with a loop; a failed poll is retried, and every-poll-failed throws rather than reporting `null` |
 | `InputService` | No delays: clicks are back-to-back `SendInput`; the cursor is placed with `SetCursorPos` and read back before any button event | A clamped (off-monitor) point throws rather than clicking elsewhere |
 | `PowerShellService` | Async wait on process exit | 15-min execution backstop (armed after the serialization gate); caller cancellation kills the process tree |
 | `ShellTools` heartbeat | Progress notification every 10s during a foreground `powershell` call | Lets spec-compliant clients reset their request timeout |
