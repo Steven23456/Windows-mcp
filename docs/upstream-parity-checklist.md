@@ -7,9 +7,9 @@
 HTTP transport + background-jobs work. SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
-This is the working list of everything upstream can do that this server cannot (plus four
-defects the comparison exposed). Each item carries enough context to write a
-design note and an implementation plan without re-reading
+This is the working list of everything upstream can do that this server cannot (plus eight
+defects: D-1…D-4 from the original comparison, D-5…D-8 added later under rule 4). Each item
+carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
 implementation sketch, files to touch, tests, and a "done when" bar.
 
@@ -54,7 +54,11 @@ function names are the stable anchor.
 | D-1 | `shortcut`/`key` reject letters, digits, bare keys | P1 | S | — | ☑ |
 | D-2 | `interact_element` missing click / focus / type | P1 | S | D-3 | ☑ |
 | D-3 | Cursor placement wrong on secondary monitors | P1 | S | — | ☑ |
-| D-4 | `assert_element` advertises `value` / `focused` but implements neither | P2 | S | — | ☐ |
+| D-4 | `assert_element` advertises `value` / `focused` but implements neither | P2 | S | — | ☑ |
+| D-5 | `find_element(kind=any)` / `wait_for` fail on the first stale element; whole-desktop walk | P1 | S | — | ☐ |
+| D-6 | `find_element(kind=interactive)` excludes Edit, ComboBox, ListItem, TabItem, … | P2 | S | — | ☐ |
+| D-7 | `find_element` / `wait_for` return off-screen elements by default | P2 | S | D-5 | ☐ |
+| D-8 | `powershell` ships the CLIXML progress stream to the model on every call | P2 | S | — | ☐ |
 | A-1 | Whole-desktop window inventory | P1 | M | — | ☐ |
 | A-2 | Desktop-wide labeled interactive-element snapshot | P1 | L | A-1 | ☐ |
 | A-3 | Scrollable regions with scroll percentages | P2 | S | A-2 | ☐ |
@@ -99,10 +103,12 @@ function names are the stable anchor.
 | S-9 | Claude Desktop Extension (`.mcpb`) + registry `server.json` | P3 | M | — | ☐ |
 | S-10 | Per-tool black-box tester skill | P3 | S | — | ☐ |
 
-**Suggested order.** D-3 → D-1 → D-2 first (bugs, each < 1 day; the D-2 physical-click fallback needs D-3 — design notes in `docs/design/`), D-4 whenever convenient. Then the screenshot cluster
-(A-7, A-9, A-8, A-11) because every agent loop starts with a screenshot. Then A-1 → A-2 → A-4,
-which unlock B-6, B-8, B-10, A-3, A-6. Quick wins B-5, B-1, B-2, B-3, C-2, C-7, S-8, S-1 can be
-interleaved anywhere. A-5, A-12, S-4 last.
+**Suggested order.** D-1 … D-4 are done. Next D-5 → D-7 → D-6 as one PR (all three edit
+`FindElementAsync`, and `wait_for` is unusable until D-5 lands), then D-8 (independent, an hour,
+pays for itself on the first day). Then the
+screenshot cluster (A-7, A-9, A-8, A-11) because every agent loop starts with a screenshot.
+Then A-1 → A-2 → A-4, which unlock B-6, B-8, B-10, A-3, A-6. Quick wins B-5, B-1, B-2, B-3,
+C-2, C-7, S-8, S-1 can be interleaved anywhere. A-5, A-12, S-4 last.
 
 ---
 
@@ -198,7 +204,7 @@ call `SetCursorPos` directly, so negative and beyond-primary coordinates land co
 manual check clicks a target on a secondary monitor via `multi_monitor` bounds.
 
 ### D-4 — `assert_element` advertises `value` and `focused` but implements neither  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/D-4-assert-element-states.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Found while planning D-2** (`docs/design/D-2-interact-element-actions.md`). `Tools/UIAutomationTools.cs`
 `AssertElement` lists `exists, enabled, checked, value, visible, focused`;
@@ -214,6 +220,191 @@ or drop `value` from the description. Either way put the observed state in the `
 `tests/.../Tools/UIAutomationToolsTests.cs`, `docs/architecture/COMPONENTS.md`.
 
 **Done when.** Every state named in the description is implemented; `FAIL:` names the observed state.
+
+---
+
+### D-5 — `find_element(kind=any)` and `wait_for` fail on the first stale element  `P1 · S`
+- [ ] Not started
+
+**Found 2026-09-04 in use**, not by the upstream comparison — logged under rule 4. `kind=any`
+errored twice on a busy desktop while `text` and `interactive` worked; reproduced the same day on
+a second machine: `find_element("zzqxv", kind="any")` → "An error occurred invoking
+'find_element'", `kind="text"` → `{"Matches":[]}`.
+
+**Ours today.** `Services/UIAutomationService.cs` `FindElementAsync` calls
+`_automation.GetDesktop().FindAllDescendants()` — every element of every process on the desktop,
+materialised by one cross-process `FindAll`, with no `CacheRequest` and no element cap
+(`Take(20)` runs after the walk) — then filters in LINQ with **unguarded** reads: `el.Name` in the
+text predicate, `el.ControlType` in `MatchesKind` (`text` / `interactive`),
+`el.Patterns.Scroll.IsSupported` (`scrollable`); `ToInfo` guards everything except
+`el.BoundingRectangle`. With `kind=any`, `MatchesKind` short-circuits to `true`, so `el.Name` is
+read on every element until 20 match, and one element that vanished between the walk and the read
+(a tooltip, a closing menu, a virtualised list row) raises `UIA_E_ELEMENTNOTAVAILABLE` and the
+whole call fails. `text` / `interactive` narrow on `ControlType` first and usually survive, but
+that read is just as unguarded. `WaitForAsync` hard-codes `FindKind.Any` and does not catch
+between polls, so the first transient failure ends the wait instead of being retried — the one
+thing a wait is for. The whole-desktop walk also holds the single STA worker for its duration
+(every other UIA call queues behind it), and `wait_for` repeats it every `interval_ms`.
+
+**Upstream behaviour.** `tree/service.py` walks per window (active window first) on its own
+thread with retry, reads properties through a `CacheRequest` (`tree/cache_utils.py`) and stops at
+the `TreeElementBudget` (A-4). A dead element costs one node, never the call.
+
+**Implementation sketch.**
+- Guard every read on the find path with the existing `TryGetName` / `TryGetControlType` plus new
+  `TryGetBounds` / `TryIsScrollable`; a failed read means "skip this element", never "fail the
+  call". Reuse D-4's `IsElementGone` predicate (`ElementNotAvailableException`, or `COMException`
+  with `UIA_E_ELEMENTNOTAVAILABLE` / the RPC failures) and its ProcessId liveness probe — a dead
+  Win32 window's element answers reads with defaults (ControlType Pane, ProcessId 0) rather than
+  throwing, so the walker must not rely on an exception alone.
+- Scope the walk: `scope` = `foreground` (default: `GetForegroundRoot()`, the root `get_state`
+  already uses and the window the agent is acting on) | `desktop` on `find_element` and
+  `wait_for`. `desktop` walks the desktop's top-level children one window at a time, each in its
+  own try/catch, so a window closing mid-walk drops out instead of killing the search.
+- Push the kind filter into the UIA condition where it can be (`ConditionFactory.ByControlType`
+  OR-ed for `text` / `interactive`, `TrueCondition` for `any` / `scrollable`) so the provider
+  marshals fewer elements; `Name` still has to be read client-side (UIA has no "contains").
+- `WaitForAsync`: forward `kind` and `scope` instead of hard-coding `Any`; catch per poll, keep
+  the last exception, and if the deadline passes with nothing found report it in the timeout
+  message. Give the loop an internal overload that takes the poll delegate so the retry is
+  unit-testable without UIA.
+- Leave the `CacheRequest` and the element budget to A-4, but shape the walker as one method per
+  window root so A-4 wraps it without another rewrite.
+
+**Touches.** `Services/UIAutomationService.cs`, `Abstractions/IUIAutomationService.cs`,
+`Tools/UIAutomationTools.cs` (`scope` on `find_element` / `wait_for`; descriptions),
+`docs/architecture/COMPONENTS.md`, `DATAFLOW.md` (the `wait_for` diagram),
+`skills/windows/SKILL.md` §4.
+
+**Tests.** Unit: the tool forwards `kind` and `scope`; the `WaitForAsync` loop keeps polling when
+a poll throws and returns the first hit. `UIAutomation` category: `FindElementAsync("", Any)`
+against the Notepad fixture returns without throwing, in both scopes, ten times in a row;
+`WaitForAsync` for text that appears after 500 ms returns it.
+
+**Done when.** `find_element(kind=any)` and `wait_for` return on a busy desktop; a stale element
+is skipped, not fatal; the default scope is the foreground window and `scope=desktop` is opt-in;
+the STA worker is not held for a whole-desktop walk unless asked.
+
+---
+
+### D-6 — `find_element(kind=interactive)` excludes Edit, ComboBox, ListItem, TabItem, RadioButton, Slider, TreeItem  `P2 · S`
+- [ ] Not started
+
+**Ours today.** `MatchesKind` (`Services/UIAutomationService.cs`):
+`Interactive => Button | CheckBox | Hyperlink | MenuItem`. Edit, ComboBox, ListItem, TabItem,
+RadioButton, SplitButton, TreeItem, DataItem, HeaderItem, Spinner, Slider, ScrollBar and Document
+are all excluded — so the Claude Code prompt box (an `Edit`) is not "interactive", nor is any
+dropdown, list row, tab, or radio button. `kind=text` (`Text | Edit | Document`) is currently the
+only way to find an input.
+
+**Upstream behaviour.** `tree/config.py` `INTERACTIVE_CONTROL_TYPE_NAMES` = Button, ListItem,
+MenuItem, Edit, CheckBox, RadioButton, ComboBox, Hyperlink, SplitButton, TabItem, TreeItem,
+DataItem, HeaderItem, TextBox, Spinner, Slider, ScrollBar, plus `INTERACTIVE_ROLES` via the
+LegacyIAccessible role for controls that misreport their type. `DocumentControl` is its own class
+(`DOCUMENT_CONTROL_TYPE_NAMES`, action `scroll`), listed alongside the interactive elements in the
+snapshot. A-2 ports the whole classifier.
+
+**Implementation sketch.** Replace the four-type test with a `static readonly HashSet<ControlType>`
+of the upstream set (`Button, ListItem, MenuItem, Edit, CheckBox, RadioButton, ComboBox, Hyperlink,
+SplitButton, TabItem, TreeItem, DataItem, HeaderItem, Spinner, Slider, ScrollBar`) **plus
+`Document`** — for a flat `kind` filter a text area you type into is interactive; A-2 can split
+it back out when there is a separate document list. State the set in the `kind` parameter
+description. When A-2 lands, `find_element` calls the classifier instead of keeping its own list
+(A-2's acceptance test).
+
+**Touches.** `Services/UIAutomationService.cs`, `Tools/UIAutomationTools.cs` (description),
+`docs/architecture/COMPONENTS.md`.
+
+**Tests.** `UIAutomation` category: `FindElementAsync("", Interactive)` on the Notepad fixture
+returns the editor (`Edit` / `Document`) and at least one `MenuItem`; a unit test pins the set
+against the list above so a later edit is a visible diff.
+
+**Done when.** `find_element("", kind=interactive)` on Notepad lists the editor and the menu
+items; the set matches upstream's and is stated in the description.
+
+---
+
+### D-7 — `find_element` and `wait_for` return off-screen elements by default  `P2 · S`
+- [ ] Not started
+
+**Ours today.** `FindElementAsync` has no `IsOffscreen` filter; `ToInfo` reports the flag and
+leaves it to the caller. Observed 2026-09-04: 18 of 21 `kind=text` hits were `IsOffscreen: true`
+(collapsed panes, virtualised list rows, minimised windows). Worse, `Take(20)` runs before any
+filtering the caller could do, so off-screen hits **crowd out** on-screen ones — an on-screen match
+can be absent from the 20 returned. `wait_for` inherits both and can "find" a not-yet-visible
+element and return early. (Off-screen is not the same as negative coordinates: a monitor left of
+or above the primary has negative bounds and is on-screen — D-3.)
+
+**Upstream behaviour.** `tree/service.py` `tree_traversal`: `is_visible = area > 0 and not
+is_offscreen` (narrow exceptions for `EditControl` and browser `ListItemControl`) — off-screen
+nodes never reach the output. The A-2 sketch already says "off-screen dropped"; this item is the
+same rule applied to the tools that exist today.
+
+**Implementation sketch.** `include_offscreen` (`bool`, default `false`) on `find_element` and
+`wait_for`; the filter is `!TryGetIsOffscreen(el)` and non-empty bounds, applied **before**
+`Take(20)`. Decide in implementation whether to keep upstream's `Edit` exception (an edit control
+scrolled out of view reports off-screen yet is still the right target for `type`); if adopted,
+say so in the description. `IsOffscreen` stays in `ElementInfo` for `get_element`.
+
+**Touches.** `Services/UIAutomationService.cs`, `Abstractions/IUIAutomationService.cs`,
+`Tools/UIAutomationTools.cs`, `docs/architecture/COMPONENTS.md`, `skills/windows/SKILL.md` §4.
+
+**Tests.** `UIAutomation` category: `find_element("", kind=text)` returns only
+`IsOffscreen == false` results by default; with `include_offscreen=true` the count is ≥ the
+default count. Unit: the tool forwards the flag.
+
+**Done when.** Default results contain no `IsOffscreen: true` element; the 20-cap applies after
+the filter; `include_offscreen=true` restores today's behaviour.
+
+---
+
+### D-8 — `powershell` ships the CLIXML progress stream to the model on every call  `P2 · S`
+- [ ] Not started
+
+**Not an upstream-parity item** — logged here (rule 4) because it is the highest token-ROI fix on
+the most-used tool. Related: C-6 touches the same service; do D-8 first or together.
+
+**Ours today.** Windows PowerShell 5.1 with redirected stderr wraps its non-stdout streams in
+CLIXML. Every cold start emits a `progress` record ("Preparing modules for first use.") and any
+`Write-Progress` — including the ones inside `Invoke-WebRequest` and module autoload — adds
+another. `PowerShellService.RunAsync` keeps the raw stream in `PSResult.Stderr`, and
+`ShellTools.Powershell` serialises the whole `PSResult`, so each call carries ~0.6–3 KB of XML the
+model reads and ignores. Measured 2026-09-04 through the service's exact process setup: a
+one-liner with one `Write-Progress` → 596 characters of CLIXML on stderr; the same script with
+`$ProgressPreference='SilentlyContinue'` in the preamble → 0. `Errors[]` is already clean: since
+`6c96350` (2026-08-24) `ExtractErrors` decodes only `<S S="Error">` records (test
+`RunAsync_progress_records_on_stderr_do_not_fail_the_command`), so the blob is carried once, in
+`Stderr`, not twice — except when `XElement.Parse` fails, in which case the `RawLines()` fallback
+puts the raw XML lines into `Errors[]` as well.
+
+**Implementation sketch.**
+- `PowerShellInvocation.BuildArgumentsAsync`: add `$ProgressPreference='SilentlyContinue'` to the
+  preamble (script scope; a caller's script can set it back). Welcome side effect:
+  `Invoke-WebRequest` / `Invoke-RestMethod` are markedly faster without the progress bar. Update
+  the preamble comment and the tool description ("progress output is suppressed — there is no
+  console to draw it on").
+- `PowerShellService`: decode `Stderr` the way `Errors` already is — when the stream is CLIXML,
+  replace it with the decoded text of the error / warning / verbose / debug / information records
+  (one line each, stream-prefixed, e.g. `WARNING: careful`) and drop `progress` records;
+  non-CLIXML stderr and unparseable CLIXML stay raw. `Errors[]` unchanged. This also covers a
+  script that re-enables progress and the parse-failure fallback.
+- Keep `PSResult`'s shape (`Success, Stdout, Stderr, ExitCode, Errors`) so `job` output and the
+  existing tests are untouched.
+
+**Touches.** `Services/PowerShellInvocation.cs`, `Services/PowerShellService.cs`,
+`Tools/ShellTools.cs` (description), `docs/architecture/COMPONENTS.md` (PowerShellService
+bullets), `tests/.../Services/PowerShellServiceTests.cs`.
+
+**Tests.** Pure tests on a captured CLIXML sample for the decoder (progress dropped, warning kept
+as text, error kept, raw stderr passthrough, concatenated `<Objs>` documents); the existing
+`RunAsync_progress_records_on_stderr_do_not_fail_the_command` flips its
+`Stderr.Should().Contain("progress")` precondition to assert the stream is now empty; one
+real-process test that `Write-Warning 'careful'` yields `Stderr` containing `careful` and not
+`<Objs`.
+
+**Done when.** A `powershell` call that triggers module first-use returns `Stderr: ""`; a
+`Write-Warning` arrives as text; `Errors[]` and `Success` semantics are unchanged; the response for
+`'hi'` is under 200 bytes.
 
 ---
 
@@ -313,6 +504,9 @@ traverser, renderer), `Tools/UIAutomationTools.cs`, `skills/windows/SKILL.md`, R
 **Tests.** Pure unit tests for the classifier, renderer and action map on fake node records;
 `UIAutomation`-category integration against the Notepad fixture asserting the edit control is
 listed with `action: fill` and a centre inside its bounds; a timing assertion under the element cap.
+**Acceptance test carried over from D-6:** the classifier lists an `Edit` (Notepad's editor, the
+Claude Code prompt box) and every type in upstream's `INTERACTIVE_CONTROL_TYPE_NAMES` as
+interactive, and `find_element(kind=interactive)` calls this classifier instead of keeping its own list.
 
 **Done when.** One call returns all visible windows' interactive elements with centre coordinates,
 action hints and metadata, in the compact text form, bounded by the element cap, and the
@@ -343,7 +537,9 @@ limit. `tree/cache_utils.py` builds a `CacheRequest` so property reads are one c
 per subtree instead of one per property.
 
 **Ours.** `BuildTree` recursion is depth-limited (3) but not count-limited — a large grid at depth
-≤ 3 still explodes; no cache request (each `TryGetX` is a COM round-trip).
+≤ 3 still explodes; no cache request (each `TryGetX` is a COM round-trip). `FindElementAsync` is
+worse: it walks the **whole desktop** with no cap at all — D-5 scopes it and guards the reads; the
+cache request and budget here are what make its `scope=desktop` search affordable.
 
 **Sketch.** `max_elements` param (default 500) + `WINDOWSMCP_MAX_TREE_ELEMENTS` env; counter
 threaded through traversal; `Truncated`, `ElementLimit` in the result + a note in text output;

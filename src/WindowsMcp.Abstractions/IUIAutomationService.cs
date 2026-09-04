@@ -8,7 +8,7 @@ public interface IUIAutomationService : IDisposable
     Task<FindElementResult> FindElementAsync(string text, FindKind kind = FindKind.Any, CancellationToken ct = default);
     Task<ElementInfo> GetElementAsync(string elementId, CancellationToken ct = default);
     Task<string> GetTextAsync(string elementId, CancellationToken ct = default);
-    Task<bool> AssertElementAsync(string elementId, string state, CancellationToken ct = default);
+    Task<AssertResult> AssertElementAsync(string elementId, string state, string? expected = null, CancellationToken ct = default);
     Task<InteractResult> InteractAsync(string elementId, string action, string? value, CancellationToken ct = default);
     Task<TableData> GetTableAsync(string elementId, CancellationToken ct = default);
     Task<ElementInfo?> WaitForAsync(string text, int timeoutMs, int intervalMs, CancellationToken ct = default);

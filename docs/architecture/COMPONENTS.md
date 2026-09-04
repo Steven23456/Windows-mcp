@@ -135,7 +135,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 | `FindElement` | `(string text, string kind="any")` | Find elements by text; kind: any/interactive/text/scrollable |
 | `GetElement` | `(string element_id)` | Properties of a specific element by ID |
 | `GetText` | `(string element_id)` | Extract text content (faster than OCR) |
-| `AssertElement` | `(string element_id, string state)` | Assert element state; returns `PASS` or `FAIL: <reason>` |
+| `AssertElement` | `(string element_id, string state, string? expected=null)` | exists / enabled / checked / visible / focused / value (needs `expected`); returns `PASS` or `FAIL: <state> — observed <what was found>` |
 | `InteractElement` | `(string element_id, string action, string? value=null)` | click / invoke / toggle / select / focus / type via UIA patterns, with a physical click or keyboard fallback; returns `InteractResult` JSON naming what fired |
 | `GetTable` | `(string element_id)` | Extract grid/table data via `GridPattern` |
 | `WaitFor` | `(string text, int timeout_ms=10000, int interval_ms=500)` | Poll until element appears |
@@ -373,7 +373,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IAudioService` | `GetAsync` → `AudioState`, `SetVolumeAsync`, `SetMutedAsync` |
 | `IPowerShellService` | `RunAsync(command)` → `PSResult` |
 | `IJobService` | `StartAsync(command)`, `GetStatus(id)`, `GetOutput(id, tailChars)`, `Cancel(id)`, `List()` |
-| `IUIAutomationService` | `GetStateAsync`, `FindElementAsync`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync`, `InteractAsync` → `InteractResult`, `GetTableAsync`, `WaitForAsync`, `FocusAsync` |
+| `IUIAutomationService` | `GetStateAsync`, `FindElementAsync`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync` → `AssertResult`, `InteractAsync` → `InteractResult`, `GetTableAsync`, `WaitForAsync`, `FocusAsync` |
 | `IFileSystemService` | `ReadTextAsync`, `ReadBytesAsync`, `WriteTextAsync`, `CopyAsync`, `MoveAsync`, `DeleteAsync`, `ListAsync`, `SearchAsync`, `GetInfoAsync`, `HashFileAsync`, `ZipAsync`, `UnzipAsync` |
 | `IFileStreamService` | `GetStreamsAsync(path)` → `FileStreamsDto` (alternate data streams + reparse target) |
 | `IRegistryService` | `GetAsync`, `SetAsync`, `EnumerateValuesAsync`, `EnumerateSubKeysAsync` |
@@ -413,7 +413,7 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 21 f
 |------|-----------|
 | `InputDtos.cs` | `ClickResult`, `DragResult`, `TypeResult`, `MouseButton` (enum) |
 | `ScreenDtos.cs` | `ScreenRegion`, `ScreenshotResult`, `ImageFormat` (enum) |
-| `UIAutomationDtos.cs` | `ElementInfo`, `Bounds`, `ElementTree`, `FindElementResult`, `FindKind` (enum), `TableData`, `InteractResult` |
+| `UIAutomationDtos.cs` | `ElementInfo`, `Bounds`, `ElementTree`, `FindElementResult`, `FindKind` (enum), `TableData`, `InteractResult`, `AssertResult` |
 | `WindowDtos.cs` | `WindowAction`, `MonitorInfo` |
 | `ProcessDtos.cs` | `ProcessDto`, `ProcessDetailDto`, `ModuleInfo`, `ProcessLineageDto`, `ProcessGroupDto` |
 | `PowerShellDtos.cs` | `PSResult` (success, stdout, stderr, exit code, parsed errors) |
@@ -455,7 +455,7 @@ Uses **FlaUI.UIA3** to walk the Windows Accessibility (UIA3) tree:
 - `InteractAsync()` — click / invoke / toggle / select / focus / type. Each acts through a UIA pattern (Invoke, SelectionItem, Toggle, Value) or a physical fallback via `IInputService` (a click at the element's centre; keyboard entry when there is no writable ValuePattern) and returns an `InteractResult` naming what fired; an unsupported pattern throws `NotSupportedException` with the control type — never a silent no-op. `FocusAsync()` sets keyboard focus
 - `WaitForAsync()` — polls at `interval_ms` until element appears or `timeout_ms` elapses
 - `GetTableAsync()` — reads cells via `IGridPattern`
-- `AssertElementAsync()` — checks element properties: exists / enabled / checked / visible (`value` and `focused` are advertised by the tool but not yet implemented — parity checklist D-4)
+- `AssertElementAsync()` — exists / enabled / checked / visible / focused / value (`expected`: ordinal match against the ValuePattern value, else the Name — the same read as `get_text`); returns `AssertResult` with the observed state (focus owner, actual value, toggle state). A stale element (ProcessId 0, or UIA_E_ELEMENTNOTAVAILABLE / an RPC failure on a read — `IsElementGone`) fails with `element no longer available` instead of throwing; optional properties a provider omits (modern Notepad's document has no `IsOffscreen`) fall back to UIA's defaults
 
 ### `InputService`
 

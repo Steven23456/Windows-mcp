@@ -412,29 +412,39 @@ Interactive control types (FlaUI ControlType names):
 ## AssertElement Data Flow
 
 ```
-AssertElement(element_id, state)
+AssertElement(element_id, state, expected?)
         │
         ▼
-UIAutomationService.AssertElementAsync(element_id, state)
+UIAutomationService.AssertElementAsync(element_id, state, expected)
+        │
+        ▼
+  Validate: known state; `expected` only — and always — with "value"
         │
         ▼
   Resolve element by ID from internal cache
+  ├─ unknown id + "exists" → FAIL "unknown element id"
+  └─ unknown id + other    → KeyNotFoundException
+        │
+        ▼
+  Liveness probe: ProcessId <= 0, or UIA_E_ELEMENTNOTAVAILABLE /
+  RPC failure on any read (IsElementGone)
+  └─ gone → FAIL "element no longer available"
         │
         ▼
   switch (state)
-  ├─ "exists"  → true (the id resolved from the cache)
-  ├─ "enabled" → element.IsEnabled
-  ├─ "checked" → TogglePattern state == ToggleState.On
-  ├─ "visible" → !element.IsOffscreen
-  └─ anything else → throws "Unknown assertion state"
-       ("value" and "focused" are advertised by the tool
-        description but not implemented — parity item D-4)
+  ├─ "exists"  → PASS
+  ├─ "enabled" → IsEnabled (UIA default true)              FAIL: "disabled"
+  ├─ "checked" → TogglePattern state == On                 FAIL: "toggle state Off" / "no TogglePattern on …"
+  ├─ "visible" → !IsOffscreen && bounds non-empty          FAIL: "offscreen" / "empty bounds"
+  ├─ "focused" → HasKeyboardFocus, or == FocusedElement()  FAIL: "focus is on <type> '<name>'" / "nothing has focus"
+  └─ "value"   → ValuePattern value (else Name) == expected, ordinal
+                                                           FAIL: "value is '<actual>' (from ValuePattern|Name)"
         │
         ▼
-  return true/false
+  AssertResult(ElementId, State, Pass, Observed)
         │
         ▼
-  Tool: "PASS" or "FAIL: {state}"
+  Tool: "PASS" or "FAIL: {state} — observed {Observed}"
 ```
 
 ---

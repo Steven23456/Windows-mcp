@@ -34,6 +34,16 @@
   reads it back: a point Windows clamped (off any monitor) throws instead of clicking somewhere
   else. The four mouse tools' descriptions now state the coordinate space. An integration test
   hovers to every monitor's centre and asserts the exact position.
+- **`assert_element` implements every state it advertises** (parity D-4). `focused` (keyboard
+  focus, or identity with UIA's focused element) and `value` (new `expected` parameter; exact match
+  against the ValuePattern value, else the Name — the same read as `get_text`) now work instead of
+  throwing `Unknown assertion state`; `exists` is a real liveness probe; `visible` also requires
+  non-empty bounds. A FAIL names what was observed (`focus is on Button 'Save'`, `value is 'x'
+  (from ValuePattern)`, `toggle state Off`, `element no longer available` once the window closed —
+  a dead Win32 window's element answers reads with defaults rather than throwing, so the probe is
+  the ProcessId). Optional properties a provider omits (modern Notepad's document has no
+  `IsOffscreen`) no longer throw. `IUIAutomationService.AssertElementAsync` returns `AssertResult`.
+  Verified live against Notepad and a killed Character Map window (`UIAutomationServiceTests`).
 - **Doc drift after D-1/D-2/D-3 and the environment repair.** `docs/architecture/OVERVIEW.md` still
   described `interact_element` as "toggle, select, or invoke" and `key` as name-only, and
   `COMPONENTS.md`'s tool tables said the same; `COMPONENTS.md`'s `Program.cs` startup sequence
@@ -41,9 +51,9 @@
   said "latest" for pinned versions while omitting `System.ServiceProcess.ServiceController`;
   `ARCHITECTURE.md` quoted the pre-D-3 `click` description and left `EnvironmentRepair` out of the
   `Hosting/` file list; `DATAFLOW.md`'s `AssertElement` flow still claimed `value` and `focused`
-  work (they throw — parity item D-4). The item counts in `todo.md` and the parity checklist now
-  say 47 / four defects after D-4 was logged. Tool counts (64 tools, 19 classes, 36 services) were
-  already correct everywhere and are unchanged.
+  work (they threw at the time — parity item D-4, fixed above). The item counts in `todo.md` and
+  the parity checklist now say 51 / eight defects after D-4…D-8 were logged. Tool counts (64
+  tools, 19 classes, 36 services) were already correct everywhere and are unchanged.
 
 ### Added
 

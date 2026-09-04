@@ -116,3 +116,6 @@ docker-compose.override.yml
 # OS / editor noise
 .DS_Store
 *.code-workspace
+
+# Local secrets
+.local-secrets/

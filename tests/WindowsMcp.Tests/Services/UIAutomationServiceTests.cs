@@ -101,6 +101,125 @@ public class UIAutomationServiceTests : IClassFixture<NotepadFixture>
         await act.Should().ThrowAsync<NotSupportedException>().WithMessage("TogglePattern not supported on *");
     }
 
+    // ---- D-4: assert_element ----------------------------------------------------------------
+
+    [Fact]
+    public async Task AssertElementAsync_exists_enabled_visible_pass_on_the_document()
+    {
+        using var svc = NewService();
+        var id = await FindNotepadDocumentIdAsync(svc);
+
+        foreach (var state in new[] { "exists", "enabled", "visible" })
+        {
+            var result = await svc.AssertElementAsync(id, state);
+            result.Pass.Should().BeTrue($"{state}: observed {result.Observed}");
+            result.State.Should().Be(state);
+        }
+    }
+
+    [Fact]
+    public async Task AssertElementAsync_focused_passes_on_the_focused_document_and_names_the_focus_owner_otherwise()
+    {
+        using var svc = NewService();
+        var id = await FindNotepadDocumentIdAsync(svc);
+        await svc.FocusAsync(id);
+        await Task.Delay(200);
+
+        var onDocument = await svc.AssertElementAsync(id, "focused");
+        onDocument.Pass.Should().BeTrue(onDocument.Observed);
+
+        // A title-bar / toolbar button never holds keyboard focus while the document does. (The
+        // top-level Window of a XAML app does report HasKeyboardFocus, so it is no use here.)
+        var button = FindInTree(await svc.GetStateAsync(), "Button")
+            ?? throw new Xunit.Sdk.XunitException("No Button within three levels of the Notepad window");
+        var onButton = await svc.AssertElementAsync(button.ElementId, "focused");
+        onButton.Pass.Should().BeFalse($"observed {onButton.Observed}");
+        onButton.Observed.Should().StartWith("focus is on");
+    }
+
+    private static ElementInfo? FindInTree(ElementTree t, string controlType)
+    {
+        if (t.Root.ControlType == controlType) return t.Root;
+        foreach (var c in t.Children)
+            if (FindInTree(c, controlType) is { } hit) return hit;
+        return null;
+    }
+
+    [Fact]
+    public async Task AssertElementAsync_value_compares_exactly_and_quotes_the_actual_value()
+    {
+        using var svc = NewService();
+        var id = await FindNotepadDocumentIdAsync(svc);
+        var stamp = $"d4-{Guid.NewGuid():N}"[..12];
+        await svc.InteractAsync(id, "type", stamp);
+        await Task.Delay(300);
+        var text = await svc.GetTextAsync(id);   // other tests type into the same document
+
+        var match = await svc.AssertElementAsync(id, "value", text);
+        match.Pass.Should().BeTrue(match.Observed);
+
+        var mismatch = await svc.AssertElementAsync(id, "value", "not-" + stamp);
+        mismatch.Pass.Should().BeFalse();
+        mismatch.Observed.Should().StartWith("value is '").And.Contain(stamp);
+    }
+
+    [Fact]
+    public async Task AssertElementAsync_checked_names_the_missing_pattern_on_a_document()
+    {
+        using var svc = NewService();
+        var id = await FindNotepadDocumentIdAsync(svc);
+
+        var result = await svc.AssertElementAsync(id, "checked");
+
+        result.Pass.Should().BeFalse();
+        result.Observed.Should().StartWith("no TogglePattern on");
+    }
+
+    [Fact]
+    public async Task AssertElementAsync_reports_a_stale_element_as_no_longer_available()
+    {
+        using var svc = NewService();
+
+        // A throwaway classic Win32 window (Character Map is single-process, multi-instance, and
+        // present on every Windows edition) so killing it cannot disturb the shared Notepad.
+        using var proc = System.Diagnostics.Process.Start("charmap.exe");
+        string id;
+        try
+        {
+            for (int i = 0; i < 40 && proc.MainWindowHandle == IntPtr.Zero; i++) { await Task.Delay(150); proc.Refresh(); }
+            proc.MainWindowHandle.Should().NotBe(IntPtr.Zero, "charmap.exe must open a window");
+            _np.Automation.FromHandle(proc.MainWindowHandle).SetForeground();
+
+            // get_state roots at the foreground window; wait until that is Character Map.
+            ElementTree state = await svc.GetStateAsync();
+            for (int i = 0; i < 20 && !state.Root.Name.Contains("Character Map", StringComparison.OrdinalIgnoreCase); i++)
+            {
+                await Task.Delay(150);
+                state = await svc.GetStateAsync();
+            }
+            state.Root.Name.Should().Contain("Character Map", "the throwaway window must be in the foreground for this test");
+            id = state.Root.ElementId;
+            var alive = await svc.AssertElementAsync(id, "exists");
+            alive.Pass.Should().BeTrue(alive.Observed);
+
+            proc.Kill();
+            proc.WaitForExit();
+            await Task.Delay(500);
+        }
+        finally
+        {
+            try { if (!proc.HasExited) proc.Kill(); } catch { /* already gone */ }
+            _np.BringToForeground();
+        }
+
+        // A dead Win32 window's element does not throw: UIA answers with defaults (ControlType
+        // Pane, ProcessId 0), so the service's liveness probe must not rely on an exception.
+        var gone = await svc.AssertElementAsync(id, "exists");
+        gone.Pass.Should().BeFalse();
+        gone.Observed.Should().Be("element no longer available");
+        (await svc.AssertElementAsync(id, "enabled")).Observed.Should().Be("element no longer available");
+    }
+
     /// <summary>
     /// The service-issued id of Notepad's editor. get_state is rooted at the foreground window
     /// three levels deep, which reaches classic Notepad's Document; modern (XAML) Notepad nests its
@@ -119,13 +238,26 @@ public class UIAutomationServiceTests : IClassFixture<NotepadFixture>
         var state = await svc.GetStateAsync();
         if (Dfs(state) is { } inTree) return inTree.ElementId;
 
-        var byName = await svc.FindElementAsync("Text editor", FindKind.Text);
-        if (byName.Matches.Length > 0) return byName.Matches[0].ElementId;
+        // Until checklist D-5 lands, FindElementAsync walks the whole desktop with unguarded
+        // property reads and dies on the first stale element (a tooltip or closing menu in any
+        // other process). Retry a few times so that defect does not fail an unrelated test.
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                var byName = await svc.FindElementAsync("Text editor", FindKind.Text);
+                if (byName.Matches.Length > 0) return byName.Matches[0].ElementId;
 
-        var any = await svc.FindElementAsync("", FindKind.Text);
-        var doc = any.Matches.FirstOrDefault(m => m.ControlType is "Document" or "Edit")
-            ?? throw new Xunit.Sdk.XunitException("No Document/Edit element found — is Notepad in the foreground?");
-        return doc.ElementId;
+                var any = await svc.FindElementAsync("", FindKind.Text);
+                var doc = any.Matches.FirstOrDefault(m => m.ControlType is "Document" or "Edit")
+                    ?? throw new Xunit.Sdk.XunitException("No Document/Edit element found — is Notepad in the foreground?");
+                return doc.ElementId;
+            }
+            catch (System.Runtime.InteropServices.COMException) when (attempt < 5)
+            {
+                await Task.Delay(200);
+            }
+        }
     }
 }
 
@@ -141,5 +273,48 @@ public class UIAutomationServiceUnitTests
         svc.Dispose();
         Func<Task> act = () => svc.GetStateAsync();
         await act.Should().ThrowAsync<ObjectDisposedException>();
+    }
+
+    // D-4: the argument rules and the unknown-id rule are decided before any UIA call is made,
+    // so these run headless.
+    [Theory]
+    [InlineData("value", null, "*requires expected*")]
+    [InlineData("enabled", "x", "*only used with state=value*")]
+    [InlineData("hovering", null, "*Unknown assertion state 'hovering'*")]
+    public async Task AssertElementAsync_rejects_bad_arguments(string state, string? expected, string message)
+    {
+        using var svc = new UIAutomationService(new Mock<IInputService>().Object);
+        Func<Task> act = () => svc.AssertElementAsync("el_0", state, expected);
+        await act.Should().ThrowAsync<ArgumentException>().WithMessage(message);
+    }
+
+    [Fact]
+    public async Task AssertElementAsync_exists_fails_for_an_unknown_id()
+    {
+        using var svc = new UIAutomationService(new Mock<IInputService>().Object);
+
+        var result = await svc.AssertElementAsync("el_404", "exists");
+
+        result.Pass.Should().BeFalse();
+        result.Observed.Should().Be("unknown element id");
+    }
+
+    [Fact]
+    public async Task AssertElementAsync_other_states_throw_for_an_unknown_id()
+    {
+        using var svc = new UIAutomationService(new Mock<IInputService>().Object);
+        Func<Task> act = () => svc.AssertElementAsync("el_404", "enabled");
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    [Theory]
+    [InlineData(unchecked((int)0x80040201), true)]   // UIA_E_ELEMENTNOTAVAILABLE
+    [InlineData(unchecked((int)0x800706BA), true)]   // RPC_S_SERVER_UNAVAILABLE
+    [InlineData(unchecked((int)0x80004005), false)]  // E_FAIL is not "gone"
+    public void IsElementGone_recognises_the_destroyed_element_HRESULTs(int hresult, bool gone)
+    {
+        var ex = new System.Runtime.InteropServices.COMException("probe", hresult);
+        UIAutomationService.IsElementGone(ex).Should().Be(gone);
+        UIAutomationService.IsElementGone(new InvalidOperationException()).Should().BeFalse();
     }
 }

@@ -18,10 +18,10 @@ public sealed class UIAutomationTools
 
     private static FindKind ParseKind(string kind) => kind.ToLowerInvariant() switch
     {
-        "any"          => FindKind.Any,
-        "interactive"  => FindKind.Interactive,
-        "text"         => FindKind.Text,
-        "scrollable"   => FindKind.Scrollable,
+        "any" => FindKind.Any,
+        "interactive" => FindKind.Interactive,
+        "text" => FindKind.Text,
+        "scrollable" => FindKind.Scrollable,
         _ => throw new ArgumentException($"Unknown kind '{kind}'; expected any|interactive|text|scrollable")
     };
 
@@ -56,13 +56,14 @@ public sealed class UIAutomationTools
         return await _uia.GetTextAsync(element_id);
     }
 
-    [McpServerTool, Description("Assert a UI element state. Returns 'PASS' or 'FAIL: <reason>'.")]
+    [McpServerTool, Description("Assert a UI element state: exists, enabled, checked, visible, focused, or value (needs expected: an exact match against the element's ValuePattern value, else its Name). Returns 'PASS' or 'FAIL: <state> — observed <what was found>', e.g. 'focus is on Button 'Save'', 'value is 'x' (from ValuePattern)', 'toggle state Off', 'element no longer available' (its window closed since the id was issued). An unknown state, 'value' without expected, or expected with another state is an error.")]
     public async Task<string> AssertElement(
         [Description("Element ID to check")] string element_id,
-        [Description("State to assert: exists, enabled, checked, value, visible, focused")] string state)
+        [Description("State to assert: exists, enabled, checked, value, visible, focused")] string state,
+        [Description("Expected value; only with state=value")] string? expected = null)
     {
-        bool pass = await _uia.AssertElementAsync(element_id, state);
-        return pass ? "PASS" : $"FAIL: {state}";
+        var result = await _uia.AssertElementAsync(element_id, state, expected);
+        return result.Pass ? "PASS" : $"FAIL: {result.State} — observed {result.Observed}";
     }
 
     [McpServerTool, Description("Act on a UI element by id. action: click (InvokePattern, else SelectionItem, else Toggle, else a physical click at the element's centre), invoke, toggle, select (no value: select this item; value: pick the child item with that name in a combo/list), focus, type (value = text; a writable ValuePattern replaces the whole value, otherwise it is typed at the caret). Returns {ElementId, Action, Method, Detail} saying which pattern or fallback fired; an unsupported pattern errors naming the control type.")]
