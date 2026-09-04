@@ -60,4 +60,31 @@ public class BoundedTextBufferTests
         buf.Snapshot().Should().Be("b");
         buf.Length.Should().Be(1);
     }
+
+    // D-9: a finished job's stderr buffer is rewritten in place with its decoded text.
+    [Fact]
+    public void ReplaceAll_swaps_the_retained_text_and_keeps_the_trim_count()
+    {
+        var buf = new BoundedTextBuffer(10);
+        buf.Append("0123456789ABCDE");        // 5 chars trimmed from the front
+        var trimmedBefore = buf.TrimmedChars;
+        trimmedBefore.Should().Be(5);
+
+        buf.ReplaceAll("decoded");
+
+        buf.Snapshot().Should().Be("decoded");
+        buf.Length.Should().Be(7);
+        buf.TrimmedChars.Should().Be(trimmedBefore, "TrimmedChars counts what was lost from the RAW stream");
+    }
+
+    [Fact]
+    public void ReplaceAll_still_honours_the_capacity()
+    {
+        var buf = new BoundedTextBuffer(4);
+        buf.ReplaceAll("abcdefgh");
+
+        buf.Snapshot().Should().Be("efgh");
+        buf.Length.Should().Be(4);
+        buf.TrimmedChars.Should().Be(4);
+    }
 }

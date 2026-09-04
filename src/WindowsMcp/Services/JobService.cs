@@ -151,11 +151,38 @@ public sealed class JobService : IJobService
             state = job.State;
             exitCode = job.ExitCode;
         }
+        // A finished job's buffer was decoded once by the monitor, so Tail() is already text. A
+        // running job's has not been — decode a copy on the way out (D-9). PowerShell flushes whole
+        // <Objs> documents, and the decoder drops a trailing partial one, so this usually succeeds
+        // mid-run; when it cannot, the raw stream passes through exactly as before.
+        var stderrText = state == "running"
+            ? TailOf(ClixmlStderr.Decode(job.Stderr.Snapshot()), tailChars)
+            : job.Stderr.Tail(tailChars);
+
         return new JobOutput(
             job.Id, state,
-            job.Stdout.Tail(tailChars), job.Stderr.Tail(tailChars),
+            job.Stdout.Tail(tailChars), stderrText,
             exitCode,
             job.Stdout.TrimmedChars, job.Stderr.TrimmedChars);
+    }
+
+    private static string TailOf(string text, int chars) =>
+        chars <= 0 || chars >= text.Length ? text : text[^chars..];
+
+    /// <summary>
+    /// Rewrites a finished job's stderr buffer from CLIXML into readable text. Windows PowerShell
+    /// 5.1 wraps every non-stdout stream in CLIXML when stderr is redirected; D-8 handles that for
+    /// the foreground service, but a job's stream is captured incrementally and can only be decoded
+    /// once it is complete. Best-effort by construction: <see cref="ClixmlStderr.Decode"/> returns
+    /// the input unchanged for non-CLIXML or unparseable input, and a buffer whose head was trimmed
+    /// has lost the "#&lt; CLIXML" marker, so it stays raw.
+    /// </summary>
+    private static void DecodeStderr(BoundedTextBuffer stderr)
+    {
+        var raw = stderr.Snapshot();
+        if (raw.Length == 0) return;
+        var decoded = ClixmlStderr.Decode(raw);
+        if (!ReferenceEquals(decoded, raw) && decoded != raw) stderr.ReplaceAll(decoded);
     }
 
     public bool Cancel(string id)
@@ -203,6 +230,13 @@ public sealed class JobService : IJobService
             await job.Process.WaitForExitAsync(CancellationToken.None);
             int exitCode = job.Process.ExitCode;
             await Task.WhenAll(job.StdoutPump, job.StderrPump);
+
+            // D-9: decode the now-complete CLIXML stderr ONCE, before the state flips to a terminal
+            // value — so no reader can ever observe a finished job together with raw XML. After this
+            // the buffer holds readable text, which keeps Tail(), Length and TrimmedChars consistent
+            // with what `job output` returns, at no per-read cost.
+            DecodeStderr(job.Stderr);
+
             lock (_lock)
             {
                 job.ExitCode = exitCode;

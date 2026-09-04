@@ -51,6 +51,29 @@ public sealed class BoundedTextBuffer
         lock (_lock) { return _sb.ToString(); }
     }
 
+    /// <summary>
+    /// Replaces the retained text wholesale. Used once per job, when a finished job's stderr is
+    /// decoded from CLIXML into readable text (D-9): decoding is only possible on a complete stream,
+    /// so it happens after the pumps drain rather than as chars arrive.
+    /// <see cref="TrimmedChars"/> is deliberately NOT reset — it counts what was lost from the raw
+    /// stream, which stays true after the retained text is rewritten.
+    /// </summary>
+    public void ReplaceAll(string text)
+    {
+        lock (_lock)
+        {
+            _sb.Clear();
+            // Decoded text is always shorter than the CLIXML it came from, but clamp anyway so this
+            // can never be the one path that breaks the capacity invariant.
+            if (text.Length > _capacity)
+            {
+                TrimmedChars += text.Length - _capacity;
+                text = text[^_capacity..];
+            }
+            _sb.Append(text);
+        }
+    }
+
     /// <summary>The last <paramref name="chars"/> retained chars (everything if chars &lt;= 0 or larger than retained).</summary>
     public string Tail(int chars)
     {
