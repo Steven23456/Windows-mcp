@@ -27,5 +27,8 @@
       "mcp__everything-mcp__search"
     ],
     "deny": []
-  }
+  },
+  "disabledMcpjsonServers": [
+    "Windows-mcp"
+  ]
 }
