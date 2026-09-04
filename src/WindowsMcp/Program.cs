@@ -20,6 +20,13 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        // Repair the environment before ANYTHING spawns a child: Claude Desktop launches stdio
+        // servers with PATHEXT=.CPL and ~18 variables, which breaks every exe lookup in the
+        // powershell tool and crashes `docker mcp` (no ProgramData). See EnvironmentRepair.
+        var repaired = EnvironmentRepair.Apply();
+        if (repaired.Count > 0)
+            Console.Error.WriteLine($"Windows-mcp: repaired environment ({string.Join(", ", repaired)})");
+
         // Register AppUserModelID first so WinRT ToastNotification works.
         try { PInvoke.SetCurrentProcessExplicitAppUserModelID("org.windows-mcp.server"); }
         catch { /* best effort */ }

@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Fixed
+
+- **Stripped host environment no longer breaks child processes.** Claude Desktop (1.46) launches
+  stdio servers with ~18 variables and `PATHEXT=.CPL`, so the `powershell` tool could not resolve
+  `git`, `winget`, `dotnet`, `wsl` (no `.EXE` in the search list) and `docker mcp` panicked on a
+  missing `ProgramData`. `Hosting/EnvironmentRepair` now runs first thing in `Main`: it fills
+  missing variables from the registry (machine, then user; the two `Path` values joined) and
+  well-known folder defaults, and corrects `PATHEXT` when it cannot resolve an `.exe`. Values the
+  host did set are never overwritten (only `PATHEXT` is corrected). Repaired names are logged to
+  stderr once at startup. Unit-tested in `EnvironmentRepairTests`.
+
 ### Added
 
 - **Background PowerShell jobs** (63 → 64 tools). `powershell` gains `background: true`: instead
