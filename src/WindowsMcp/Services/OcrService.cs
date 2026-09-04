@@ -17,7 +17,8 @@ public sealed class OcrService : IOcrService
     {
         ct.ThrowIfCancellationRequested();
 
-        var shot = await _screenshot.CaptureAsync(region, ImageFormat.Png, ct);
+        // OCR reads pixels, so it always gets the full-resolution capture (MaxWidth/MaxHeight 0 = no cap).
+        var shot = await _screenshot.CaptureAsync(region, new CaptureOptions(ImageFormat.Png, MaxWidth: 0, MaxHeight: 0), ct);
 
         using var ras = new InMemoryRandomAccessStream();
         await ras.WriteAsync(shot.Bytes.AsBuffer());

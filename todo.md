@@ -24,6 +24,15 @@ invisible to the unit suite. This table is the resumable record so the sweep sur
 > works. Prefer at least one `Category=Integration` test per PowerShell-backed service (see
 > `DiskServiceReclaimableIntegrationTests`).
 
+> **2026-09-04 — two more mocked-only paths, logged by the A-9 GREEN pass.** (1) The stdio
+> host wiring `Program.RunStdioAsync` → `AddWindowsMcp(options)` has no in-process test; a
+> regression to `AddWindowsMcp(ServerOptions.Stdio)` would keep the suite green while
+> `--screenshot-scale` silently stopped working under the default transport. Candidate:
+> a `BuildStdioHost(options, configureServices?)` seam like `BuildHttpApp`'s, or a live-exe
+> smoke here. (2) `OcrService`'s real path (`BitmapDecoder` → `OcrEngine`) has never run under
+> a test — `OcrServiceTests` stop at the mocked capture. Add a `UIAutomation` OCR test when A-8
+> touches the shared region parser.
+
 **Before trusting ANY live result — verify the running image.** The served exe is whatever the
 MCP registration points at (see `CLAUDE.md` "Testing a change against the LIVE MCP server"); a
 `dotnet publish -o bundle` on its own changes **nothing** for a server that is already running.

@@ -36,7 +36,9 @@ internal sealed record ServerOptions(
     int Port,
     string? CertThumbprint,
     string? ApiKey,
-    bool ShowHelp = false)
+    bool ShowHelp = false,
+    // A-9: process-wide multiplier on every screenshot's own 'scale' argument, [0.1, 1.0].
+    double ScreenshotScale = 1.0)
 {
     public const int DefaultPort = 8765;
     public const string DefaultBind = "0.0.0.0";
@@ -55,7 +57,7 @@ internal sealed record ServerOptions(
 
     private static readonly string[] HttpOnlyOptions = ["port", "bind", "cert-thumbprint", "api-key"];
     private static readonly HashSet<string> KnownOptions =
-        new(["transport", .. HttpOnlyOptions], StringComparer.OrdinalIgnoreCase);
+        new(["transport", "screenshot-scale", .. HttpOnlyOptions], StringComparer.OrdinalIgnoreCase);
 
     public static string Usage => $"""
         Usage: WindowsMcp.exe [--transport stdio|http] [options]
@@ -78,8 +80,14 @@ internal sealed record ServerOptions(
                                     registry_set, process kill, ...) is reachable on this port.
           -h, --help                Show this help.
 
+        Capture options (both transports):
+          --screenshot-scale <0.1-1.0>
+                                    Multiply every screenshot's own scale by this (default 1.0):
+                                    a cheap way to shrink what the model sees on a 4K desktop.
+
         Environment fallbacks (a flag on the command line wins): {EnvPrefix}TRANSPORT,
-        {EnvPrefix}PORT, {EnvPrefix}BIND, {EnvPrefix}CERT_THUMBPRINT, {EnvPrefix}API_KEY.
+        {EnvPrefix}PORT, {EnvPrefix}BIND, {EnvPrefix}CERT_THUMBPRINT, {EnvPrefix}API_KEY,
+        {EnvPrefix}SCREENSHOT_SCALE.
         Prefer {EnvPrefix}API_KEY over --api-key: it stays out of process command lines.
 
         Examples:
@@ -143,12 +151,22 @@ internal sealed record ServerOptions(
             _ => throw new OptionsException($"Unknown transport '{transportRaw}'; expected 'stdio' or 'http'."),
         };
 
+        // Not HTTP-only: parsed before the stdio early return so it applies to both transports.
+        var screenshotScale = 1.0;
+        if (Get("screenshot-scale", "SCREENSHOT_SCALE") is { } scaleRaw)
+        {
+            // AllowDecimalPoint only: no sign, no exponent, no NaN/Infinity, no thousands separator.
+            if (!double.TryParse(scaleRaw, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out screenshotScale)
+                || !(screenshotScale >= 0.1 && screenshotScale <= 1.0))   // positive test: NaN parses, must fail
+                throw new OptionsException($"Invalid --screenshot-scale '{scaleRaw}'; expected a number from 0.1 to 1.0.");
+        }
+
         if (transport == TransportKind.Stdio)
         {
             var stray = HttpOnlyOptions.FirstOrDefault(cli.ContainsKey);
             if (stray is not null)
                 throw new OptionsException($"'--{stray}' only applies with '--transport http'.");
-            return Stdio;
+            return Stdio with { ScreenshotScale = screenshotScale };
         }
 
         var port = DefaultPort;
@@ -184,7 +202,7 @@ internal sealed record ServerOptions(
             apiKey = apiKeyRaw;
         }
 
-        return new ServerOptions(TransportKind.Http, bind, port, thumbprint, apiKey);
+        return new ServerOptions(TransportKind.Http, bind, port, thumbprint, apiKey, ScreenshotScale: screenshotScale);
     }
 
     /// <summary>

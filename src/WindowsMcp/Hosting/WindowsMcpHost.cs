@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using WindowsMcp.Abstractions;
+using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Services;
 using ModelContextProtocol.AspNetCore;
 
@@ -53,9 +54,13 @@ internal static class WindowsMcpHost
     /// Registers every service singleton and the MCP server (identity, error filter, tools).
     /// The caller appends the transport: <c>.WithStdioServerTransport()</c> or <c>.WithHttpTransport(...)</c>.
     /// </summary>
-    public static IMcpServerBuilder AddWindowsMcp(this IHostApplicationBuilder builder)
+    public static IMcpServerBuilder AddWindowsMcp(this IHostApplicationBuilder builder, ServerOptions options)
     {
         var services = builder.Services;
+
+        // Process-level knobs the tools read (roadmap C7): ServerOptions is internal to this
+        // assembly, so the public options record is what crosses into the tool layer.
+        services.AddSingleton(new ScreenshotOptions(options.ScreenshotScale));
 
         services.AddSingleton<IInputService, InputService>();
         services.AddSingleton<IScreenshotService, ScreenshotService>();
@@ -130,7 +135,12 @@ internal static class WindowsMcpHost
     /// stateless Streamable HTTP transport at <see cref="McpPath"/>. Separated from
     /// <see cref="Program"/> so tests can start it in-process on an ephemeral port.
     /// </summary>
-    public static WebApplication BuildHttpApp(ServerOptions options, X509Certificate2? cert)
+    /// <param name="configureServices">
+    /// Runs after <see cref="AddWindowsMcp"/>, so a registration made here wins — the seam the
+    /// transport tests use to swap a service (e.g. the screen capture) for a fake.
+    /// </param>
+    public static WebApplication BuildHttpApp(
+        ServerOptions options, X509Certificate2? cert, Action<IServiceCollection>? configureServices = null)
     {
         if (!options.IsHttp)
             throw new ArgumentException("BuildHttpApp requires TransportKind.Http.", nameof(options));
@@ -142,7 +152,7 @@ internal static class WindowsMcpHost
         var builder = WebApplication.CreateBuilder();
         ConfigureStderrLogging(builder.Logging, http: true);
 
-        builder.AddWindowsMcp()
+        builder.AddWindowsMcp(options)
             .WithHttpTransport(o =>
             {
                 // Stateless: no server->client requests are used by any tool (no sampling,
@@ -151,6 +161,7 @@ internal static class WindowsMcpHost
                 // 404-ing a stale Mcp-Session-Id.
                 o.Stateless = true;
             });
+        configureServices?.Invoke(builder.Services);
 
         var bind = IPAddress.Parse(options.BindAddress);
         builder.WebHost.ConfigureKestrel(kestrel =>

@@ -13,6 +13,17 @@
   reported format and mime type describe what was encoded, never the request. Design note:
   `docs/design/A-7-screenshot-image-content.md`.
 
+- **`screenshot` downscales to 1920×1080 by default and reports the coordinate scale** (parity
+  A-9). A 4K capture was a ~10 MB PNG; it is now fitted inside `max_width` × `max_height`
+  (default 1920×1080, 0 = no limit) with a Mitchell cubic resample, then shrunk further by the
+  call's `scale` (0–1] and the server's `--screenshot-scale`. Metadata always carries
+  `originalWidth`/`originalHeight`; when anything was scaled it adds `coordinateScale` and a
+  `note` telling the model to multiply image pixel coordinates by that factor before `click`/
+  `drag`/`scroll`, and omits both otherwise. New `quality` argument (1–100, default 90) for JPEG.
+  `ocr` is unaffected — it always captures at full resolution. `IScreenshotService.CaptureAsync`
+  now takes a `CaptureOptions` record and `ScreenshotResult` gained the original size and scale.
+  Design note: `docs/design/A-9-screenshot-downscale.md`.
+
 ### Fixed
 
 - **`find_element` and `wait_for` survive a stale element, and can be pinned to one window**
@@ -120,6 +131,12 @@
 
 ### Added
 
+- **`--screenshot-scale <0.1-1.0>` / `WINDOWSMCP_SCREENSHOT_SCALE`** (parity A-9): a process-wide
+  multiplier on every screenshot's own `scale`, for both transports — the cheap way to shrink
+  what the model sees on a large desktop. Registered as a `ScreenshotOptions` singleton in
+  `AddWindowsMcp`, which now takes the parsed `ServerOptions`. `BuildHttpApp` gained an optional
+  `configureServices` seam (applied after `AddWindowsMcp`) so the transport tests can swap the
+  capture service for a fake and prove the screenshot surface headless.
 - **`test-agent` subagent (dev infrastructure).** `.claude/agents/test-agent.md` — an Opus-model
   Claude Code subagent that owns `tests/WindowsMcp.Tests` and enforces test-first work. Given the
   requirements for a change (the ask, a `docs/design` note, a parity-checklist item's "Tests." /

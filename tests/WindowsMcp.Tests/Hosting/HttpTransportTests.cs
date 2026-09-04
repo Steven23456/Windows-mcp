@@ -6,8 +6,12 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
+using Moq;
 using ModelContextProtocol.Protocol;
+using WindowsMcp.Abstractions;
+using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Hosting;
 
 namespace WindowsMcp.Tests.Hosting;
@@ -37,12 +41,20 @@ public class HttpTransportTests
             BaseAddress = baseAddress;
         }
 
-        public static async Task<Harness> StartAsync(string? apiKey = null, X509Certificate2? cert = null)
+        /// <param name="configureServices">
+        /// Runs after <c>AddWindowsMcp</c>, so a registration here replaces the real service
+        /// (A-7 follow-up: without this seam every transport test of the screenshot surface has
+        /// to capture the real screen, which no headless run can do).
+        /// </param>
+        public static async Task<Harness> StartAsync(
+            string? apiKey = null,
+            X509Certificate2? cert = null,
+            Action<IServiceCollection>? configureServices = null)
         {
             // Port 0: Kestrel picks a free port and reports it via IServerAddressesFeature —
             // no pick-then-bind race.
             var options = new ServerOptions(TransportKind.Http, "127.0.0.1", 0, cert?.Thumbprint, apiKey);
-            var app = WindowsMcpHost.BuildHttpApp(options, cert);
+            var app = WindowsMcpHost.BuildHttpApp(options, cert, configureServices);
             await app.StartAsync();
 
             var address = WindowsMcpHost.GetListeningAddress(app)
@@ -222,6 +234,37 @@ public class HttpTransportTests
         var schema = screenshot.ProtocolTool.InputSchema.GetProperty("properties");
         foreach (var parameter in new[] { "region", "format", "output" })
             schema.TryGetProperty(parameter, out _).Should().BeTrue($"'{parameter}' is part of the A-7 signature");
+        foreach (var parameter in new[] { "max_width", "max_height", "scale", "quality" })
+            schema.TryGetProperty(parameter, out _).Should().BeTrue($"'{parameter}' is part of the A-9 signature");
+    }
+
+    /// <summary>
+    /// A-9 (R1): the schema defaults and the description text are the only spec the model reads
+    /// before it calls the tool, so they are a requirement in their own right — an advertised
+    /// "default 1920" that the method does not actually apply is a lie the model acts on.
+    /// <c>ScreenToolsTests.Screenshot_defaults_pass_the_1920x1080_cap_scale_1_and_quality_90</c>
+    /// pins the other half (what the method does with the defaults).
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_schema_advertises_the_downscale_defaults_and_the_coordinate_scale_contract()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var tools = await client.ListToolsAsync();
+        var screenshot = tools.Single(t => t.Name == ScreenshotToolName(tools));
+        var schema = screenshot.ProtocolTool.InputSchema.GetProperty("properties");
+
+        schema.GetProperty("max_width").GetProperty("default").GetInt32().Should().Be(1920);
+        schema.GetProperty("max_height").GetProperty("default").GetInt32().Should().Be(1080);
+        schema.GetProperty("scale").GetProperty("default").GetDouble().Should().Be(1.0);
+        schema.GetProperty("quality").GetProperty("default").GetInt32().Should().Be(90);
+
+        var description = screenshot.ProtocolTool.Description;
+        description.Should().Contain("1920x1080", "the prose default must match the schema default");
+        description.Should().Contain("coordinateScale");
+        description.Should().Contain("multiply image pixel coordinates",
+            "the model is told once, in the tool description, how to undo the downscale");
     }
 
     /// <summary>
@@ -245,6 +288,66 @@ public class HttpTransportTests
         result.Content.OfType<TextContentBlock>().Single().Text
             .Should().Contain("Invalid region", "the ArgumentException is caller-facing and must survive the transport");
         result.Content.OfType<ImageContentBlock>().Should().BeEmpty();
+    }
+
+    // ---- A-9 ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A-9 (R9) end to end over the real transport, with <see cref="IScreenshotService"/> swapped
+    /// for a mock through the new <c>BuildHttpApp</c> seam — so the downscale metadata contract is
+    /// proven on a headless box, not only in the tool's own unit tests. Everything between the
+    /// tool method and the JSON-RPC response (DI, the tool invoker, CallToolResult serialization)
+    /// is real.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_reports_the_original_size_and_coordinate_scale_over_http()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var screenshotService = new Mock<IScreenshotService>();
+        screenshotService
+            .Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ScreenshotResult(png, 2, 2, ImageFormat.Png, 4, 4, 2.0));
+
+        await using var server = await Harness.StartAsync(
+            configureServices: services => services.AddSingleton(screenshotService.Object));
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var screenshot = ScreenshotToolName(await client.ListToolsAsync());
+
+        // No arguments: the default agent-loop call.
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?>());
+
+        result.IsError.Should().NotBe(true);
+
+        var image = result.Content.OfType<ImageContentBlock>().Should().ContainSingle().Subject;
+        image.DecodedData.ToArray().Should().Equal(png, "the mocked bytes must survive the round trip");
+        image.MimeType.Should().Be("image/png", "the mime follows the ENCODED format, not the requested one");
+
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject;
+        using var meta = JsonDocument.Parse(text.Text);
+        meta.RootElement.GetProperty("width").GetInt32().Should().Be(2);
+        meta.RootElement.GetProperty("height").GetInt32().Should().Be(2);
+        meta.RootElement.GetProperty("originalWidth").GetInt32().Should().Be(4);
+        meta.RootElement.GetProperty("originalHeight").GetInt32().Should().Be(4);
+        meta.RootElement.GetProperty("coordinateScale").GetDouble().Should().Be(2.0);
+        meta.RootElement.GetProperty("note").GetString().Should()
+            .Be("multiply image pixel coordinates by 2 before passing them to click/drag/scroll");
+    }
+
+    /// <summary>
+    /// The seam itself: a service registered through <c>configureServices</c> must be the one the
+    /// tools resolve. Without this, the test above could pass for the wrong reason on a machine
+    /// whose real screen happens to satisfy an assertion.
+    /// </summary>
+    [Fact]
+    public async Task Configure_services_replaces_the_registration_AddWindowsMcp_made()
+    {
+        var screenshotService = new Mock<IScreenshotService>();
+
+        await using var server = await Harness.StartAsync(
+            configureServices: services => services.AddSingleton(screenshotService.Object));
+
+        server.App.Services.GetRequiredService<IScreenshotService>()
+            .Should().BeSameAs(screenshotService.Object, "configureServices runs AFTER AddWindowsMcp");
     }
 }
 

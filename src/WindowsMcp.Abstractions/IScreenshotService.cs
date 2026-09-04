@@ -3,5 +3,9 @@ namespace WindowsMcp.Abstractions;
 
 public interface IScreenshotService
 {
-    Task<ScreenshotResult> CaptureAsync(ScreenRegion? region = null, ImageFormat format = ImageFormat.Png, CancellationToken ct = default);
+    /// <summary>
+    /// Captures <paramref name="region"/> (null = the primary display) and encodes it per
+    /// <paramref name="options"/> (null = <see cref="CaptureOptions"/> defaults).
+    /// </summary>
+    Task<ScreenshotResult> CaptureAsync(ScreenRegion? region = null, CaptureOptions? options = null, CancellationToken ct = default);
 }

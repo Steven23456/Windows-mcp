@@ -71,11 +71,11 @@ internal static class Program
 
         return options.IsHttp
             ? await RunHttpAsync(options)
-            : await RunStdioAsync(args);
+            : await RunStdioAsync(args, options);
     }
 
     /// <summary>The default: JSON-RPC over stdin/stdout, as launched by the plugin's <c>.mcp.json</c>.</summary>
-    private static async Task<int> RunStdioAsync(string[] args)
+    private static async Task<int> RunStdioAsync(string[] args, ServerOptions options)
     {
         // CRITICAL: MCP stdio servers must log to stderr only. stdout is JSON-RPC.
         // CRITICAL: On Windows, Console.Out defaults to the system codepage (cp1252).
@@ -95,7 +95,7 @@ internal static class Program
         var builder = Host.CreateApplicationBuilder(args);
         WindowsMcpHost.ConfigureStderrLogging(builder.Logging, http: false);
 
-        builder.AddWindowsMcp()
+        builder.AddWindowsMcp(options)
             .WithStdioServerTransport();
 
         await builder.Build().RunAsync();

@@ -69,7 +69,7 @@ function names are the stable anchor.
 | A-6 | Annotated screenshot (boxes, labels, grid, cursor) | P2 | M | A-2, A-7 | ☐ |
 | A-7 | Return screenshot as MCP image content | P1 | S | — | ☑ |
 | A-8 | Multi-display / virtual-desktop-coordinate capture | P1 | M | — | ☐ |
-| A-9 | Auto-downscale + scale env + coordinate-scale report | P1 | S | A-7 | ☐ |
+| A-9 | Auto-downscale + scale env + coordinate-scale report | P1 | S | A-7 | ☑ |
 | A-10 | Alternative capture backend (WGC / DXGI) | P3 | M–L | — | ☐ |
 | A-11 | Cursor position in responses + drawn on capture | P2 | S | — | ☐ |
 | A-12 | Virtual desktops (report; optional manage) | P3 | L | A-1 | ☐ |
@@ -677,7 +677,7 @@ selected displays, region, and states the coordinate space; same for `ocr`. Deci
 monitors captures correctly; an out-of-bounds region errors.
 
 ### A-9 — Auto-downscale, scale env, coordinate-scale report  `P1 · S`
-- [ ] Not started
+- [x] Done — shipped in 0.8.0 (phase-1 PR) — [design note](design/A-9-screenshot-downscale.md)
 
 **Upstream.** Images larger than 1920×1080 are downscaled (LANCZOS) and
 `WINDOWS_MCP_SCREENSHOT_SCALE` (0.1–1.0) applies on top; the text block reports
