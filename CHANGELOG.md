@@ -107,6 +107,17 @@
 
 ### Added
 
+- **`test-agent` subagent (dev infrastructure).** `.claude/agents/test-agent.md` — an Opus-model
+  Claude Code subagent that owns `tests/WindowsMcp.Tests` and enforces test-first work. Given the
+  requirements for a change (the ask, a `docs/design` note, a parity-checklist item's "Tests." /
+  "Done when." lines, a tool `[Description]`), it writes a requirement → test matrix and the
+  failing xUnit tests **before** any production code exists, adding only the minimal
+  `Abstractions` stubs (interface members, DTO records, `NotImplementedException` bodies) that keep
+  the tree compiling. Run again after the implementation it measures coverlet coverage of the
+  changed files, closes every open matrix row, proves the tests bite with a reverted one-line
+  break, and flags mocked-only PowerShell/WMI paths that need an `Integration` sibling (the
+  `disk_inspect` lesson in `todo.md`). It never writes feature logic and never commits.
+  `CLAUDE.md` gains a "Test-first workflow" section and "Adding a tool" now starts with it.
 - **`docs-agent` subagent (dev infrastructure).** `.claude/agents/docs-agent.md` — an Opus-model
   Claude Code subagent to run after any change. It derives the facts from the code (tool count and
   names, tool classes, services, interfaces, DTOs, CLI flags, version lockstep, publish flags) and
