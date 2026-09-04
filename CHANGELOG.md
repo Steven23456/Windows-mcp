@@ -24,6 +24,23 @@
   now takes a `CaptureOptions` record and `ScreenshotResult` gained the original size and scale.
   Design note: `docs/design/A-9-screenshot-downscale.md`.
 
+- **`screenshot` and `ocr` capture any monitor, and regions are validated, not clipped** (parity
+  A-8). New `display` argument: `all`, or comma-separated zero-based indices in `multi_monitor`
+  order (`1`, `0,2`); several are captured as their union, a monitor left of or above the
+  primary keeps its negative origin. The default stays the primary display (cheaper than
+  upstream's all-displays default; one flag flips it later). `region` (`x,y,w,h`, virtual-desktop
+  pixels) wins over `display` and is now checked against the virtual screen — outside it is an
+  error naming the bounds, where it used to be silently clipped or fail deep in GDI; an invalid
+  `display` errors even when `region` wins. Metadata now **always** carries `region` (the rect
+  actually captured — image (0,0) is its origin) and `displays` (every monitor's bounds), adds
+  `selectedDisplays` when `display` picked the rect, and the `note` gains the offset form
+  (`virtual-desktop x = 1920 + imageX × 2, …`) for any capture that does not start at (0,0).
+  One shared parser (`RegionMath`) for both tools; a region with a non-integer part or a
+  non-positive size is a named `ArgumentException` rather than a `FormatException`.
+  `multi_monitor` indices are now the position in the returned list, so a monitor whose info
+  query fails cannot leave a gap between what `display` selects and what the metadata reports.
+  Design note: `docs/design/A-8-multi-display-capture.md`.
+
 ### Fixed
 
 - **`find_element` and `wait_for` survive a stale element, and can be pinned to one window**

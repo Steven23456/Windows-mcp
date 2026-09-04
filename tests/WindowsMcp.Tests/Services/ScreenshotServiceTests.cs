@@ -115,4 +115,45 @@ public class ScreenshotServiceTests
         result.Height.Should().Be(100);
         result.CoordinateScale.Should().Be(1.0);
     }
+
+    // ---- A-8 (R6) — the capture rect is in virtual-desktop coordinates -----------------------
+
+    /// <summary>
+    /// A-8's capture claim, which only a real GDI capture can prove: <c>CopyFromScreen</c> already
+    /// takes virtual-desktop coordinates, so the union of every monitor — whose origin is negative
+    /// whenever a monitor sits left of or above the primary — captures at the union's size with no
+    /// change to the copy. Every tool-level test mocks <c>IScreenshotService</c> and would stay
+    /// green if this were wrong (the <c>disk_inspect</c> failure mode in CLAUDE.md).
+    /// <para>
+    /// On a single-monitor box the union is the primary display, and the test still proves the
+    /// resolved rect round-trips; the multi-monitor assertion is only meaningful on a desk with
+    /// two screens, which is called out in the message.
+    /// </para>
+    /// <para>
+    /// Note what is deliberately NOT tested here: the service does not validate the rect against
+    /// the virtual screen — that is the tool's job (<c>RegionMathTests.Validate_*</c> and
+    /// <c>ScreenToolsTests.Screenshot_region_outside_the_virtual_screen_throws_with_the_bounds</c>).
+    /// A test that a one-pixel-outside rect fails here would pin behaviour GDI defines, not ours.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task CaptureAsync_captures_the_union_of_every_monitor()
+    {
+        var monitors = await new WindowService().EnumerateMonitorsAsync();
+        monitors.Should().NotBeEmpty("EnumerateMonitorsAsync reports at least the primary display");
+        var union = RegionMath.Union(monitors);
+
+        var result = await new ScreenshotService().CaptureAsync(
+            union, new CaptureOptions(ImageFormat.Png, MaxWidth: 0, MaxHeight: 0));
+
+        result.Width.Should().Be(union.Width,
+            monitors.Length > 1
+                ? "the bitmap is sized to the union of {0} monitors, origin ({1},{2})"
+                : "single-monitor box: the union is the primary display, origin ({1},{2})",
+            monitors.Length, union.X, union.Y);
+        result.Height.Should().Be(union.Height);
+        result.OriginalWidth.Should().Be(union.Width);
+        result.OriginalHeight.Should().Be(union.Height);
+        result.Bytes.Take(4).Should().Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, "a real PNG came back");
+    }
 }

@@ -236,6 +236,7 @@ public class HttpTransportTests
             schema.TryGetProperty(parameter, out _).Should().BeTrue($"'{parameter}' is part of the A-7 signature");
         foreach (var parameter in new[] { "max_width", "max_height", "scale", "quality" })
             schema.TryGetProperty(parameter, out _).Should().BeTrue($"'{parameter}' is part of the A-9 signature");
+        schema.TryGetProperty("display", out _).Should().BeTrue("'display' is part of the A-8 signature");
     }
 
     /// <summary>
@@ -331,6 +332,70 @@ public class HttpTransportTests
         meta.RootElement.GetProperty("coordinateScale").GetDouble().Should().Be(2.0);
         meta.RootElement.GetProperty("note").GetString().Should()
             .Be("multiply image pixel coordinates by 2 before passing them to click/drag/scroll");
+    }
+
+    // ---- A-8 ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A-8 (R8) headless, through the real transport: with BOTH collaborators swapped through the
+    /// <c>BuildHttpApp</c> seam — a capture mock and a two-monitor <see cref="IWindowService"/> —
+    /// <c>screenshot(display:"1")</c> must resolve the second monitor's rect, report it as the
+    /// captured region, and list the whole inventory. This is the only place the DI wiring of the
+    /// new <c>IWindowService</c> dependency into <c>ScreenTools</c> is exercised at all.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_display_selects_the_second_monitor_over_http()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var screenshotService = new Mock<IScreenshotService>();
+        screenshotService
+            .Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ScreenshotResult(png, 1920, 1080, ImageFormat.Png, 1920, 1080, 1.0));
+
+        var windowService = new Mock<IWindowService>();
+        windowService
+            .Setup(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new MonitorInfo(0, "Monitor0", 0, 0, 1920, 1080, true),
+                new MonitorInfo(1, "Monitor1", 1920, 0, 1920, 1080, false),
+            ]);
+
+        await using var server = await Harness.StartAsync(configureServices: services =>
+        {
+            services.AddSingleton(screenshotService.Object);
+            services.AddSingleton(windowService.Object);
+        });
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var screenshot = ScreenshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?>
+        {
+            ["display"] = "1",
+            ["format"] = "png",
+        });
+
+        result.IsError.Should().NotBe(true);
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject;
+        using var meta = JsonDocument.Parse(text.Text);
+
+        foreach (var field in new[] { "region", "displays", "selectedDisplays" })
+            meta.RootElement.TryGetProperty(field, out _).Should()
+                .BeTrue($"A-8 metadata must carry '{field}' when display picked the rect");
+
+        var region = meta.RootElement.GetProperty("region");
+        region.GetProperty("x").GetInt32().Should().Be(1920, "display 1 starts at x=1920 on this inventory");
+        region.GetProperty("y").GetInt32().Should().Be(0);
+        region.GetProperty("width").GetInt32().Should().Be(1920);
+        region.GetProperty("height").GetInt32().Should().Be(1080);
+
+        meta.RootElement.GetProperty("selectedDisplays").EnumerateArray()
+            .Select(e => e.GetInt32()).Should().Equal(new[] { 1 });
+        meta.RootElement.GetProperty("displays").GetArrayLength().Should().Be(2, "every monitor is listed");
+        meta.RootElement.GetProperty("coordinateSpace").GetString().Should().Be("virtual-desktop");
+
+        screenshotService.Verify(s => s.CaptureAsync(
+            new ScreenRegion(1920, 0, 1920, 1080), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Once, "the resolved rect reaches the capture service through the real host");
     }
 
     /// <summary>

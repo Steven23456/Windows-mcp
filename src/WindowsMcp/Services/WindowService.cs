@@ -105,9 +105,13 @@ public sealed class WindowService : IWindowService
                 var rc = info.rcMonitor;
                 bool isPrimary = (info.dwFlags & MONITORINFOF_PRIMARY) != 0;
 
+                // Index = position in the returned array, not the enumeration counter: a failed
+                // GetMonitorInfo must not leave a gap, because screenshot/ocr 'display' selects
+                // by position and reports Index — the two numberings have to be one numbering.
+                int position = results.Count;
                 results.Add(new MonitorInfo(
-                    order,
-                    $"Monitor{order}",
+                    position,
+                    $"Monitor{position}",
                     rc.left,
                     rc.top,
                     rc.right - rc.left,

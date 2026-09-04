@@ -75,3 +75,32 @@ public class OcrServiceTests
             Times.Never);
     }
 }
+
+
+/// <summary>
+/// A-9's open follow-up, taken up by A-8: <c>OcrService</c>'s real path — capture bytes →
+/// <c>BitmapDecoder</c> → <c>SoftwareBitmap</c> → <c>OcrEngine.RecognizeAsync</c> — had no live
+/// test at all. Everything above mocks <see cref="IScreenshotService"/> and would stay green if
+/// the WinRT chain threw on every call (the <c>disk_inspect mode:reclaimable</c> failure mode in
+/// CLAUDE.md). What is asserted is deliberately weak — that the chain RUNS and returns a string —
+/// because the recognised text depends on whatever is on the screen; the value is the wiring, not
+/// the words.
+/// <para>
+/// Needs an interactive desktop (<c>CopyFromScreen</c>) and an installed OCR language pack, so it
+/// carries the UIAutomation trait and lives in its own class: a vstest <c>Category!=UIAutomation</c>
+/// filter does not exclude a test that also carries another Category value.
+/// </para>
+/// </summary>
+[Trait("Category", "UIAutomation")]
+public class OcrServiceLiveTests
+{
+    [Fact]
+    public async Task ExtractTextAsync_runs_the_real_decode_and_recognize_path()
+    {
+        var service = new OcrService(new ScreenshotService());
+
+        var text = await service.ExtractTextAsync(new ScreenRegion(0, 0, 400, 200));
+
+        text.Should().NotBeNull("OcrEngine returns a (possibly empty) string for a blank region, never null");
+    }
+}
