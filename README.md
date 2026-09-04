@@ -9,13 +9,26 @@ SDK. See [Tool reference](#tool-reference) for the 64 tools.
 ```powershell
 git clone https://github.com/Steven23456/Windows-mcp.git
 cd Windows-mcp
-dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained `
-    -p:PublishSingleFile=true `
-    -p:EnableCompressionInSingleFile=true
+.\scripts\build-release.ps1
 ```
 
-Output: `dist/WindowsMcp.exe` (~66 MB self-contained — bundles the .NET and
-ASP.NET Core runtimes; nothing to install on the target machine).
+Output: one file, `bundle/WindowsMcp.exe` (~77 MB self-contained — bundles the .NET and
+ASP.NET Core runtimes plus the native SkiaSharp library; nothing to install on the target
+machine). The script runs this publish:
+
+```powershell
+dotnet publish src/WindowsMcp -c Release -o bundle -r win-x64 --self-contained `
+    -p:PublishSingleFile=true `
+    -p:EnableCompressionInSingleFile=true `
+    -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:DebugType=none
+```
+
+`IncludeNativeLibrariesForSelfExtract` is what makes it genuinely one file — without it
+`libSkiaSharp.dll` and `aspnetcorev2_inprocess.dll` are left loose next to the exe. One
+file survives every publish flag, `libSkiaSharp.pdb` (a native asset of the SkiaSharp
+package); the script deletes it afterwards. `bundle/` is gitignored — binaries are never
+committed.
 
 Requires the .NET 10 SDK for building. End users only need Windows 10 1703+
 (for per-monitor DPI awareness V2) and System PowerShell (always present on
@@ -26,7 +39,7 @@ Windows 7+ at `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`).
 Point your MCP host at the published exe. With Claude Code:
 
 ```powershell
-claude mcp add --transport stdio Windows-mcp -- C:\path\to\Windows-mcp\dist\WindowsMcp.exe
+claude mcp add --transport stdio Windows-mcp -- C:\path\to\Windows-mcp\bundle\WindowsMcp.exe
 ```
 
 or in a `.mcp.json`:
@@ -47,9 +60,10 @@ I modified this so that the PATH works correctly
 Reconnect (`/mcp`) or start a new session. Tools appear as `mcp__Windows-mcp__*`.
 
 The `.mcp.json` at the repo root is the **plugin** manifest: its
-`${CLAUDE_PLUGIN_ROOT}` path only resolves when the repo is installed as a Claude Code
-plugin, so opening this repo as a plain project shows that server as disconnected.
-Register the exe explicitly as above instead.
+`${CLAUDE_PLUGIN_ROOT}/bundle/WindowsMcp.exe` path only resolves when the repo is installed
+as a Claude Code plugin **and** a locally built `bundle/WindowsMcp.exe` is present (`bundle/`
+is gitignored, so a fresh clone has none). Opening this repo as a plain project shows that
+server as disconnected. Register the exe explicitly as above instead.
 
 ## Run over HTTP/HTTPS (remote)
 
@@ -181,7 +195,7 @@ On first launch, the single-file binary extracts native dependencies
 startup. Subsequent launches are warm.
 
 If you hit the 30s Claude Code startup timeout, add a Defender exclusion
-for the `dist/` folder.
+for the `bundle/` folder.
 
 ## Development
 

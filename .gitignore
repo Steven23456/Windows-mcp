@@ -1,177 +1,118 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
+# Build results
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
 
-# C extensions
-*.so
+# Visual Studio
+.vs/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.rsuser
+*.sln.docstates
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Virtual environments
-.venv/
-venv/
-ENV/
-env/
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-.pybuilder/
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# pyenv
-.python-version
-
-# pipenv
-Pipfile.lock
-
-# PEP 582
-__pypackages__/
-
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.env.local
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# IDE
-.vscode/
+# Rider / JetBrains
 .idea/
+*.sln.iml
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Test results
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+# Code coverage
+coverage/
+coverage.*
+*.opencover.xml
+*.cobertura.xml
+
+# BenchmarkDotNet
+BenchmarkDotNet.Artifacts/
+
+# Publish output
+publish/
+app.publish/
+# Single-file publish output of scripts/build-release.ps1 - binaries are never committed
+bundle/
+
+# ASP.NET generated files
+wwwroot/dist/
+wwwroot/lib/
+
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
 *.swp
 *.swo
-*~
+~$*
 
-# OS
-.DS_Store
-Thumbs.db
-desktop.ini
+# Logs
+*.log
 
-# Project specific - DO commit these
-!uv.lock
-!CLAUDE.md
-.env.tmp
-.mcp.json
-/.claude
+# Crash dumps
+*.dmp
 
-# Dropbox conflicted copies
-*conflicted copy*
+# Debugging
+*.pdb
+*.mdb
 
-# Test artifacts
-test_baseline.png
-recordings/
-.dropboxignore
-.mcp.json
-# Added by post-migration audit (2026-05-01)
+# Installer output
+*.msi
+*.msix
+*.appx
+*.appxbundle
+
+# Certificates / private keys
+*.pfx
+*.p12
+*.key
+*.pem
+
+# Local configuration / secrets
+secrets.json
+.env
+.env.*
+!.env.example
+
+
+# Generated files
+Generated/
+gen/
+
+# Node dependencies if project contains frontend assets
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# C# / .NET
-bin/
-obj/
-*.user
-*.suo
-.vs/
-src/WindowsMcp/Properties/launchSettings.json
+# Docker local overrides
+docker-compose.override.yml
 
-# Local MCP config backups (never commit; may contain user-specific paths/env)
-.mcp.json.bak*
-
-# subagent-driven-development scratch/ledger
-.superpowers/
+# OS / editor noise
+.DS_Store
+*.code-workspace

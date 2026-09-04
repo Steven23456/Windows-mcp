@@ -24,13 +24,13 @@ Cut a release of the C# server. The version lives in **two** places that must ma
 6. Build and run the headless-safe suite:
    `dotnet build` then `dotnet test --filter "Category!=UIAutomation"`
    (a lone `ClipboardServiceTests` failure is environmental — see `CLAUDE.md`).
-7. Publish the single-file exe:
-   `dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true`
-   then confirm `dist/WindowsMcp.exe --help` runs. The MCP `serverInfo` version is derived from
+7. Publish the single-file exe: `.\scripts\build-release.ps1` (publishes `bundle/WindowsMcp.exe`
+   with the native libraries embedded and strips the stray `libSkiaSharp.pdb`), then confirm
+   `bundle/WindowsMcp.exe --help` runs. The MCP `serverInfo` version is derived from
    `<Version>`, so the passing `ServerInfoTests` in step 6 is the version check.
 8. Show the user `git status` and `git diff --stat`, plus the proposed commit message
    `release: v<new>` and tag `v<new>`.
 9. Do NOT commit, tag, or push automatically — the user runs those.
-10. Do NOT copy the exe into the repo. Distribution (a committed plugin bundle, a release asset,
-    or a remote host) is a separate decision; see `CLAUDE.md` "Testing a change against the LIVE
-    MCP server" for how a running server picks up a new build.
+10. Do NOT commit the exe. `bundle/` is gitignored — binaries never enter the repo; distribution
+    (a release asset or a remote host) is a separate step. See `CLAUDE.md` "Testing a change
+    against the LIVE MCP server" for how a running server picks up a new build.

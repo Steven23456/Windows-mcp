@@ -54,6 +54,15 @@
 
 ### Changed
 
+- **Single-file publish → `bundle/`; `dist/` retired (2026-09-04).** `scripts/build-release.ps1`
+  now runs from any directory and publishes ONE file, `bundle/WindowsMcp.exe`. It adds
+  `IncludeNativeLibrariesForSelfExtract=true` — the previously documented command left
+  `libSkiaSharp.dll` and `aspnetcorev2_inprocess.dll` loose beside the exe, so the exe alone was
+  not portable — and `DebugType=none`, then deletes the `libSkiaSharp.pdb` the SkiaSharp package
+  emits regardless of publish flags. `bundle/` is gitignored (no binaries in the repo, by
+  decision), and every `dist/` reference in README, `CLAUDE.md`, the version-bump skill,
+  `todo.md`, and the parity checklist now points at `bundle/`.
+
 - **Docs consolidated (2026-09-04).** Removed the executed `docs/superpowers/` specs and plans,
   the Python-era `docs/plans/` testing design, the generated dependency-graph / unused-analysis
   artifacts, and the Python-era `security-reviewer` agent. The feature backlog against the

@@ -26,7 +26,7 @@ invisible to the unit suite. This table is the resumable record so the sweep sur
 
 **Before trusting ANY live result — verify the running image.** The served exe is whatever the
 MCP registration points at (see `CLAUDE.md` "Testing a change against the LIVE MCP server"); a
-`dotnet publish -o dist` on its own changes **nothing** for a server that is already running.
+`dotnet publish -o bundle` on its own changes **nothing** for a server that is already running.
 This trap already cost us once: v0.6.0 was tagged, pushed, and believed shipped on 2026-07-08,
 but the live server kept running **0.5.0 for four days**, and `process orphans` was recorded as
 "errored" against a binary that didn't have it. Check first:
@@ -62,7 +62,7 @@ but the live server kept running **0.5.0 for four days**, and `process orphans` 
   (fixed in 0.6.1: version now derives from `<Version>` in `Directory.Build.props` and is pinned to
   `plugin.json` by `ServerInfoTests`). Re-verified over stdio: the rebuilt exe reports `0.6.1`.
 
-**Reusable harness:** drive any tool against a freshly published `dist/WindowsMcp.exe` over MCP
+**Reusable harness:** drive any tool against a freshly published `bundle/WindowsMcp.exe` over MCP
 stdio without touching the registered server — spawn the exe, `initialize` →
 `notifications/initialized` → `tools/call`. This is how the 0.6.1 fix was verified before merge
 (reproduce the original failure, then watch it not happen), and it sidesteps any deploy lag.
@@ -95,11 +95,12 @@ stdio without touching the registered server — spawn the exe, `initialize` →
 - [x] **OVERVIEW.md tool-catalog reconciliation** — done 2026-09-04: all four `docs/architecture/`
   docs re-aligned to the 64-tool / 36-interface surface (Integrity, USN, Watch, Job sections added;
   Window/Web/Network rows corrected; interface and DTO tables regenerated from the code).
-- [ ] **Decide the plugin distribution path.** `.mcp.json` launches
-  `${CLAUDE_PLUGIN_ROOT}/bundle/WindowsMcp.exe`, and the committed bundle has been removed from the
-  tree. Either restore a committed bundle (and a redeploy step that updates it) or change the
-  manifest to another delivery mechanism. Until then the repo cannot be installed as a plugin;
-  register `dist/WindowsMcp.exe` directly (README "Register with Claude Code").
+- [ ] **Plugin delivery from a fresh clone.** Decided 2026-09-04: **no binaries in the repo** —
+  `bundle/` is gitignored and `scripts/build-release.ps1` writes the single-file exe there locally.
+  `.mcp.json` still launches `${CLAUDE_PLUGIN_ROOT}/bundle/WindowsMcp.exe`, so a clone cannot be
+  installed as a plugin until either a build step precedes install or the manifest points at
+  another delivery mechanism (release asset, remote host). Meanwhile register
+  `bundle/WindowsMcp.exe` directly (README "Register with Claude Code").
 - [ ] **`.claude/settings.json` hooks are Python-era.** The `PostToolUse` hook runs `ruff` on every
   Edit/Write; it is a silent no-op on `.cs` files but spawns a process each time. Replace with
   `dotnet format` on `*.cs`, or drop it.

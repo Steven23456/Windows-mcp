@@ -39,15 +39,17 @@ dotnet build                      # debug build (first build ~3 min cold; increm
 dotnet test                       # full suite
 dotnet test --filter "Category!=UIAutomation"   # headless-safe subset
 
-# Publish the single-file exe (end users need no .NET runtime):
-dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained `
-    -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true
-# → dist/WindowsMcp.exe
+# Publish the single-file exe (end users need no .NET runtime) — ONE file, bundle/WindowsMcp.exe:
+.\scripts\build-release.ps1
+# = dotnet publish src/WindowsMcp -c Release -o bundle -r win-x64 --self-contained `
+#     -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true `
+#     -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none
+#   then deletes the stray libSkiaSharp.pdb. bundle/ is gitignored — never commit binaries.
 
 # Serve over HTTP instead of stdio (remote clients; README "Run over HTTP/HTTPS"):
 $env:WINDOWSMCP_API_KEY = "<16+ chars>"
-dist/WindowsMcp.exe --transport http --port 8765 [--bind <ip>] [--cert-thumbprint <sha1>]
-dist/WindowsMcp.exe --help
+bundle/WindowsMcp.exe --transport http --port 8765 [--bind <ip>] [--cert-thumbprint <sha1>]
+bundle/WindowsMcp.exe --help
 ```
 
 - **`[Trait("Category","UIAutomation")]` tests need an interactive desktop** with the target
@@ -74,10 +76,10 @@ Get-CimInstance Win32_Process -Filter "Name='WindowsMcp.exe'" | Select ProcessId
 ```
 
 **Redeploy a rebuilt exe:**
-1. `dotnet publish src/WindowsMcp -c Release -o dist -r win-x64 --self-contained
-   -p:PublishSingleFile=true -p:EnableCompressionInSingleFile=true`.
+1. `.\scripts\build-release.ps1` → `bundle/WindowsMcp.exe`. Keep `IncludeNativeLibrariesForSelfExtract`:
+   without it `libSkiaSharp.dll` is left loose beside the exe and the exe alone is not portable.
 2. Make sure the registration points at that exe: `claude mcp add --transport stdio Windows-mcp
-   -- <repo>\dist\WindowsMcp.exe`, or the `command` in the relevant `.mcp.json` (README
+   -- <repo>\bundle\WindowsMcp.exe`, or the `command` in the relevant `.mcp.json` (README
    "Register with Claude Code"). For a remote host, copy the exe over and restart it there
    (README "Run over HTTP/HTTPS").
 3. Reconnect (`/mcp`) or start a new session — a running `WindowsMcp.exe` keeps serving the old
@@ -88,9 +90,11 @@ Get-CimInstance Win32_Process -Filter "Name='WindowsMcp.exe'" | Select ProcessId
 
 The repo-root `.mcp.json` is the **plugin** manifest: it launches
 `${CLAUDE_PLUGIN_ROOT}/bundle/WindowsMcp.exe`, which only resolves when the repo is installed as
-a Claude Code plugin **and** a `bundle/WindowsMcp.exe` is committed. Opened as a plain project,
-that entry shows as disconnected — expected, not a bug. Plugin-based delivery needs a committed
-bundle (or a changed manifest); until that is settled, register `dist/WindowsMcp.exe` directly.
+a Claude Code plugin **and** a locally built `bundle/WindowsMcp.exe` exists. `bundle/` is
+gitignored by decision (2026-09-04): **no binaries in the repo**, so a fresh clone has no bundle
+and the plugin entry shows as disconnected — expected, not a bug. Register `bundle/WindowsMcp.exe`
+directly (README "Register with Claude Code"); plugin delivery from a clone still needs either a
+build step before install or a changed manifest (see `todo.md`).
 
 ## Conventions (enforced)
 

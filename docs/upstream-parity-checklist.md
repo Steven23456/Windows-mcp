@@ -31,7 +31,7 @@ implementation sketch, files to touch, tests, and a "done when" bar.
 `sealed` behind an `IXxxService`; tools stay thin (`async Task<string>`, JSON out); new services
 are registered as singletons in `Hosting/WindowsMcpHost.AddWindowsMcp` (tools auto-discover);
 destructive actions require `confirm: true`; tests that need the interactive desktop carry
-`[Trait("Category","UIAutomation")]`; the redeploy path is the marketplace bundle, not `dist/`.
+`[Trait("Category","UIAutomation")]`; the redeploy path is `scripts/build-release.ps1` → `bundle/WindowsMcp.exe` (gitignored; binaries are never committed).
 
 **Reading the upstream reference code.** Paths below are relative to `src/windows_mcp/` in the
 upstream repo. Fetch a copy into the scratchpad (never into this repo):
