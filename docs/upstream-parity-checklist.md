@@ -67,7 +67,7 @@ function names are the stable anchor.
 | A-4 | Element budget, truncation note, UIA caching | P1 | M | A-2 | ☐ |
 | A-5 | Browser DOM mode (Chromium; Firefox IA2) | P2 | L | A-2 | ☐ |
 | A-6 | Annotated screenshot (boxes, labels, grid, cursor) | P2 | M | A-2, A-7 | ☐ |
-| A-7 | Return screenshot as MCP image content | P1 | S | — | ☐ |
+| A-7 | Return screenshot as MCP image content | P1 | S | — | ☑ |
 | A-8 | Multi-display / virtual-desktop-coordinate capture | P1 | M | — | ☐ |
 | A-9 | Auto-downscale + scale env + coordinate-scale report | P1 | S | A-7 | ☐ |
 | A-10 | Alternative capture backend (WGC / DXGI) | P3 | M–L | — | ☐ |
@@ -633,7 +633,7 @@ coordinate captions. Params on the snapshot/screenshot tool: `annotate`, `grid_c
 **Done when.** The annotated image's label N sits on element N from the same call.
 
 ### A-7 — Return the screenshot as MCP image content  `P1 · S`
-- [ ] Not started
+- [x] Done — shipped in 0.8.0 (phase-1 PR) — [design note](design/A-7-screenshot-image-content.md)
 
 **Upstream.** `build_snapshot_response()` returns `[text, Image(data=png, format="png")]` — an
 MCP `ImageContent` block, so the model sees the picture directly.

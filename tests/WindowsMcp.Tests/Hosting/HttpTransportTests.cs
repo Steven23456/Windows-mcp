@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using ModelContextProtocol.Client;
@@ -24,7 +25,7 @@ public class HttpTransportTests
 
     // ---- harness --------------------------------------------------------------------------
 
-    private sealed class Harness : IAsyncDisposable
+    internal sealed class Harness : IAsyncDisposable
     {
         public WebApplication App { get; }
         public Uri BaseAddress { get; }
@@ -56,7 +57,7 @@ public class HttpTransportTests
         }
     }
 
-    private static async Task<McpClient> ConnectAsync(Uri endpoint, string? apiKey = null, HttpClient? httpClient = null)
+    internal static async Task<McpClient> ConnectAsync(Uri endpoint, string? apiKey = null, HttpClient? httpClient = null)
     {
         var options = new HttpClientTransportOptions
         {
@@ -81,6 +82,9 @@ public class HttpTransportTests
 
     private static string FileWriteToolName(IEnumerable<McpClientTool> tools) =>
         tools.Single(t => t.Name.Replace("_", "").Equals("filewrite", StringComparison.OrdinalIgnoreCase)).Name;
+
+    internal static string ScreenshotToolName(IEnumerable<McpClientTool> tools) =>
+        tools.Single(t => t.Name.Replace("_", "").Equals("screenshot", StringComparison.OrdinalIgnoreCase)).Name;
 
     /// <summary>
     /// A throwaway localhost server certificate. SChannel cannot serve TLS with the purely
@@ -195,5 +199,121 @@ public class HttpTransportTests
             .Should().Be("'confirm: true' is required for file writes",
                 "the ToolErrors filter registered in AddWindowsMcp applies to the HTTP transport too");
         File.Exists(scratch).Should().BeFalse();
+    }
+
+    // ---- A-7 ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A-7 risk #1 (A-roadmap section 6): <c>screenshot</c> changes its return type from
+    /// <c>string</c> to <see cref="CallToolResult"/>. If <c>WithToolsFromAssembly</c> stopped
+    /// discovering it, or the SDK rejected the return type, the tool would vanish from the list —
+    /// this catches that without needing a desktop.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_tool_is_still_discovered_with_a_CallToolResult_return_type()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var tools = await client.ListToolsAsync();
+        var screenshot = tools.Single(t => t.Name.Replace("_", "").Equals("screenshot", StringComparison.OrdinalIgnoreCase));
+
+        screenshot.Name.Should().Be(ScreenshotToolName(tools));
+        var schema = screenshot.ProtocolTool.InputSchema.GetProperty("properties");
+        foreach (var parameter in new[] { "region", "format", "output" })
+            schema.TryGetProperty(parameter, out _).Should().BeTrue($"'{parameter}' is part of the A-7 signature");
+    }
+
+    /// <summary>
+    /// The argument guards run before any capture, so this exercises the new tool over the real
+    /// transport on a headless box: no screen is touched, but the call, the filter and the
+    /// CallToolResult serialization all are.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_argument_errors_reach_the_client_over_http()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var screenshot = ScreenshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?>
+        {
+            ["region"] = "not-a-region",   // rejected by ParseRegion before ScreenshotService is called
+        });
+
+        result.IsError.Should().BeTrue();
+        result.Content.OfType<TextContentBlock>().Single().Text
+            .Should().Contain("Invalid region", "the ArgumentException is caller-facing and must survive the transport");
+        result.Content.OfType<ImageContentBlock>().Should().BeEmpty();
+    }
+}
+
+/// <summary>
+/// The one A-7 test that captures the real screen through the real HTTP host. Split out of
+/// <see cref="HttpTransportTests"/> because that class is <c>Category=Integration</c> and a
+/// vstest <c>Category!=UIAutomation</c> filter does not exclude a test that also carries
+/// another Category value.
+/// <para>
+/// <c>Graphics.CopyFromScreen</c> needs an interactive desktop session (see the note on
+/// <c>ScreenshotServiceTests</c>), so this fails headless — run it from an interactive session.
+/// </para>
+/// </summary>
+[Trait("Category", "UIAutomation")]
+public class HttpTransportScreenshotImageTests
+{
+    [Fact]
+    public async Task Screenshot_returns_an_image_content_block_over_http()
+    {
+        await using var server = await HttpTransportTests.Harness.StartAsync();
+        await using var client = await HttpTransportTests.ConnectAsync(server.McpEndpoint);
+        var screenshot = HttpTransportTests.ScreenshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?>
+        {
+            ["region"] = "0,0,64,48",   // small: this is a wiring proof, not a capture-quality test
+            ["format"] = "png",
+        });
+
+        result.IsError.Should().NotBe(true);
+
+        var image = result.Content.OfType<ImageContentBlock>().Should().ContainSingle().Subject;
+        image.Data.Length.Should().BeGreaterThan(0, "the base64 image must survive the JSON-RPC round trip");
+        image.MimeType.Should().Be("image/png");
+        image.DecodedData.ToArray().Take(4).Should().Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, "PNG magic bytes");
+
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject;
+        using var meta = JsonDocument.Parse(text.Text);
+        meta.RootElement.GetProperty("width").GetInt32().Should().Be(64);
+        meta.RootElement.GetProperty("height").GetInt32().Should().Be(48);
+        meta.RootElement.GetProperty("coordinateSpace").GetString().Should().Be("virtual-desktop");
+    }
+
+    /// <summary>
+    /// A-7 flipped the inline default to JPEG. Every mocked tool test hands back bytes a human
+    /// wrote, so this is the only thing that proves the real Skia encode produces JPEG for the
+    /// default path an agent loop actually takes (no <c>format</c> argument).
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_default_format_is_jpeg_over_http()
+    {
+        await using var server = await HttpTransportTests.Harness.StartAsync();
+        await using var client = await HttpTransportTests.ConnectAsync(server.McpEndpoint);
+        var screenshot = HttpTransportTests.ScreenshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?>
+        {
+            ["region"] = "0,0,64,48",   // no 'format': exercise the default
+        });
+
+        result.IsError.Should().NotBe(true);
+
+        var image = result.Content.OfType<ImageContentBlock>().Should().ContainSingle().Subject;
+        image.MimeType.Should().Be("image/jpeg", "inline output defaults to jpeg (A-7)");
+        image.DecodedData.ToArray().Take(3).Should().Equal(new byte[] { 0xFF, 0xD8, 0xFF }, "JPEG SOI marker");
+
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject;
+        using var meta = JsonDocument.Parse(text.Text);
+        meta.RootElement.GetProperty("format").GetString().Should().Be("jpeg");
+        meta.RootElement.GetProperty("width").GetInt32().Should().Be(64);
     }
 }

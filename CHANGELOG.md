@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+### Changed
+
+- **`screenshot` returns the image as MCP image content** (parity A-7). The tool result is now a
+  text block with one JSON metadata object (`{width, height, format, coordinateSpace:
+  "virtual-desktop", region?, path?}`) followed by an `ImageContentBlock`, so Claude Code and
+  Claude Desktop render the capture inline and the model can look at it in the same call.
+  **Migration:** `output` defaults to `inline` (was `file`; ask for `file` explicitly to get a
+  path, `base64` is an alias of `inline` for one release), `format` defaults to `auto` (jpeg for
+  inline, png for file; was always png), and the old `data_base64` JSON key is gone. Arguments
+  are validated before any capture; unknown `output`/`format` name the accepted values. The
+  reported format and mime type describe what was encoded, never the request. Design note:
+  `docs/design/A-7-screenshot-image-content.md`.
+
 ### Fixed
 
 - **`find_element` and `wait_for` survive a stale element, and can be pinned to one window**
