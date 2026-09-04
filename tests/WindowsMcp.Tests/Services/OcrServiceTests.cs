@@ -45,6 +45,27 @@ public class OcrServiceTests
             Times.Once, "OCR never downscales: 0 x 0 means no limit, and PNG keeps the glyph edges");
     }
 
+    /// <summary>
+    /// A-11 (R5): OCR must never get a cursor drawn on its bitmap — a mouse pointer over a word is
+    /// exactly the kind of occlusion that turns recognised text into noise. The rule lives here,
+    /// in the service that builds the options, not in the tool.
+    /// </summary>
+    [Fact]
+    public async Task ExtractTextAsync_never_asks_for_the_cursor_to_be_drawn()
+    {
+        var mock = ThrowingShotMock();
+        var service = new OcrService(mock.Object);
+
+        Func<Task> act = () => service.ExtractTextAsync(new ScreenRegion(10, 20, 30, 40));
+
+        await act.Should().ThrowAsync<CaptureReached>();
+        mock.Verify(s => s.CaptureAsync(
+            It.IsAny<ScreenRegion?>(),
+            It.Is<CaptureOptions>(o => !o.IncludeCursor),
+            It.IsAny<CancellationToken>()),
+            Times.Once, "the cursor would occlude the very glyphs OCR is reading");
+    }
+
     [Fact]
     public async Task ExtractTextAsync_passes_a_null_region_through_unchanged()
     {

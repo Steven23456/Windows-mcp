@@ -45,8 +45,21 @@ public class ScreenToolsMonitorInventoryTests
         return mock;
     }
 
+    /// <summary>
+    /// A-11: the cursor source stays mocked at a fixed point — this class is about the real
+    /// monitor inventory, and a live cursor would make the metadata unpredictable. The real read
+    /// is <c>InputServiceTests.GetCursorPositionAsync_*</c>.
+    /// </summary>
+    private static Mock<IInputService> InputMock()
+    {
+        var mock = new Mock<IInputService>();
+        mock.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CursorPosition(0, 0));
+        return mock;
+    }
+
     private static ScreenTools MakeTools(IScreenshotService shot) =>
-        new(shot, new Mock<IOcrService>().Object, new WindowService());
+        new(shot, new Mock<IOcrService>().Object, new WindowService(), InputMock().Object);
 
     private static JsonElement Meta(CallToolResult result)
     {

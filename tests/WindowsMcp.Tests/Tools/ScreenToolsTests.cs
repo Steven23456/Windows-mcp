@@ -42,7 +42,8 @@ public class ScreenToolsTests : IDisposable
 
     private static Mock<IScreenshotService> ShotMock(
         byte[]? bytes = null, int width = 100, int height = 100, ImageFormat? resultFormat = null,
-        int? originalWidth = null, int? originalHeight = null, double coordinateScale = 1.0)
+        int? originalWidth = null, int? originalHeight = null, double coordinateScale = 1.0,
+        string? cursorDrawn = null)
     {
         var mock = new Mock<IScreenshotService>();
         mock.Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
@@ -52,7 +53,7 @@ public class ScreenToolsTests : IDisposable
                 return new ScreenshotResult(
                     bytes ?? (effective == ImageFormat.Jpeg ? JpegBytes : PngBytes),
                     width, height, effective,
-                    originalWidth ?? width, originalHeight ?? height, coordinateScale);
+                    originalWidth ?? width, originalHeight ?? height, coordinateScale, cursorDrawn);
             });
         return mock;
     }
@@ -90,11 +91,24 @@ public class ScreenToolsTests : IDisposable
         return mock;
     }
 
+    /// <summary>
+    /// A-11: every screenshot reads the cursor, so the tool now needs an <see cref="IInputService"/>.
+    /// The default point (100,100) is inside the primary display of every desktop above, which
+    /// makes the expected <c>cursor.monitorIndex</c> 0 unless a test moves it.
+    /// </summary>
+    private static Mock<IInputService> InputMock(int x = 100, int y = 100)
+    {
+        var mock = new Mock<IInputService>();
+        mock.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CursorPosition(x, y));
+        return mock;
+    }
+
     private static ScreenTools MakeTools(
         IScreenshotService? shot = null, IOcrService? ocr = null, ScreenshotOptions? options = null,
-        IWindowService? windows = null) =>
+        IWindowService? windows = null, IInputService? input = null) =>
         new(shot ?? ShotMock().Object, ocr ?? new Mock<IOcrService>().Object,
-            windows ?? WinMock().Object, options);
+            windows ?? WinMock().Object, input ?? InputMock().Object, options);
 
     /// <summary>The whole primary display — what a call with neither region nor display captures (roadmap C3).</summary>
     private static readonly ScreenRegion PrimaryRect = new(0, 0, 1920, 1080);
@@ -716,10 +730,11 @@ public class ScreenToolsTests : IDisposable
     [Fact]
     public async Task Screenshot_without_process_options_uses_scale_one()
     {
-        // ScreenTools(shot, ocr, windows) — the options-less form (A-8 added the third
-        // dependency) — must behave as ScreenshotOptions.Default.
+        // ScreenTools(shot, ocr, windows, input) — the options-less form (A-8 added the monitor
+        // inventory, A-11 the cursor source) — must behave as ScreenshotOptions.Default.
         var mock = ShotMock();
-        var tools = new ScreenTools(mock.Object, new Mock<IOcrService>().Object, WinMock().Object);
+        var tools = new ScreenTools(mock.Object, new Mock<IOcrService>().Object,
+            WinMock().Object, InputMock().Object);
 
         await tools.Screenshot(null, format: "png", output: "inline", scale: 0.5);
 
@@ -1414,5 +1429,287 @@ public class ScreenToolsTests : IDisposable
             .And.Contain("virtual-desktop", "the same space click/drag/scroll use (roadmap C1)")
             .And.Contain("negative", "a monitor left of or above the primary has negative coordinates")
             .And.Contain("rejected", "out-of-bounds regions raise, they are not clipped");
+    }
+
+    // ---- A-11 (R5) — the cursor in the metadata and the include_cursor argument ---------------
+
+    private static void ShouldNeverReadTheCursor(Mock<IInputService> mock) =>
+        mock.Verify(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()),
+            Times.Never, "a call that never happens must not cost a cursor read either");
+
+    /// <summary>The <c>cursor</c> object the metadata always carries.</summary>
+    private static (int X, int Y, int MonitorIndex) Cursor(JsonElement meta)
+    {
+        var cursor = Field(meta, "cursor");
+        cursor.ValueKind.Should().Be(JsonValueKind.Object, "cursor is an object {x, y, monitorIndex}");
+        return (Field(cursor, "x").GetInt32(), Field(cursor, "y").GetInt32(),
+                Field(cursor, "monitorIndex").GetInt32());
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_always_carries_the_cursor()
+    {
+        var tools = MakeTools(input: InputMock(640, 480).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline");
+
+        Cursor(Meta(result)).Should().Be((640, 480, 0),
+            "the position comes from IInputService and the index from the same inventory the rect did");
+    }
+
+    [Fact]
+    public async Task Screenshot_cursor_monitor_index_comes_from_the_capture_inventory()
+    {
+        // The whole point of reporting an index: (2000,10) is on the SECOND monitor of this desktop.
+        var tools = MakeTools(windows: WinMock(SideBySide).Object, input: InputMock(2000, 10).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline");
+
+        Cursor(Meta(result)).Should().Be((2000, 10, 1));
+    }
+
+    [Fact]
+    public async Task Screenshot_cursor_off_every_monitor_reports_index_minus_one()
+    {
+        var tools = MakeTools(input: InputMock(10_000, 10_000).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline");
+
+        Cursor(Meta(result)).Should().Be((10_000, 10_000, -1),
+            "the position is still reported; -1 says it is on no monitor");
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_carries_the_cursor_even_when_it_is_not_drawn()
+    {
+        // "Always" means always: include_cursor only decides what is PAINTED, never what is reported.
+        var tools = MakeTools(input: InputMock(300, 200).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline", include_cursor: false);
+
+        Cursor(Meta(result)).Should().Be((300, 200, 0));
+    }
+
+    [Fact]
+    public async Task Screenshot_forwards_the_cursor_it_read_so_the_service_draws_at_the_reported_point()
+    {
+        var input = new Mock<IInputService>();
+        input.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CursorPosition(321, 45));
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object, input: input.Object);
+
+        await tools.Screenshot();
+
+        CapturedOptions(shot).Cursor.Should().Be(new CursorPosition(321, 45),
+            "the metadata's cursor and the painted mark must be the same read, not two reads that can disagree");
+    }
+
+    [Fact]
+    public async Task Screenshot_reads_the_cursor_exactly_once_per_call()
+    {
+        var input = InputMock();
+        var tools = MakeTools(input: input.Object);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        input.Verify(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()), Times.Once,
+            "one read per screenshot — a second read could report a cursor that moved after the capture");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Screenshot_passes_include_cursor_to_the_capture_options(bool includeCursor)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(format: "png", output: "inline", include_cursor: includeCursor);
+
+        CapturedOptions(mock).IncludeCursor.Should().Be(includeCursor);
+    }
+
+    [Fact]
+    public async Task Screenshot_include_cursor_defaults_to_true()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        CapturedOptions(mock).IncludeCursor.Should().BeTrue(
+            "the default agent-loop call shows the model where the pointer is");
+    }
+
+    [Theory]
+    [InlineData("icon")]
+    [InlineData("ring")]
+    public async Task Screenshot_metadata_reports_how_the_cursor_was_drawn(string drawn)
+    {
+        var mock = ShotMock(cursorDrawn: drawn);
+        var tools = MakeTools(mock.Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline");
+
+        Field(Meta(result), "cursorDrawn").GetString().Should().Be(drawn,
+            "the metadata reports what the service actually painted");
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_omits_cursorDrawn_when_nothing_was_drawn()
+    {
+        var mock = ShotMock(cursorDrawn: null);
+        var tools = MakeTools(mock.Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline");
+
+        Meta(result).TryGetProperty("cursorDrawn", out var value).Should().BeFalse(
+            "absent, never null — a field that does not apply is omitted (A-7). Got {0}", value);
+    }
+
+    [Fact]
+    public async Task Screenshot_file_output_carries_the_cursor_and_cursorDrawn_too()
+    {
+        var mock = ShotMock(cursorDrawn: "icon");
+        var tools = MakeTools(mock.Object, input: InputMock(2000, 10).Object,
+            windows: WinMock(SideBySide).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "file");
+        TrackPath(result);
+
+        var meta = Meta(result);
+        Cursor(meta).Should().Be((2000, 10, 1), "the file mode's metadata has the same shape as inline's");
+        Field(meta, "cursorDrawn").GetString().Should().Be("icon");
+    }
+
+    [Fact]
+    public async Task Screenshot_reads_the_cursor_before_it_captures()
+    {
+        // Order matters: the read is an argument-free operation that can fail (a broken desktop),
+        // and failing it after a capture would burn the capture for nothing.
+        var order = new List<string>();
+        var input = new Mock<IInputService>();
+        input.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => { order.Add("cursor"); return new CursorPosition(1, 2); });
+        var shot = new Mock<IScreenshotService>();
+        shot.Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                order.Add("capture");
+                return new ScreenshotResult(PngBytes, 100, 100, ImageFormat.Png, 100, 100, 1.0);
+            });
+        var tools = MakeTools(shot.Object, input: input.Object);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        order.Should().Equal("cursor", "capture");
+    }
+
+    [Theory]
+    [InlineData("nope")]
+    [InlineData("")]
+    public async Task Screenshot_invalid_output_throws_without_reading_the_cursor(string output)
+    {
+        var mock = ShotMock();
+        var input = InputMock();
+        var tools = MakeTools(mock.Object, input: input.Object);
+
+        Func<Task> act = () => tools.Screenshot(output: output);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        ShouldNeverReadTheCursor(input);
+        ShouldNeverCapture(mock);
+    }
+
+    [Fact]
+    public async Task Screenshot_cursor_read_failure_propagates_and_never_captures()
+    {
+        // A cursor that cannot be read is a broken desktop, not a detail to paper over: the caller
+        // sees the failure rather than a picture whose metadata invents a position.
+        var mock = ShotMock();
+        var input = new Mock<IInputService>();
+        input.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("GetCursorPos failed (Win32 error 5)."));
+        var tools = MakeTools(mock.Object, input: input.Object);
+
+        Func<Task> act = () => tools.Screenshot(format: "png", output: "inline");
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message
+            .Should().Contain("GetCursorPos failed");
+        ShouldNeverCapture(mock);
+    }
+
+    [Fact]
+    public async Task Ocr_never_reads_the_cursor()
+    {
+        // OCR returns text; a cursor position in it would be noise, and the capture it makes must
+        // stay cursor-free (OcrServiceTests pins the IncludeCursor:false half).
+        var input = InputMock();
+        var tools = MakeTools(ocr: OcrMock().Object, input: input.Object);
+
+        await tools.Ocr();
+
+        ShouldNeverReadTheCursor(input);
+    }
+
+    [Fact]
+    public void Screenshot_include_cursor_is_the_last_parameter_and_defaults_to_true()
+    {
+        // Appended, not inserted: every existing caller and test passes the earlier arguments
+        // positionally, and the schema default is what the model reads.
+        var parameters = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!.GetParameters();
+
+        parameters[^1].Name.Should().Be("include_cursor");
+        parameters[^1].DefaultValue.Should().Be(true);
+    }
+
+    [Fact]
+    public void Screenshot_description_documents_the_cursor_metadata_and_the_new_argument()
+    {
+        var description = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should()
+            .Contain("cursor", "the metadata list is the only place the model learns the field exists")
+            .And.Contain("monitorIndex", "the cursor object's shape is part of the contract")
+            .And.Contain("cursorDrawn", "and that it is present only when something was drawn");
+
+        ParameterDescription(nameof(ScreenTools.Screenshot), "include_cursor").Should()
+            .Contain("cursor").And.Contain("default", "the model must know it is on by default");
+    }
+
+    // ---- A-11 (GREEN) — the gaps the implementation opened ----------------------------------
+
+    [Fact]
+    public async Task Screenshot_cursor_is_reported_in_virtual_desktop_pixels_not_region_relative()
+    {
+        // Roadmap C1: everything the response carries is virtual-desktop, and 'cursor' is what the
+        // model feeds straight back to click/drag. Rebasing it onto the captured rect's origin
+        // (which is what the DRAWN mark is rebased onto) would send every click 1920 px left.
+        var tools = MakeTools(windows: WinMock(SideBySide).Object, input: InputMock(2000, 10).Object);
+
+        var result = await tools.Screenshot("1920,0,100,100", format: "png", output: "inline");
+
+        var meta = Meta(result);
+        Cursor(meta).Should().Be((2000, 10, 1));
+        // The region IS the rebased rect the image starts at — the contrast is the point.
+        ShouldBeRect(Field(meta, "region"), new ScreenRegion(1920, 0, 100, 100));
+    }
+
+    [Fact]
+    public async Task Screenshot_invalid_region_throws_without_reading_the_cursor()
+    {
+        // The read sits after the rect is resolved AND validated: a region off the virtual screen
+        // must cost neither a capture nor a Win32 cursor call.
+        var mock = ShotMock();
+        var input = InputMock();
+        var tools = MakeTools(mock.Object, input: input.Object);
+
+        Func<Task> act = () => tools.Screenshot("5000,0,100,100", format: "png", output: "inline");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        ShouldNeverReadTheCursor(input);
+        ShouldNeverCapture(mock);
     }
 }

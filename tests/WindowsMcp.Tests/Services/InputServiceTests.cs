@@ -86,6 +86,62 @@ public class InputServiceTests
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
+    // ---- A-11 (R1) — the cursor position the screenshot metadata reports --------------------
+
+    /// <summary>
+    /// The live read, through the real <c>GetCursorPos</c>: every tool test mocks
+    /// <see cref="IInputService"/>, so without this nothing proves the service returns the actual
+    /// cursor rather than a constant (the <c>disk_inspect mode:reclaimable</c> failure mode in
+    /// CLAUDE.md). Read-only — it moves nothing.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task GetCursorPositionAsync_returns_a_point_inside_the_virtual_screen()
+    {
+        var monitors = await new WindowService().EnumerateMonitorsAsync();
+        monitors.Should().NotBeEmpty();
+        var virtualScreen = RegionMath.VirtualScreen(monitors);
+
+        var cursor = await new InputService().GetCursorPositionAsync();
+
+        cursor.X.Should().BeInRange(virtualScreen.X, virtualScreen.X + virtualScreen.Width - 1);
+        cursor.Y.Should().BeInRange(virtualScreen.Y, virtualScreen.Y + virtualScreen.Height - 1);
+    }
+
+    /// <summary>
+    /// The same coordinate space in and out (roadmap C1): what <c>HoverAsync</c> takes is what
+    /// <c>GetCursorPositionAsync</c> reports — the property the screenshot metadata rests on.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task GetCursorPositionAsync_reports_where_the_cursor_was_just_moved()
+    {
+        var monitors = await new WindowService().EnumerateMonitorsAsync();
+        var primary = RegionMath.Primary(monitors);
+        int x = primary.X + primary.Width / 3;
+        int y = primary.Y + primary.Height / 3;
+        var service = new InputService();
+
+        await service.HoverAsync(x, y);
+        var cursor = await service.GetCursorPositionAsync();
+
+        (cursor.X, cursor.Y).Should().Be((x, y));
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task GetCursorPositionAsync_throws_when_cancellation_already_requested()
+    {
+        // The convention every other InputService method follows: check the token before the API.
+        var service = new InputService();
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        Func<Task> act = () => service.GetCursorPositionAsync(cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
     private const int SM_XVIRTUALSCREEN = 76;
     private const int SM_YVIRTUALSCREEN = 77;
 

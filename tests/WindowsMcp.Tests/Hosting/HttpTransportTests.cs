@@ -398,6 +398,93 @@ public class HttpTransportTests
             Times.Once, "the resolved rect reaches the capture service through the real host");
     }
 
+    // ---- A-11 ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A-11 (R6) headless, through the real transport, with all three collaborators swapped at the
+    /// <c>BuildHttpApp</c> seam: the cursor the tool reports must be the one
+    /// <see cref="IInputService"/> gave it, and its <c>monitorIndex</c> must be resolved against
+    /// the same two-monitor inventory the rect was. This is the only place the new
+    /// <c>IInputService</c> dependency of <c>ScreenTools</c> is resolved through real DI.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_reports_the_cursor_and_its_monitor_over_http()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var screenshotService = new Mock<IScreenshotService>();
+        screenshotService
+            .Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ScreenshotResult(png, 1920, 1080, ImageFormat.Png, 1920, 1080, 1.0, "icon"));
+
+        var windowService = new Mock<IWindowService>();
+        windowService
+            .Setup(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([
+                new MonitorInfo(0, "Monitor0", 0, 0, 1920, 1080, true),
+                new MonitorInfo(1, "Monitor1", 1920, 0, 1920, 1080, false),
+            ]);
+
+        var inputService = new Mock<IInputService>();
+        inputService
+            .Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CursorPosition(2000, 10));   // on the second monitor
+
+        await using var server = await Harness.StartAsync(configureServices: services =>
+        {
+            services.AddSingleton(screenshotService.Object);
+            services.AddSingleton(windowService.Object);
+            services.AddSingleton(inputService.Object);
+        });
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var screenshot = ScreenshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?>
+        {
+            ["format"] = "png",
+        });
+
+        result.IsError.Should().NotBe(true);
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject;
+        using var meta = JsonDocument.Parse(text.Text);
+
+        meta.RootElement.TryGetProperty("cursor", out var cursor).Should()
+            .BeTrue("A-11 metadata carries 'cursor' on every screenshot");
+        cursor.GetProperty("x").GetInt32().Should().Be(2000, "the position comes from IInputService");
+        cursor.GetProperty("y").GetInt32().Should().Be(10);
+        cursor.GetProperty("monitorIndex").GetInt32().Should()
+            .Be(1, "(2000,10) is on the second monitor of this inventory");
+        meta.RootElement.GetProperty("cursorDrawn").GetString().Should()
+            .Be("icon", "the service reported it drew the real cursor bitmap");
+
+        inputService.Verify(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()),
+            Times.Once, "one cursor read per screenshot, through the real host");
+        screenshotService.Verify(s => s.CaptureAsync(
+            It.IsAny<ScreenRegion?>(), It.Is<CaptureOptions>(o => o.IncludeCursor),
+            It.IsAny<CancellationToken>()),
+            Times.Once, "include_cursor defaults to true, so the capture is asked to draw it");
+    }
+
+    /// <summary>
+    /// A-11 (R6): the schema is where the model learns the argument exists and that it is on by
+    /// default — an advertised default the method does not apply is a lie the model acts on.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_schema_advertises_include_cursor_defaulting_to_true()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var tools = await client.ListToolsAsync();
+        var screenshot = tools.Single(t => t.Name == ScreenshotToolName(tools));
+        var schema = screenshot.ProtocolTool.InputSchema.GetProperty("properties");
+
+        schema.TryGetProperty("include_cursor", out var includeCursor).Should()
+            .BeTrue("the parameter must reach the wire schema, not just the method signature");
+        includeCursor.GetProperty("default").GetBoolean().Should().BeTrue();
+        screenshot.ProtocolTool.Description.Should().Contain("cursor",
+            "the metadata list in the description tells the model the cursor field is there");
+    }
+
     /// <summary>
     /// The seam itself: a service registered through <c>configureServices</c> must be the one the
     /// tools resolve. Without this, the test above could pass for the wrong reason on a machine

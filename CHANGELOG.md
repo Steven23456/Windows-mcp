@@ -41,6 +41,18 @@
   query fails cannot leave a gap between what `display` selects and what the metadata reports.
   Design note: `docs/design/A-8-multi-display-capture.md`.
 
+- **`screenshot` reports the mouse pointer and paints it onto the capture** (parity A-11). Metadata
+  always carries `cursor {x, y, monitorIndex}` (virtual-desktop pixels; `-1` = on no monitor),
+  drawn or not. New `include_cursor` argument (default true): the real cursor image is composited
+  through `DrawIconEx` at its hotspot, and when the cursor is hidden or the composite fails a
+  two-tone ring (white outside, black inside) is drawn instead; `cursorDrawn` says `icon` or `ring`
+  and is absent when the pointer was outside the captured rect. The overlay goes onto the
+  full-resolution bitmap before the A-9 downscale, so it shrinks with the picture. The tool reads
+  the position once and hands it to the capture, so the numbers and the mark cannot disagree.
+  `ocr` never draws it. New `IInputService.GetCursorPositionAsync` / `CursorPosition`; `CaptureOptions`
+  gained `IncludeCursor` and `Cursor`, `ScreenshotResult` gained `CursorDrawn`. Design note:
+  `docs/design/A-11-cursor.md`.
+
 ### Fixed
 
 - **`find_element` and `wait_for` survive a stale element, and can be pinned to one window**

@@ -6,14 +6,18 @@ public enum ImageFormat { Png, Jpeg }
 /// <summary>
 /// Per-call capture settings (A-9). <see cref="MaxWidth"/>/<see cref="MaxHeight"/> of zero or
 /// less mean "no limit"; <see cref="Scale"/> multiplies on top of the fit-to-cap factor and must
-/// be in (0, 1]; <see cref="Quality"/> is the JPEG encoder quality, 1-100.
+/// be in (0, 1]; <see cref="Quality"/> is the JPEG encoder quality, 1-100. <see cref="Cursor"/>
+/// is the pointer position to draw at when <see cref="IncludeCursor"/> is set — the caller's own
+/// read, so the metadata and the painted mark agree; null means the service reads it live.
 /// </summary>
 public record CaptureOptions(
     ImageFormat Format = ImageFormat.Png,
     int MaxWidth = 1920,
     int MaxHeight = 1080,
     double Scale = 1.0,
-    int Quality = 90);
+    int Quality = 90,
+    bool IncludeCursor = false,
+    CursorPosition? Cursor = null);
 
 /// <summary>
 /// The encoded image plus the geometry the caller needs to map image pixels back to the virtual
@@ -28,7 +32,8 @@ public record ScreenshotResult(
     ImageFormat Format,
     int OriginalWidth,
     int OriginalHeight,
-    double CoordinateScale);
+    double CoordinateScale,
+    string? CursorDrawn = null);
 
 /// <summary>
 /// Process-level screenshot options (roadmap C7): the <c>WINDOWSMCP_SCREENSHOT_SCALE</c> /

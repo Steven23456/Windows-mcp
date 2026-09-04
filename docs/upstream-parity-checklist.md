@@ -71,7 +71,7 @@ function names are the stable anchor.
 | A-8 | Multi-display / virtual-desktop-coordinate capture | P1 | M | — | ☑ |
 | A-9 | Auto-downscale + scale env + coordinate-scale report | P1 | S | A-7 | ☑ |
 | A-10 | Alternative capture backend (WGC / DXGI) | P3 | M–L | — | ☐ |
-| A-11 | Cursor position in responses + drawn on capture | P2 | S | — | ☐ |
+| A-11 | Cursor position in responses + drawn on capture | P2 | S | — | ☑ |
 | A-12 | Virtual desktops (report; optional manage) | P3 | L | A-1 | ☐ |
 | A-13 | Unicode hygiene (PUA strip, surrogate repair) | P2 | S | — | ☐ |
 | A-14 | Post-capture flash overlay + snapshot profiling | P3 | M | — | ☐ |
@@ -713,7 +713,7 @@ backend produced the frame.
 the alternative backend.
 
 ### A-11 — Cursor position in responses and drawn on captures  `P2 · S`
-- [ ] Not started
+- [x] Done — shipped in 0.8.0 (phase-1 PR) — [design note](design/A-11-cursor.md)
 
 **Upstream.** `Cursor Position: (x, y)` heads every snapshot/screenshot (`get_cursor_location`);
 the cursor is highlighted in annotated images.

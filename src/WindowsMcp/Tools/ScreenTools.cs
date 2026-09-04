@@ -15,6 +15,7 @@ public sealed class ScreenTools
     private readonly IScreenshotService _screenshot;
     private readonly IOcrService _ocr;
     private readonly IWindowService _windows;
+    private readonly IInputService _input;
     private readonly ScreenshotOptions _options;
 
     /// <param name="windows">
@@ -25,11 +26,13 @@ public sealed class ScreenTools
     /// The process-level <c>--screenshot-scale</c> (A-9); null means no process-level scaling,
     /// so tests and other hosts can construct the tool without it.
     /// </param>
-    public ScreenTools(IScreenshotService screenshot, IOcrService ocr, IWindowService windows, ScreenshotOptions? options = null)
+    /// <param name="input">Where the cursor is (A-11): reported on every screenshot in the same virtual-desktop pixels.</param>
+    public ScreenTools(IScreenshotService screenshot, IOcrService ocr, IWindowService windows, IInputService input, ScreenshotOptions? options = null)
     {
         _screenshot = screenshot;
         _ocr = ocr;
         _windows = windows;
+        _input = input;
         _options = options ?? ScreenshotOptions.Default;
     }
 
@@ -84,7 +87,7 @@ public sealed class ScreenTools
         return $"virtual-desktop x = {region.X} + imageX × {s}, y = {region.Y} + imageY × {s} — use these for click/drag/scroll";
     }
 
-    [McpServerTool, Description("Capture a screenshot and return it as MCP image content the model can see directly (parity A-7/A-8/A-9). Result content: a text block with one JSON object of metadata {width, height, originalWidth, originalHeight, format, coordinateSpace:'virtual-desktop', region (the rect actually captured, in virtual-desktop pixels), displays (every monitor: index, x, y, width, height, isPrimary), selectedDisplays? (when 'display' picked the rect), path? (file output), coordinateScale? and note? (present whenever image pixels are not virtual-desktop pixels 1:1: multiply image pixel coordinates by coordinateScale and add the region origin — the note spells it out; do this before calling click/drag/scroll)} followed, for inline output, by an image block. Default: the primary display, downscaled to fit max_width x max_height (1920x1080).")]
+    [McpServerTool, Description("Capture a screenshot and return it as MCP image content the model can see directly (parity A-7/A-8/A-9). Result content: a text block with one JSON object of metadata {width, height, originalWidth, originalHeight, format, coordinateSpace:'virtual-desktop', region (the rect actually captured, in virtual-desktop pixels), displays (every monitor: index, x, y, width, height, isPrimary), selectedDisplays? (when 'display' picked the rect), cursor {x, y, monitorIndex} (always: the mouse pointer in virtual-desktop pixels and which display it is on, -1 = none), cursorDrawn? ('icon' or 'ring', only when the pointer was painted onto the image), path? (file output), coordinateScale? and note? (present whenever image pixels are not virtual-desktop pixels 1:1: multiply image pixel coordinates by coordinateScale and add the region origin — the note spells it out; do this before calling click/drag/scroll)} followed, for inline output, by an image block. Default: the primary display, downscaled to fit max_width x max_height (1920x1080).")]
     public async Task<CallToolResult> Screenshot(
         [Description(RegionDescription)] string? region = null,
         [Description(DisplayDescription)] string? display = null,
@@ -93,7 +96,8 @@ public sealed class ScreenTools
         [Description("Downscale so the image is at most this wide, in pixels; 0 = no limit (default 1920)")] int max_width = 1920,
         [Description("Downscale so the image is at most this tall, in pixels; 0 = no limit (default 1080)")] int max_height = 1080,
         [Description("Extra shrink factor applied on top of the max_width/max_height fit, in (0, 1] (default 1.0); the server's --screenshot-scale multiplies it further")] double scale = 1.0,
-        [Description("JPEG encoder quality, 1-100 (default 90); ignored for png")] int quality = 90)
+        [Description("JPEG encoder quality, 1-100 (default 90); ignored for png")] int quality = 90,
+        [Description("Draw the mouse cursor onto the capture (default: true): the real cursor image when it can be composited, otherwise a drawn ring — cursorDrawn in the metadata says which. The cursor position is reported either way")] bool include_cursor = true)
     {
         // Validate every argument before touching the screen: a bad call must not cost a capture.
         bool toFile = ParseOutput(output);
@@ -107,10 +111,13 @@ public sealed class ScreenTools
         if (quality is < 1 or > 100)
             throw new ArgumentException($"quality must be 1-100, got {quality}");
         var (r, monitors, selected) = await ResolveRegionAsync(region, display);
+        // Read before the capture so the reported position is at most one capture old, and so a
+        // broken cursor read (a broken desktop) never costs a capture. It is not masked.
+        var cursor = await _input.GetCursorPositionAsync();
 
         // The process-level --screenshot-scale applies on top of the call's own scale.
         var result = await _screenshot.CaptureAsync(r,
-            new CaptureOptions(fmt, max_width, max_height, scale * _options.Scale, quality));
+            new CaptureOptions(fmt, max_width, max_height, scale * _options.Scale, quality, include_cursor, cursor));
 
         // Report what was ENCODED, not what was asked for — the image block must never lie
         // about the bytes it carries.
@@ -126,7 +133,11 @@ public sealed class ScreenTools
             // Always: image (0,0) is this rect's origin, which is not (0,0) on a second monitor.
             ["region"] = new { x = r.X, y = r.Y, width = r.Width, height = r.Height },
             ["displays"] = monitors.Select(m => new { index = m.Index, x = m.X, y = m.Y, width = m.Width, height = m.Height, isPrimary = m.IsPrimary }).ToArray(),
+            // Always, drawn or not: where the pointer is, and which of 'displays' it is on (-1 = none).
+            ["cursor"] = new { x = cursor.X, y = cursor.Y, monitorIndex = CursorMath.MonitorIndexOf(cursor.X, cursor.Y, monitors) },
         };
+        if (result.CursorDrawn is { } drawn)
+            meta["cursorDrawn"] = drawn;
         if (selected is not null)
             meta["selectedDisplays"] = selected;
         if (result.CoordinateScale != 1.0)
