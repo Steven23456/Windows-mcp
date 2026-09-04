@@ -73,7 +73,7 @@ function names are the stable anchor.
 | A-10 | Alternative capture backend (WGC / DXGI) | P3 | M–L | — | ☐ |
 | A-11 | Cursor position in responses + drawn on capture | P2 | S | — | ☑ |
 | A-12 | Virtual desktops (report; optional manage) | P3 | L | A-1 | ☐ |
-| A-13 | Unicode hygiene (PUA strip, surrogate repair) | P2 | S | — | ☐ |
+| A-13 | Unicode hygiene (PUA strip, surrogate repair) | P2 | S | — | ☑ |
 | A-14 | Post-capture flash overlay + snapshot profiling | P3 | M | — | ☐ |
 | B-1 | `type`: target, clear, caret, press_enter, paste path | P1 | M | D-2 | ☐ |
 | B-2 | `drag`: duration / intermediate motion / from-cursor | P2 | S | D-3 | ☐ |
@@ -748,15 +748,18 @@ build-number detection with graceful "unsupported on this build" failure; `remov
 name.
 
 ### A-13 — Unicode hygiene  `P2 · S`
-- [ ] Not started
+- [x] Done — shipped in 0.8.0 (phase-1 PR) — [design note](design/A-13-unicode-hygiene.md)
 
 **Upstream.** `desktop/utils.py` `remove_private_use_chars()` strips U+E000–U+F8FF (VS Code's
 codicons in element names) and `repair_surrogates()` fixes lone UTF-16 surrogates (emoji in window
 titles) before any string reaches the JSON encoder — one bad title used to take the whole snapshot
 down.
 
-**Ours.** Names flow straight from UIA into `JsonSerializer`. Verify what `System.Text.Json`
-does with a lone surrogate (throws vs. U+FFFD) and whether PUA glyphs appear in VS Code snapshots.
+**Ours (before A-13).** Names flowed straight from UIA into `JsonSerializer`. Measured on
+.NET 10: a lone surrogate does **not** throw, it is silently written as U+FFFD — a lossy rewrite
+the model cannot see — and PUA glyphs passed through as token noise. Now every name, value,
+`get_text` result, table header/cell and `assert_element` observation goes through
+`UiText.Sanitize` (see the design note).
 
 **Sketch.** A `UiText.Sanitize(string)` helper applied in `ToInfo`/`TryGetName` and to window
 titles: strip PUA, replace lone surrogates with U+FFFD, trim control chars.

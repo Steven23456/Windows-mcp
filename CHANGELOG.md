@@ -52,6 +52,16 @@
   `ocr` never draws it. New `IInputService.GetCursorPositionAsync` / `CursorPosition`; `CaptureOptions`
   gained `IncludeCursor` and `Cursor`, `ScreenshotResult` gained `CursorDrawn`. Design note:
   `docs/design/A-11-cursor.md`.
+- **UI text is sanitised before it reaches the model** (parity A-13). Element names and values,
+  `get_text`, `get_table` headers and cells, and the `assert_element state=value` observation now
+  go through one `UiText.Sanitize`: Private Use Area glyphs (VS Code's codicons, icon fonts — BMP
+  and both supplementary planes) are stripped, lone UTF-16 surrogates become U+FFFD explicitly
+  (measured on .NET 10: `System.Text.Json` was already rewriting them to U+FFFD *silently*, so the
+  model got a value that differed from the UI with nothing saying so), C0/C1 controls other than
+  tab/LF/CR are dropped, and the result is trimmed. Valid emoji, ZWJ sequences, combining marks
+  and RTL text are untouched. `assert_element state=value` compares the sanitised value, so a
+  value read back from `find_element`/`get_text` matches. `get_table` columns without a header
+  element are now `""` instead of null. Design note: `docs/design/A-13-unicode-hygiene.md`.
 
 ### Fixed
 

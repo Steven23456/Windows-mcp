@@ -31,7 +31,11 @@ invisible to the unit suite. This table is the resumable record so the sweep sur
 > a `BuildStdioHost(options, configureServices?)` seam like `BuildHttpApp`'s, or a live-exe
 > smoke here. (2) `OcrService`'s real path (`BitmapDecoder` → `OcrEngine`) has never run under
 > a test — `OcrServiceTests` stop at the mocked capture. Add a `UIAutomation` OCR test when A-8
-> touches the shared region parser.
+> touches the shared region parser. *(Closed 2026-09-04: `OcrServiceLiveTests` runs the real
+> chain; the stdio seam is still open.)* A-13 adds a third: `get_table`'s GridPattern/TablePattern
+> reads have no live test at all — the Notepad fixture has no grid — so exercise `get_table` on an
+> Explorer details view or Task Manager grid in the sweep; the string projection (`BuildTable`) is
+> unit-tested, the pattern reads are not.
 
 **Before trusting ANY live result — verify the running image.** The served exe is whatever the
 MCP registration points at (see `CLAUDE.md` "Testing a change against the LIVE MCP server"); a

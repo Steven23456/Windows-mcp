@@ -1,3 +1,4 @@
+using System.Text;
 using FlaUI.Core.Definitions;
 using FluentAssertions;
 using Moq;
@@ -325,6 +326,113 @@ public class UIAutomationServiceTests : IClassFixture<NotepadFixture>
 
         (await waiting).Should().NotBeNull("the text appeared while the wait was polling");
     }
+
+    // ---- A-13: unicode hygiene, end to end ---------------------------------------------------
+
+    // A codicon-style private use glyph and an emoji, written as code points so this file stays
+    // ASCII and nothing can normalise them on the way to the compiler.
+    private static readonly string PuaGlyph = ((char)0xE0B0).ToString();   // U+E0B0, powerline/VS Code
+    private static readonly string Emoji = char.ConvertFromUtf32(0x1F600); // grinning face, a valid pair
+
+    // These two are the ONLY proof that the UIA read sites are wired to UiText.Sanitize: an
+    // AutomationElement cannot be faked or mocked (sealed, COM-backed), so nothing headless can
+    // observe TryGetName / TryGetValue / GetTextAsync. They type the glyph and the emoji into the
+    // editor with InputService.TypeAsync (SendInput KEYEVENTF_UNICODE - the only way a PUA glyph
+    // and the two halves of a surrogate pair get into a control) and read them back through the
+    // paths the model uses.
+    //
+    // Modern (XAML) Notepad's editor is a Document whose text may surface as ElementInfo.Value
+    // (classic Notepad's Edit carries a ValuePattern) or only through the TextPattern that
+    // GetTextAsync falls back on, and the same string can also land on an element's Name. The
+    // first test is therefore tolerant of WHICH carrier holds it: it searches every element from
+    // both get_state and find_element, and every Name and Value on them.
+
+    [Fact]
+    public async Task Element_name_and_value_carry_no_private_use_glyph_and_keep_the_emoji()
+    {
+        using var svc = NewService();
+        var id = await FindNotepadDocumentIdAsync(svc);
+        var marker = $"a13-{Guid.NewGuid():N}"[..10];
+
+        await svc.InteractAsync(id, "focus", null);
+        await new InputService().TypeAsync($"{PuaGlyph}left-{marker} {Emoji} right");
+        await WaitForTypedTextAsync(svc, id, marker);
+
+        var carriers = await TextCarriersContainingAsync(svc, marker);
+
+        carriers.Should().NotBeEmpty("the typed text must surface on some element's Name or Value");
+        carriers.Should().OnlyContain(t => PrivateUseCodePoints(t).Length == 0,
+            "A-13 strips U+E000-U+F8FF in TryGetName and TryGetValue before the model sees the name");
+        carriers.Should().Contain(t => t.Contains(Emoji),
+            "sanitising must not break a valid surrogate pair - the emoji has to survive intact");
+    }
+
+    [Fact]
+    public async Task GetTextAsync_strips_private_use_glyphs_and_keeps_the_emoji()
+    {
+        using var svc = NewService();
+        var id = await FindNotepadDocumentIdAsync(svc);
+        var marker = $"a13-{Guid.NewGuid():N}"[..10];
+
+        await svc.InteractAsync(id, "focus", null);
+        await new InputService().TypeAsync($"{PuaGlyph}left-{marker} {Emoji} right");
+        await WaitForTypedTextAsync(svc, id, marker);
+
+        var text = await svc.GetTextAsync(id);
+
+        text.Should().Contain(marker, "get_text must read back what was typed into the editor");
+        PrivateUseCodePoints(text).Should().BeEmpty(
+            "A-13 sanitises the text GetTextAsync returns, so no icon-font glyph reaches the model");
+        text.Should().Contain(Emoji, "the emoji must survive intact");
+    }
+
+    /// <summary>
+    /// SendInput returns before the control has processed the keystrokes, and on a loaded box a
+    /// fixed delay raced the read (a run saw the text cut off right after the marker). Poll until
+    /// the LAST word of the typed string is visible, so the whole string, emoji included, is there.
+    /// </summary>
+    private static async Task WaitForTypedTextAsync(UIAutomationService svc, string id, string marker)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(8);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(200);
+            string text;
+            try { text = await svc.GetTextAsync(id); } catch { continue; }
+            if (text.Contains(marker) && text.Contains("right")) return;
+        }
+        // Fall through: the assertions below say precisely what is missing.
+    }
+
+    /// <summary>
+    /// Every string the model could read the typed text from: the Name and Value of every element
+    /// in the get_state tree plus every find_element match in the Notepad window.
+    /// </summary>
+    private static async Task<string[]> TextCarriersContainingAsync(UIAutomationService svc, string marker)
+    {
+        var infos = new List<ElementInfo>();
+        Collect(await svc.GetStateAsync(), infos);
+        infos.AddRange((await svc.FindElementAsync("", FindKind.Text, FindScope.Window, "Notepad")).Matches);
+
+        return infos
+            .SelectMany(i => new[] { i.Name, i.Value ?? "" })
+            .Where(t => t.Contains(marker))
+            .ToArray();
+
+        static void Collect(ElementTree node, List<ElementInfo> into)
+        {
+            into.Add(node.Root);
+            foreach (var child in node.Children) Collect(child, into);
+        }
+    }
+
+    private static int[] PrivateUseCodePoints(string s) =>
+        s.EnumerateRunes()
+            .Where(r => (r.Value >= 0xE000 && r.Value <= 0xF8FF)          // BMP private use area
+                     || (r.Value >= 0xF0000 && r.Value <= 0xFFFFD)        // plane 15
+                     || (r.Value >= 0x100000 && r.Value <= 0x10FFFD))     // plane 16
+            .Select(r => r.Value)
+            .ToArray();
 
     private static async Task<string> FindNotepadDocumentIdAsync(UIAutomationService svc)
     {
