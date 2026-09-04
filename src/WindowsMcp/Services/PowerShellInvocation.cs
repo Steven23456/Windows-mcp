@@ -46,15 +46,23 @@ internal static class PowerShellInvocation
     {
         const string CommonFlags = "-NoProfile -NonInteractive -ExecutionPolicy Bypass";
 
-        // We read the child's stdout as UTF-8 (StandardOutputEncoding), but Windows PowerShell 5.1
-        // WRITES stdout in the console OEM codepage, so non-ASCII arrives corrupted (café -> caf?).
-        // Force the writer side to match the reader side. Kept to one line and try/caught so it can
-        // never break a caller's script; `catch {}` deliberately swallows, as failing to set an
-        // encoding must not fail the command.
-        const string EncodingPreamble =
-            "try{[Console]::OutputEncoding=[System.Text.Encoding]::UTF8}catch{}\n";
+        // Line 1: we read the child's stdout as UTF-8 (StandardOutputEncoding), but Windows
+        // PowerShell 5.1 WRITES stdout in the console OEM codepage, so non-ASCII arrives corrupted
+        // (café -> caf?). Force the writer side to match the reader side. Kept to one line and
+        // try/caught so it can never break a caller's script; `catch {}` deliberately swallows, as
+        // failing to set an encoding must not fail the command.
+        //
+        // Line 2 (D-8): with stderr redirected, every Write-Progress — including the ones inside
+        // Invoke-WebRequest and first-use module autoload — becomes a CLIXML record on stderr that
+        // the model then reads and ignores (measured 2026-09-04: 596 characters for a single
+        // progress record). There is no console to draw a progress bar on, so nothing is lost, and
+        // Invoke-WebRequest / Invoke-RestMethod are markedly faster without it. Script scope, so a
+        // caller's script can set it back — ClixmlStderr then drops the records anyway.
+        const string Preamble =
+            "try{[Console]::OutputEncoding=[System.Text.Encoding]::UTF8}catch{}\n" +
+            "$ProgressPreference='SilentlyContinue'\n";
 
-        var payload = EncodingPreamble + command;
+        var payload = Preamble + command;
 
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(payload));
         if (encoded.Length <= MaxEncodedCommandChars)
