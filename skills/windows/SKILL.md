@@ -106,13 +106,16 @@ Run all four and compose the results into one health summary with a per-area ver
 ### 4. UI-automation loop
 
 ```
-get_state                                   (read the element tree)
+window(action:"list")                       (what is open, z-order, which is active)
+  → get_state                               (read the element tree)
   → interact_element / click / type / key   (act)
   → assert_element / wait_for               (confirm the state changed)
   → repeat
 ```
 
 Read the tree before acting, act, then confirm the action landed before moving on — don't chain blind actions. **The target app must be foregrounded on an interactive desktop; these tools fail headless or when the app is in the background.** Prefer `find_element`/`get_element` to locate targets by name/role over hardcoded coordinates, which break when the window moves or resizes.
+
+Start with `window(action:"list")` rather than guessing what is open or launching a second copy of an app that is already running. It returns every user-visible top-level window in z-order (`ZOrder` 0 = frontmost) with `Title`, `Pid`/`ProcessName`, `State` (`Normal|Minimized|Maximized`), `Bounds` in virtual-desktop pixels, `IsActive`, `IsBrowser`, and `MonitorIndex` into `multi_monitor`'s list (`-1` = on no monitor, e.g. minimized). `window(action:"active")` returns just the foreground window, or `{"found":false}`. **Target by `Title`** — that string is what `switch_to_window`/`focus` and `window(action:"minimize"|"maximize"|"restore"|"close")` match (exact), and what `find_element(scope:"window", window:…)` matches exact-then-substring; the reported `Hwnd` is informational, no tool accepts it. Minimized windows are listed by default (`include_minimized:false` drops them); untitled ones are not (`include_hidden:true` adds them). Check `IsActive`/`State` before a `get_state` or a coordinate `click` — a backgrounded or minimized target is the usual cause of an empty tree.
 
 Prefer `interact_element` over a coordinate `click` for a named control: it acts through the UIA pattern (Invoke, SelectionItem, Toggle, Value) and falls back to a physical click at the element's centre, reports which one fired in `Method`, and errors — instead of silently doing nothing — when a pattern is unsupported. Keyboard chords go through `shortcut` (`ctrl+c`, `ctrl+shift+s`, `win+r`, `alt+f4`, a bare `win`); a single key through `key` (`a`, `enter`, `f5`). Coordinates for `click`/`drag`/`hover`/`scroll` are physical pixels on the virtual desktop with the origin at the primary monitor's top-left, so a monitor left of or above it has negative coordinates — take them from `multi_monitor` or an element's `Bounds`.
 

@@ -3,15 +3,15 @@
 **Baseline:** 2026-09-04
 **Upstream:** [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) `main` = **v0.8.5**
 (released 2026-08-01; Python ≥ 3.14, FastMCP 3, 20 tools).
-**Ours:** `main` @ `cb3b488` + the phase-1 branch, 64 tools, plugin `0.7.3`, `CHANGELOG.md
-[Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13). SDK
-`ModelContextProtocol` 2.2.0.
+**Ours:** `main` @ `8cb40b6` + the phase-2 branch, 64 tools, plugin `0.7.3`, `CHANGELOG.md
+[Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13) and phase 2's A-1.
+SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
 This is the working list of everything upstream can do that this server cannot (plus nine
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 — **all nine are
-now fixed**; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done and the rest of
-section A is the next work). Each item
+now fixed**; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 has opened
+with A-1, and the rest of section A is the next work). Each item
 carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
 implementation sketch, files to touch, tests, and a "done when" bar.
@@ -64,7 +64,7 @@ function names are the stable anchor.
 | D-7 | `find_element` / `wait_for` return off-screen elements by default | P2 | S | D-5 | ☑ |
 | D-8 | `powershell` ships the CLIXML progress stream to the model on every call | P2 | S | — | ☑ |
 | D-9 | `job output` still returns raw CLIXML on stderr | P3 | S | D-8 | ☑ |
-| A-1 | Whole-desktop window inventory | P1 | M | — | ☐ |
+| A-1 | Whole-desktop window inventory | P1 | M | — | ☑ |
 | A-2 | Desktop-wide labeled interactive-element snapshot | P1 | L | A-1 | ☐ |
 | A-3 | Scrollable regions with scroll percentages | P2 | S | A-2 | ☐ |
 | A-4 | Element budget, truncation note, UIA caching | P1 | M | A-2 | ☐ |
@@ -453,7 +453,7 @@ no complete document still passes through raw.
 ## A — Desktop state and screenshots
 
 ### A-1 — Whole-desktop window inventory  `P1 · M`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-1-window-inventory.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream behaviour.** Every `Snapshot`/`Screenshot` response lists **Focused Window** and
 **Opened Windows** as a table: name, depth (z-order), status (Maximized/Minimized/Normal/Hidden),
@@ -462,9 +462,9 @@ Source: `desktop/service.py` `get_controls_handles()` (EnumWindows callback, ~92
 `get_windows()` (~1036), `get_active_window()` (~959), `is_overlay_window()` (~910),
 `get_window_status()` (~314); `desktop/views.py` `Window`, `Status`, `Browser`.
 
-**Ours today.** No enumeration anywhere. `IWindowService` has `ExecuteAsync`, `SwitchToAsync`,
-`LaunchAsync`, `EnumerateMonitorsAsync` only. `window` acts on an exact title through
-`PInvoke.FindWindow` (`Services/WindowService.cs:16`).
+**Ours (before A-1).** No enumeration anywhere. `IWindowService` had `ExecuteAsync`, `SwitchToAsync`,
+`LaunchAsync`, `EnumerateMonitorsAsync` only. `window` acted on an exact title through
+`PInvoke.FindWindow`. Now `window(action:"list"|"active")` (see the design note).
 
 **Implementation sketch.**
 - New DTO `WindowInfo(string Title, long Hwnd, int Pid, string ProcessName, WindowState State,
@@ -1262,7 +1262,7 @@ gates; wire into the plugin manifest.
 
 | Upstream (20) | Ours (64) | Gap items |
 |---|---|---|
-| `Snapshot` | `get_state`, `find_element`, `get_element`, `get_text` | A-1..A-6, A-11..A-13 |
+| `Snapshot` | `get_state`, `find_element`, `get_element`, `get_text`, `window` (list/active) | A-1..A-6, A-11..A-13 |
 | `Screenshot` | `screenshot`, `ocr` | A-7..A-11 |
 | `DisplayInventory` | `multi_monitor` | B-12 |
 | `Click` | `click`, `interact_element` | D-2, B-4 |

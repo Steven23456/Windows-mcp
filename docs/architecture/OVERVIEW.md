@@ -10,7 +10,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 - **Understand Desktop Context**: Capture UI element trees from running applications via the Windows Accessibility API
 - **Interact with UI Elements**: Click, type, scroll, drag, and manipulate interface elements programmatically
-- **Control Windows**: Focus, resize, minimize, and manage application windows
+- **Control Windows**: Enumerate the open windows and the foreground one, then focus, minimize, maximize, restore, or close them
 - **Execute System Commands**: Run PowerShell commands for advanced system operations
 - **Capture Screens**: Take screenshots the model sees inline (any monitor or region, auto-downscaled, cursor drawn) and perform OCR on screen regions
 - **Manage System Resources**: Control processes, registry, services, scheduled tasks, and event logs
@@ -107,7 +107,7 @@ Windows-MCP exposes **64 MCP tools** across 19 tool classes:
 ### Window Tools (`WindowTools` — 5 tools)
 | Tool | Purpose |
 |------|---------|
-| `Window` | Minimize, maximize, restore, or close a window by exact title |
+| `Window` | `list` the user-visible top-level windows in z-order or `active` the foreground one; minimize, maximize, restore, or close a window by exact title |
 | `SwitchToWindow` | Bring a window to the foreground by exact title |
 | `Focus` | Alias of `SwitchToWindow` |
 | `Launch` | Launch an application by name or path (ShellExecute); returns the PID |

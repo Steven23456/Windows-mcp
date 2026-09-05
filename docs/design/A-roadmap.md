@@ -5,9 +5,9 @@ of the parity checklist. This is the implementation plan; each item still gets i
 `docs/design/<ID>-<slug>.md` note when it is picked up (checklist rule 1), and this file is the
 place those notes link back to for the cross-item decisions. ·
 **Status:** planned 2026-09-04 against `main` @ `cb3b488` (64 tools, v0.7.3, all nine D items
-closed). Phase 1 has since shipped — A-7, A-9, A-8, A-11 and A-13, still 64 tools; where the
-code deviates from the plan below, the item carries a **Shipped as** line and its design note has
-the reasoning. The rest of section A has not started. ·
+closed). Phase 1 has since shipped — A-7, A-9, A-8, A-11 and A-13 — and phase 2's A-1 with it,
+still 64 tools; where the code deviates from the plan below, the item carries a **Shipped as**
+line and its design note has the reasoning. The rest of section A has not started. ·
 **Baseline facts** used below were read from the code on that commit; the `file:line` anchors
 will drift, the member names will not.
 
@@ -219,6 +219,15 @@ checklist unless corrected.
   interactively, contains the test host's console window title.
 - **Done when.** `window(action:"list")` returns every user-visible top-level window in
   z-order; `action:"active"` returns the foreground one.
+- **Shipped as** ([note](A-1-window-inventory.md)): as planned, plus `WindowFilter.ActiveOf` so
+  `active` is the list's flagged entry (real `ZOrder`) and the choice is testable without a
+  desktop; the tool validates action-then-title instead of reordering `ExecuteAsync`; CsWin32
+  has no `GetWindowLongPtr`, `GetWindowLong` is the x64 entry; C9's stray `DllImport` is gone
+  (the pre-C9 ones in `AuthenticodeInspector`, `LspEnumerator`, `UsnService` and
+  `StartupReportService` stay).
+  `MonitorFromWindow` was not needed — `MonitorIndex` is `CursorMath.MonitorIndexOf` of the
+  window's centre over `EnumerateMonitorsAsync`, so it indexes `multi_monitor` by construction;
+  `GetWindowTextLength` joined the `NativeMethods.txt` list instead.
 
 ### Phase 3 — snapshot core
 
