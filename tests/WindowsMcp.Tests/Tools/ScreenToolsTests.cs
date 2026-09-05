@@ -46,7 +46,8 @@ public class ScreenToolsTests : IDisposable
     private static Mock<IScreenshotService> ShotMock(
         byte[]? bytes = null, int width = 100, int height = 100, ImageFormat? resultFormat = null,
         int? originalWidth = null, int? originalHeight = null, double coordinateScale = 1.0,
-        string? cursorDrawn = null, int annotationsDrawn = 0, StageTiming[]? stages = null)
+        string? cursorDrawn = null, int annotationsDrawn = 0, StageTiming[]? stages = null,
+        string resultBackend = "gdi")
     {
         var mock = new Mock<IScreenshotService>();
         mock.Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
@@ -57,7 +58,7 @@ public class ScreenToolsTests : IDisposable
                     bytes ?? (effective == ImageFormat.Jpeg ? JpegBytes : PngBytes),
                     width, height, effective,
                     originalWidth ?? width, originalHeight ?? height, coordinateScale, cursorDrawn,
-                    annotationsDrawn, stages);
+                    annotationsDrawn, stages, resultBackend);
             });
         return mock;
     }
@@ -2166,15 +2167,20 @@ public class ScreenToolsTests : IDisposable
     public void Screenshot_annotate_arguments_are_appended_after_include_cursor()
     {
         // Appended, not inserted: every existing caller passes the earlier arguments positionally.
+        // A-10 appended 'backend' after grid_rows, so the annotate block is no longer the tail —
+        // Screenshot_backend_is_the_last_argument_and_defaults_to_auto pins that. What this test
+        // protects is the block's own order, and that it still follows include_cursor.
         var parameters = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!.GetParameters();
+        var names = parameters.Select(p => p.Name).ToArray();
+        var first = Array.IndexOf(names, "annotate");
 
-        parameters[^4].Name.Should().Be("include_cursor");
-        parameters[^3].Name.Should().Be("annotate");
-        parameters[^3].DefaultValue.Should().Be(false, "annotate is opt-in: it costs a desktop walk");
-        parameters[^2].Name.Should().Be("grid_columns");
-        parameters[^2].DefaultValue.Should().Be(0);
-        parameters[^1].Name.Should().Be("grid_rows");
-        parameters[^1].DefaultValue.Should().Be(0);
+        names[first - 1].Should().Be("include_cursor");
+        first.Should().BeGreaterThan(0);
+        parameters[first].DefaultValue.Should().Be(false, "annotate is opt-in: it costs a desktop walk");
+        names[first + 1].Should().Be("grid_columns");
+        parameters[first + 1].DefaultValue.Should().Be(0);
+        names[first + 2].Should().Be("grid_rows");
+        parameters[first + 2].DefaultValue.Should().Be(0);
     }
 
     [Fact]
@@ -2554,5 +2560,170 @@ public class ScreenToolsTests : IDisposable
 
         flash.Verify(f => f.Show(It.IsAny<ScreenRegion>(), It.IsAny<TimeSpan>()), Times.Once);
         meta.TryGetProperty("flash", out _).Should().BeFalse();
+    }
+    // ---- A-10 (R4) - the capture backend argument and the backend metadata --------------------
+    // The tool does not choose the backend, it only carries the choice down and reports what came
+    // back: ScreenshotService.ResolveBackend owns the rule (ScreenshotBackendTests) and the frames
+    // themselves are ScreenshotWgcCaptureTests. What IS a tool-layer requirement is the validation
+    // (before any work) and that the metadata never lies about what produced the picture.
+
+    /// <summary>The three values the tool accepts, in the error message and in the description.</summary>
+    private static readonly string[] Backends = ["auto", "gdi", "wgc"];
+
+    [Fact]
+    public async Task Screenshot_defaults_to_the_process_backend()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        CapturedOptions(mock).Backend.Should().Be("auto",
+            "a call that names no backend takes whatever the server was started with");
+    }
+
+    [Theory]
+    [InlineData("auto")]
+    [InlineData("gdi")]
+    [InlineData("wgc")]
+    public async Task Screenshot_passes_the_requested_backend_to_the_capture_options(string backend)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(format: "png", output: "inline", backend: backend);
+
+        CapturedOptions(mock).Backend.Should().Be(backend, "the choice reaches the service verbatim");
+    }
+
+    [Theory]
+    [InlineData("AUTO", "auto")]
+    [InlineData("Gdi", "gdi")]
+    [InlineData("WGC", "wgc")]
+    public async Task Screenshot_backend_matching_is_case_insensitive(string backend, string expected)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(format: "png", output: "inline", backend: backend);
+
+        CapturedOptions(mock).Backend.Should().BeEquivalentTo(expected,
+            "every other enum-like argument on this tool is case-insensitive (output, format, display)");
+    }
+
+    [Theory]
+    [InlineData("dxcam")]     // upstream's backend names are not ours
+    [InlineData("mss")]
+    [InlineData("pillow")]
+    [InlineData("dxgi")]
+    [InlineData("")]
+    [InlineData(" wgc")]      // un-trimmed, like every other option
+    public async Task Screenshot_unknown_backend_throws_naming_the_choices(string backend)
+    {
+        var tools = MakeTools();
+
+        Func<Task> act = () => tools.Screenshot(format: "png", output: "inline", backend: backend);
+
+        var message = (await act.Should().ThrowAsync<ArgumentException>()).Which.Message;
+        foreach (var name in Backends)
+            message.Should().Contain(name, "the model cannot guess the vocabulary from a bare rejection");
+    }
+
+    [Fact]
+    public async Task Screenshot_unknown_backend_is_rejected_before_any_work()
+    {
+        // Same rule as every other argument guard on this tool: a bad call must not cost a monitor
+        // enumeration, a cursor read, a flash teardown or a capture.
+        var mock = ShotMock();
+        var windows = WinMock();
+        var input = InputMock();
+        var flash = FlashMock();
+        var tools = MakeTools(mock.Object, windows: windows.Object, input: input.Object, flash: flash.Object);
+
+        Func<Task> act = () => tools.Screenshot(format: "png", output: "inline", backend: "dxcam");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        windows.Verify(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()), Times.Never);
+        ShouldNeverReadTheCursor(input);
+        ShouldNeverCapture(mock);
+        flash.Verify(f => f.Hide(), Times.Never);
+        flash.Verify(f => f.Show(It.IsAny<ScreenRegion>(), It.IsAny<TimeSpan>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("gdi")]
+    [InlineData("wgc")]
+    public async Task Screenshot_metadata_reports_the_backend_that_produced_the_picture(string produced)
+    {
+        var tools = MakeTools(ShotMock(resultBackend: produced).Object);
+
+        var meta = Meta(await tools.Screenshot(format: "png", output: "inline"));
+
+        Field(meta, "backend").GetString().Should().Be(produced,
+            "the metadata reports what was captured, never what was asked for");
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_backend_follows_the_result_not_the_request()
+    {
+        // The 'auto' case is the whole reason the field exists: the caller does not know which
+        // backend served them until the result says so.
+        var tools = MakeTools(ShotMock(resultBackend: "wgc").Object);
+
+        var meta = Meta(await tools.Screenshot(format: "png", output: "inline", backend: "auto"));
+
+        Field(meta, "backend").GetString().Should().Be("wgc");
+    }
+
+    [Fact]
+    public async Task Screenshot_file_output_metadata_carries_the_backend_too()
+    {
+        var tools = MakeTools(ShotMock(PngBytes, 100, 100, resultBackend: "wgc").Object);
+
+        var result = await tools.Screenshot(null, format: "png", output: "file");
+
+        var meta = Meta(result);
+        _written.Add(meta.GetProperty("path").GetString()!);
+        Field(meta, "backend").GetString().Should().Be("wgc", "both output modes describe the same capture");
+    }
+
+    [Fact]
+    public void Screenshot_backend_is_the_last_argument_and_defaults_to_auto()
+    {
+        // Appended, not inserted: every existing caller and test passes the earlier arguments
+        // positionally, and the schema default is what the model reads.
+        var parameters = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!.GetParameters();
+
+        parameters[^1].Name.Should().Be("backend");
+        parameters[^1].DefaultValue.Should().Be("auto");
+        parameters[^2].Name.Should().Be("grid_rows", "A-6's block stays where it was");
+    }
+
+    [Fact]
+    public void Ocr_has_no_backend_argument_and_takes_the_process_default()
+    {
+        // OCR reads pixels, not a picture for the model: there is no reason to expose the choice,
+        // and OcrServiceTests pins that its CaptureOptions leave Backend at "auto".
+        typeof(ScreenTools).GetMethod(nameof(ScreenTools.Ocr))!.GetParameters()
+            .Select(p => p.Name).Should().NotContain("backend");
+    }
+
+    [Fact]
+    public void Screenshot_description_documents_the_backend_argument_and_metadata()
+    {
+        var description = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should()
+            .Contain("backend", "the metadata list is the only place the model learns the field exists")
+            .And.Contain("wgc", "and the only place it learns the other backend can be asked for by name")
+            .And.Contain("black", "the model needs the one reason to reach for wgc: GDI returns black for GPU/DRM surfaces");
+
+        var attribute = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!.GetParameters()
+            .Single(p => p.Name == "backend").GetCustomAttribute<DescriptionAttribute>();
+        attribute.Should().NotBeNull("an argument with no description is invisible in the wire schema");
+        foreach (var name in Backends)
+            attribute!.Description.Should().Contain(name);
+        attribute!.Description.Should().Contain("default", "the model must know which one it gets for free");
     }
 }

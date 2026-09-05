@@ -2,6 +2,20 @@
 
 ### Added
 
+- **A second screen-capture backend: Windows.Graphics.Capture** (parity A-10). `screenshot`
+  takes `backend: auto | gdi | wgc`. `wgc` reads the compositor's own frames — one
+  `GraphicsCaptureItem` per monitor the rect touches, copied through a D3D11 staging texture and
+  composed into the virtual-desktop rect — so GPU-accelerated, hardware-overlay and DRM-protected
+  surfaces that GDI's screen copy returns black for come out as drawn. `auto` (the default)
+  prefers `wgc` where the OS supports it and falls back to `gdi` silently; `backend:"wgc"` is an
+  error when the compositor cannot serve the rect (session 0, no monitor under it). The
+  metadata `backend` field, reserved since A-7, now always says which backend produced the
+  picture. `--screenshot-backend auto|gdi|wgc` / `WINDOWSMCP_SCREENSHOT_BACKEND` sets the
+  process default a call's `auto` defers to (both transports). Cursor overlay, downscale,
+  annotations and the profiling stages run unchanged on either frame. New
+  `Services/WgcCaptureBackend.cs` (the two COM interfaces it needs are declared in vtable order
+  per the COM rule); `CaptureOptions`/`ScreenshotOptions` carry `Backend`; `ScreenshotService` is
+  `IDisposable`. Design note: `docs/design/A-10-capture-backend.md`.
 - **Virtual desktops, phase 1** (parity A-12). `window(action:"desktops")` lists every virtual
   desktop (`Id`, `Name` or `Desktop N`, `Index`, `IsCurrent`) and the current one; every window
   `list`/`active` returns now carries `DesktopId`. Only the documented `IVirtualDesktopManager`

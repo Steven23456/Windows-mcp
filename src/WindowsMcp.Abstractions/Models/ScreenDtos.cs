@@ -24,7 +24,9 @@ public record CaptureOptions(
     CursorPosition? Cursor = null,
     IReadOnlyList<AnnotationBox>? Annotations = null,
     GridSpec? Grid = null,
-    bool Profile = false);
+    bool Profile = false,
+    // A-10: which capture backend this call wants - "auto" (the process default), "gdi" or "wgc".
+    string Backend = "auto");
 
 /// <summary>
 /// A-6: one labelled box to draw on a capture. <paramref name="Bounds"/> is in virtual-desktop
@@ -58,7 +60,9 @@ public record ScreenshotResult(
     double CoordinateScale,
     string? CursorDrawn = null,
     int AnnotationsDrawn = 0,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StageTiming[]? Stages = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StageTiming[]? Stages = null,
+    // A-10: the backend that actually produced this frame - "gdi" or "wgc", never "auto".
+    string Backend = "gdi");
 
 /// <summary>
 /// A-14: how long one named stage of a capture or a snapshot took, in whole milliseconds. Shared
@@ -77,7 +81,11 @@ public record StageTiming(string Stage, long Ms);
 /// just captured their screen).
 /// </param>
 /// <param name="Profile">A-14: report per-stage timings (<c>--profile-snapshot</c>).</param>
-public record ScreenshotOptions(double Scale, bool Flash = true, bool Profile = false)
+/// <param name="Backend">
+/// A-10: the process-level capture backend (<c>--screenshot-backend</c>), <c>auto|gdi|wgc</c>;
+/// <c>auto</c> prefers Windows.Graphics.Capture and falls back to GDI.
+/// </param>
+public record ScreenshotOptions(double Scale, bool Flash = true, bool Profile = false, string Backend = "auto")
 {
     /// <summary>No process-level scaling — what an unconfigured server and the tool's own default use.</summary>
     public static ScreenshotOptions Default { get; } = new(1.0);

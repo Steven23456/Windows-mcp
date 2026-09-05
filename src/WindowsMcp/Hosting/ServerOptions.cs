@@ -44,7 +44,9 @@ internal sealed record ServerOptions(
     // A-14: the post-capture glow (on by default under both transports; one switch).
     bool Flash = true,
     // A-14: per-stage timings on snapshot/screenshot results, logged to stderr.
-    bool ProfileSnapshot = false)
+    bool ProfileSnapshot = false,
+    // A-10: which capture backend every screenshot uses unless the call names its own: auto|gdi|wgc.
+    string ScreenshotBackend = "auto")
 {
     public const int DefaultPort = 8765;
     public const string DefaultBind = "0.0.0.0";
@@ -63,7 +65,7 @@ internal sealed record ServerOptions(
 
     private static readonly string[] HttpOnlyOptions = ["port", "bind", "cert-thumbprint", "api-key"];
     private static readonly HashSet<string> KnownOptions =
-        new(["transport", "screenshot-scale", "max-tree-elements", "flash", "profile-snapshot", .. HttpOnlyOptions], StringComparer.OrdinalIgnoreCase);
+        new(["transport", "screenshot-scale", "max-tree-elements", "flash", "profile-snapshot", "screenshot-backend", .. HttpOnlyOptions], StringComparer.OrdinalIgnoreCase);
 
     public static string Usage => $"""
         Usage: WindowsMcp.exe [--transport stdio|http] [options]
@@ -99,11 +101,16 @@ internal sealed record ServerOptions(
           --profile-snapshot <on|off>
                                     Report per-stage timings on snapshot and screenshot results
                                     and log them to stderr (default off).
+          --screenshot-backend <auto|gdi|wgc>
+                                    How screenshots read the screen when a call does not say: wgc
+                                    (Windows.Graphics.Capture) sees GPU-accelerated and DRM surfaces
+                                    that gdi returns black for; auto (default) prefers wgc and falls
+                                    back to gdi.
 
         Environment fallbacks (a flag on the command line wins): {EnvPrefix}TRANSPORT,
         {EnvPrefix}PORT, {EnvPrefix}BIND, {EnvPrefix}CERT_THUMBPRINT, {EnvPrefix}API_KEY,
         {EnvPrefix}SCREENSHOT_SCALE, {EnvPrefix}MAX_TREE_ELEMENTS, {EnvPrefix}FLASH,
-        {EnvPrefix}PROFILE_SNAPSHOT.
+        {EnvPrefix}PROFILE_SNAPSHOT, {EnvPrefix}SCREENSHOT_BACKEND.
         Prefer {EnvPrefix}API_KEY over --api-key: it stays out of process command lines.
 
         Examples:
@@ -187,6 +194,13 @@ internal sealed record ServerOptions(
 
         var flash = ParseSwitch(Get("flash", "FLASH"), "flash", defaultValue: true);
         var profile = ParseSwitch(Get("profile-snapshot", "PROFILE_SNAPSHOT"), "profile-snapshot", defaultValue: false);
+        var screenshotBackend = "auto";
+        if (Get("screenshot-backend", "SCREENSHOT_BACKEND") is { } backendRaw)
+        {
+            screenshotBackend = backendRaw.ToLowerInvariant();   // stored canonical; no Trim, like every option
+            if (screenshotBackend is not ("auto" or "gdi" or "wgc"))
+                throw new OptionsException($"Invalid --screenshot-backend '{backendRaw}'; expected auto|gdi|wgc.");
+        }
 
         if (transport == TransportKind.Stdio)
         {
@@ -196,7 +210,7 @@ internal sealed record ServerOptions(
             return Stdio with
             {
                 ScreenshotScale = screenshotScale, MaxTreeElements = maxTreeElements,
-                Flash = flash, ProfileSnapshot = profile,
+                Flash = flash, ProfileSnapshot = profile, ScreenshotBackend = screenshotBackend,
             };
         }
 
@@ -235,7 +249,7 @@ internal sealed record ServerOptions(
 
         return new ServerOptions(TransportKind.Http, bind, port, thumbprint, apiKey,
             ScreenshotScale: screenshotScale, MaxTreeElements: maxTreeElements,
-            Flash: flash, ProfileSnapshot: profile);
+            Flash: flash, ProfileSnapshot: profile, ScreenshotBackend: screenshotBackend);
     }
 
     /// <summary>on|off|true|false|1|0, case-insensitive; null (unset) keeps the default.</summary>

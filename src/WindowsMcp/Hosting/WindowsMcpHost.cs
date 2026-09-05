@@ -60,7 +60,7 @@ internal static class WindowsMcpHost
 
         // Process-level knobs the tools read (roadmap C7): ServerOptions is internal to this
         // assembly, so the public options record is what crosses into the tool layer.
-        services.AddSingleton(new ScreenshotOptions(options.ScreenshotScale, options.Flash, options.ProfileSnapshot));
+        services.AddSingleton(new ScreenshotOptions(options.ScreenshotScale, options.Flash, options.ProfileSnapshot, options.ScreenshotBackend));
         services.AddSingleton(new UiTreeOptions(options.MaxTreeElements, options.ProfileSnapshot));
         // Always registered: the tool gates on ScreenshotOptions.Flash, and the overlay's thread
         // only starts on its first Show, so an off switch costs nothing.

@@ -74,7 +74,7 @@ function names are the stable anchor.
 | A-7 | Return screenshot as MCP image content | P1 | S | — | ☑ |
 | A-8 | Multi-display / virtual-desktop-coordinate capture | P1 | M | — | ☑ |
 | A-9 | Auto-downscale + scale env + coordinate-scale report | P1 | S | A-7 | ☑ |
-| A-10 | Alternative capture backend (WGC / DXGI) | P3 | M–L | — | ☐ |
+| A-10 | Alternative capture backend (WGC / DXGI) | P3 | M–L | [A-10](design/A-10-capture-backend.md) | ☑ |
 | A-11 | Cursor position in responses + drawn on capture | P2 | S | — | ☑ |
 | A-12 | Virtual desktops (report; optional manage) | P3 | L | A-1 | ☑ (phase 1) |
 | A-13 | Unicode hygiene (PUA strip, surrogate repair) | P2 | S | — | ☑ |
@@ -705,13 +705,13 @@ Ties into A-7's metadata block.
 **Done when.** A 3840×2160 capture returns ≤ 1920 wide with the correct scale factor reported.
 
 ### A-10 — Alternative capture backend (WGC / DXGI)  `P3 · M–L`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-10-capture-backend.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (0.8.0 per roadmap C11)
 
 **Upstream.** `desktop/screenshot.py` backend registry: `dxcam` (DXGI desktop duplication) →
 `mss` → Pillow, selected by `WINDOWS_MCP_SCREENSHOT_BACKEND=auto|dxcam|mss|pillow`; the used
 backend is echoed in the response.
 
-**Ours.** GDI `Graphics.CopyFromScreen` only — returns black for DRM/exclusive-fullscreen surfaces
+**Ours (before A-10).** GDI `Graphics.CopyFromScreen` only — returns black for DRM/exclusive-fullscreen surfaces
 and is slower on high-refresh multi-monitor setups.
 
 **Sketch.** `IScreenCaptureBackend` with `Gdi` and `WindowsGraphicsCapture`

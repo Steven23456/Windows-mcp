@@ -667,4 +667,128 @@ public class ServerOptionsTests
         ServerOptions.Parse([], Env(("WINDOWSMCP_DISABLE_FLASH", "1"))).Flash
             .Should().BeTrue("the only switch is WINDOWSMCP_FLASH / --flash");
     }
+    // ---- A-10 (R1) - --screenshot-backend / WINDOWSMCP_SCREENSHOT_BACKEND ----------------------
+    // A knob that configures a tool rather than a listener, so - like --screenshot-scale,
+    // --max-tree-elements, --flash and --profile-snapshot - it is parsed BEFORE the stdio early
+    // return and applies to both transports. The vocabulary is auto|gdi|wgc, matching the tool's
+    // own 'backend' argument; an operator who types 'dxcam' (upstream's name) is told, not ignored.
+
+    [Fact]
+    public void Screenshot_backend_defaults_to_auto_under_both_transports()
+    {
+        Parse().ScreenshotBackend.Should().Be("auto", "auto prefers the compositor and falls back to GDI");
+        Parse("--transport", "http").ScreenshotBackend.Should().Be("auto");
+        ServerOptions.Stdio.ScreenshotBackend.Should().Be("auto", "the no-argument configuration carries the default too");
+    }
+
+    [Fact]
+    public void Screenshot_backend_applies_to_stdio_too_it_is_not_an_http_only_option()
+    {
+        var fromFlag = Parse("--screenshot-backend", "wgc");
+
+        fromFlag.Transport.Should().Be(TransportKind.Stdio);
+        fromFlag.ScreenshotBackend.Should().Be("wgc");
+
+        ServerOptions.Parse([], Env(("WINDOWSMCP_SCREENSHOT_BACKEND", "gdi"))).ScreenshotBackend.Should().Be("gdi");
+    }
+
+    [Fact]
+    public void Screenshot_backend_comes_from_the_environment_under_http_as_well()
+    {
+        var o = ServerOptions.Parse(["--transport", "http"], Env(("WINDOWSMCP_SCREENSHOT_BACKEND", "wgc")));
+
+        o.Transport.Should().Be(TransportKind.Http);
+        o.ScreenshotBackend.Should().Be("wgc");
+    }
+
+    [Theory]
+    [InlineData("auto")]
+    [InlineData("gdi")]
+    [InlineData("wgc")]
+    public void Screenshot_backend_accepts_each_of_the_three_values_in_both_flag_forms(string value)
+    {
+        Parse("--screenshot-backend", value).ScreenshotBackend.Should().Be(value);
+        Parse("--screenshot-backend=" + value).ScreenshotBackend.Should().Be(value);
+        ServerOptions.Parse([], Env(("WINDOWSMCP_SCREENSHOT_BACKEND", value))).ScreenshotBackend.Should().Be(value);
+    }
+
+    [Theory]
+    [InlineData("AUTO", "auto")]
+    [InlineData("Gdi", "gdi")]
+    [InlineData("WGC", "wgc")]
+    public void Screenshot_backend_is_case_insensitive_and_is_stored_lower_case(string raw, string expected)
+    {
+        // Canonicalised on the way in, like the thumbprint and the bind address: what is stored is
+        // what ScreenshotService.ResolveBackend compares and what the metadata reports.
+        Parse("--screenshot-backend", raw).ScreenshotBackend.Should().Be(expected);
+        ServerOptions.Parse([], Env(("WINDOWSMCP_SCREENSHOT_BACKEND", raw))).ScreenshotBackend.Should().Be(expected);
+    }
+
+    [Fact]
+    public void Screenshot_backend_on_the_command_line_beats_the_environment()
+    {
+        var o = ServerOptions.Parse(["--screenshot-backend", "gdi"], Env(("WINDOWSMCP_SCREENSHOT_BACKEND", "wgc")));
+
+        o.ScreenshotBackend.Should().Be("gdi");
+    }
+
+    [Fact]
+    public void Blank_screenshot_backend_in_the_environment_counts_as_unset()
+    {
+        ServerOptions.Parse([], Env(("WINDOWSMCP_SCREENSHOT_BACKEND", "   "))).ScreenshotBackend.Should().Be("auto");
+        ServerOptions.Parse([], Env(("WINDOWSMCP_SCREENSHOT_BACKEND", ""))).ScreenshotBackend.Should().Be("auto");
+    }
+
+    [Theory]
+    [InlineData("dxcam")]        // upstream's backend registry names
+    [InlineData("mss")]
+    [InlineData("pillow")]
+    [InlineData("dxgi")]
+    [InlineData("directx")]
+    [InlineData(" wgc")]         // no surrounding whitespace, like every other option
+    [InlineData("wgc ")]
+    public void Invalid_screenshot_backend_values_are_rejected_from_the_command_line(string raw)
+    {
+        var act = () => Parse("--screenshot-backend", raw);
+
+        var message = act.Should().Throw<OptionsException>().Which.Message;
+        message.Should().Contain("screenshot-backend", "the message names the option");
+        message.Should().Contain("auto").And.Contain("gdi").And.Contain("wgc",
+            "the message names the three accepted values");
+    }
+
+    [Fact]
+    public void Invalid_screenshot_backend_values_are_rejected_from_the_environment_too()
+    {
+        var act = () => ServerOptions.Parse([], Env(("WINDOWSMCP_SCREENSHOT_BACKEND", "dxcam")));
+
+        act.Should().Throw<OptionsException>().Which.Message.Should().Contain("wgc");
+    }
+
+    [Fact]
+    public void Screenshot_backend_without_a_value_is_an_error()
+    {
+        var missing = () => Parse("--screenshot-backend");
+        var empty = () => Parse("--screenshot-backend=");
+
+        missing.Should().Throw<OptionsException>().WithMessage("*requires a value*");
+        empty.Should().Throw<OptionsException>().WithMessage("*requires a value*");
+    }
+
+    [Fact]
+    public void Repeated_screenshot_backend_is_an_error()
+    {
+        var act = () => Parse("--screenshot-backend", "gdi", "--screenshot-backend", "wgc");
+
+        act.Should().Throw<OptionsException>().WithMessage("*more than once*");
+    }
+
+    [Fact]
+    public void Usage_documents_the_screenshot_backend_option()
+    {
+        ServerOptions.Usage.Should().Contain("--screenshot-backend");
+        ServerOptions.Usage.Should().Contain("WINDOWSMCP_SCREENSHOT_BACKEND");
+        foreach (var value in new[] { "auto", "gdi", "wgc" })
+            ServerOptions.Usage.Should().Contain(value, "the help text lists what the option accepts");
+    }
 }

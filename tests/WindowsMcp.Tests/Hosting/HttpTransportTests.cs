@@ -761,6 +761,9 @@ public class HttpTransportTests
             [
                 "region", "display", "format", "output", "max_width", "max_height",
                 "scale", "quality", "include_cursor", "annotate", "grid_columns", "grid_rows",
+                // A-10's 'backend' is the one argument added since; the flash and the profiling
+                // switches are still process options and still absent.
+                "backend",
             ], "no flash or profiling argument belongs on the tool");
 
         var snapshot = tools.Single(t => t.Name == SnapshotToolName(tools));
@@ -785,7 +788,71 @@ public class HttpTransportTests
         server.App.Services.GetRequiredService<IScreenshotService>()
             .Should().BeSameAs(screenshotService.Object, "configureServices runs AFTER AddWindowsMcp");
     }
+
+    // ---- A-10 ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A-10 (R5): the schema is where the model learns the argument exists and what it defaults
+    /// to. An advertised default the method does not apply is a lie the model acts on
+    /// (<c>ScreenToolsTests.Screenshot_defaults_to_the_process_backend</c> pins the other half).
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_schema_advertises_the_backend_argument_defaulting_to_auto()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var tools = await client.ListToolsAsync();
+        var screenshot = tools.Single(t => t.Name == ScreenshotToolName(tools));
+        var schema = screenshot.ProtocolTool.InputSchema.GetProperty("properties");
+
+        schema.TryGetProperty("backend", out var backend).Should()
+            .BeTrue("the parameter must reach the wire schema, not just the method signature");
+        backend.GetProperty("default").GetString().Should().Be("auto");
+        screenshot.ProtocolTool.Description.Should().Contain("backend",
+            "the metadata list in the description tells the model the field is there");
+    }
+
+    /// <summary>
+    /// A-10 (R5) through the real transport with <see cref="IScreenshotService"/> swapped at the
+    /// <c>BuildHttpApp</c> seam: the backend the service reports is what the metadata carries, over
+    /// the wire, for a client that has no other way to know which backend served it.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_reports_the_backend_that_produced_the_frame_over_http()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var screenshotService = new Mock<IScreenshotService>();
+        screenshotService
+            .Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ScreenshotResult(png, 1920, 1080, ImageFormat.Png, 1920, 1080, 1.0, null, 0, null, "wgc"));
+
+        await using var server = await Harness.StartAsync(configureServices: services =>
+            services.AddSingleton(screenshotService.Object));
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var screenshot = ScreenshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?>
+        {
+            ["format"] = "png",
+            ["backend"] = "auto",
+        });
+
+        result.IsError.Should().NotBe(true);
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject;
+        using var meta = JsonDocument.Parse(text.Text);
+
+        meta.RootElement.TryGetProperty("backend", out var backend).Should()
+            .BeTrue("A-10 metadata carries 'backend' on every screenshot");
+        backend.GetString().Should().Be("wgc", "the picture came from the compositor, whatever was asked for");
+
+        screenshotService.Verify(s => s.CaptureAsync(
+            It.IsAny<ScreenRegion?>(), It.Is<CaptureOptions>(o => o.Backend == "auto"),
+            It.IsAny<CancellationToken>()),
+            Times.Once, "the requested backend reaches the capture service through the real host");
+    }
 }
+
 
 /// <summary>
 /// The one A-7 test that captures the real screen through the real HTTP host. Split out of
@@ -854,5 +921,40 @@ public class HttpTransportScreenshotImageTests
         using var meta = JsonDocument.Parse(text.Text);
         meta.RootElement.GetProperty("format").GetString().Should().Be("jpeg");
         meta.RootElement.GetProperty("width").GetInt32().Should().Be(64);
+    }
+
+    /// <summary>
+    /// A-10 end to end: the tool argument, the real <c>ScreenshotService</c>, the real compositor
+    /// and the metadata, over the real transport. Every other backend test replaces one of those
+    /// with a mock (<c>ScreenToolsTests</c>, <c>HttpTransportTests</c>) or with the
+    /// <c>WgcFrameSource</c> seam (<c>ScreenshotFrameSourceTests</c>) — this is the only one where
+    /// a client asking for <c>backend:"wgc"</c> gets a picture the compositor actually produced.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_backend_wgc_captures_through_the_compositor_over_http()
+    {
+        await using var server = await HttpTransportTests.Harness.StartAsync();
+        await using var client = await HttpTransportTests.ConnectAsync(server.McpEndpoint);
+        var screenshot = HttpTransportTests.ScreenshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?>
+        {
+            ["region"] = "0,0,64,48",   // small: this is a wiring proof, not a capture-quality test
+            ["format"] = "png",
+            ["backend"] = "wgc",
+        });
+
+        result.IsError.Should().NotBe(true,
+            "a machine that supports WGC must serve a capture asked for by name, not refuse it");
+
+        var image = result.Content.OfType<ImageContentBlock>().Should().ContainSingle().Subject;
+        image.DecodedData.ToArray().Take(4).Should().Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, "PNG magic bytes");
+
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject;
+        using var meta = JsonDocument.Parse(text.Text);
+        meta.RootElement.GetProperty("backend").GetString().Should().Be("wgc",
+            "the frame came from the compositor and the metadata says so, through the whole stack");
+        meta.RootElement.GetProperty("width").GetInt32().Should().Be(64);
+        meta.RootElement.GetProperty("height").GetInt32().Should().Be(48);
     }
 }

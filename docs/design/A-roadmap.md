@@ -355,6 +355,14 @@ without a desktop:
 - **RED seed.** Backend selection by env and by fallback (fake backends); `auto` falls back
   when the first throws; metadata names the backend; `Integration`: both backends produce
   same-sized bitmaps of the primary.
+- **Shipped as** ([note](A-10-capture-backend.md)): no `IScreenCaptureBackend` interface — the
+  GDI path was not moved out; `WgcCaptureBackend` is one internal class and `ScreenshotService`
+  picks the frame source (`AcquireFrame`), with an internal frame-source seam for the headless
+  tests instead of fake backends. The selector is `--screenshot-backend` **and** the env var
+  (every option has both), plus a per-call `backend` argument on `screenshot` whose `auto` defers
+  to the process default. `IsBorderRequired` is absent from the 19041 projection, so the capture
+  border is not suppressed (Win11 does not draw one for monitor items here). The monitor path was
+  prototyped in the repo (a spike class, then the RED pass), not a scratch console app.
 
 #### A-5 — Browser DOM mode, Chromium only  `P2 · L · ~3 days`
 

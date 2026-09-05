@@ -13,26 +13,78 @@ using ImageFormat = WindowsMcp.Abstractions.Models.ImageFormat;
 
 namespace WindowsMcp.Services;
 
-public sealed class ScreenshotService : IScreenshotService
+public sealed class ScreenshotService : IScreenshotService, IDisposable
 {
     private readonly ILogger _log;
 
     /// <param name="log">Optional so tests can construct the service directly; stage timings are logged here when profiling is on (A-14).</param>
-    public ScreenshotService(ILogger<ScreenshotService>? log = null)
-        => _log = log ?? (ILogger)NullLogger<ScreenshotService>.Instance;
+    /// <param name="options">
+    /// A-10: the process-level capture backend (<c>--screenshot-backend</c>) a call that asks for
+    /// <c>auto</c> resolves to; null means <see cref="ScreenshotOptions.Default"/> (auto).
+    /// </param>
+    public ScreenshotService(ILogger<ScreenshotService>? log = null, ScreenshotOptions? options = null)
+    {
+        _log = log ?? (ILogger)NullLogger<ScreenshotService>.Instance;
+        _options = options ?? ScreenshotOptions.Default;
+    }
+
+    private readonly ScreenshotOptions _options;
+    private readonly object _wgcGate = new();
+    private WgcCaptureBackend? _wgc;
 
     /// <summary>
-    /// capture → cursor overlay (A-11, on the full-resolution bitmap) → <see cref="ScaleMath.Fit"/>
-    /// → <see cref="Downscale"/> (only when the size changes) → <see cref="Encode"/> (A-9). The GDI
-    /// buffer stays locked for the resize and encode: the Skia bitmap is a zero-copy view of it,
-    /// so both must finish before <c>UnlockBits</c>. The cursor goes on before the lock because
-    /// the icon path draws through the bitmap's HDC.
+    /// Test seam: when set, "wgc" frames come from here instead of the real compositor (null = the
+    /// compositor refused), so the auto→gdi fallback and the pipeline on a Skia frame are provable
+    /// without a desktop.
+    /// </summary>
+    internal Func<ScreenRegion, SKBitmap?>? WgcFrameSource { get; set; }
+
+    private static readonly string[] Backends = ["auto", "gdi", "wgc"];
+
+    /// <summary>
+    /// A-10: the backend that will produce the frame. <paramref name="requested"/> of "auto" means
+    /// <paramref name="processDefault"/>; the answer is lower-case, and "auto" only when both are.
+    /// </summary>
+    /// <exception cref="ArgumentException">Either value is not auto|gdi|wgc.</exception>
+    internal static string ResolveBackend(string requested, string processDefault)
+    {
+        var req = Normalise(requested, nameof(requested));
+        var def = Normalise(processDefault, nameof(processDefault));
+        return req == "auto" ? def : req;
+
+        static string Normalise(string? value, string name)
+        {
+            if (value is null) throw new ArgumentNullException(name, "Backend must be auto|gdi|wgc.");
+            var lower = value.ToLowerInvariant();   // no Trim: a padded value is a wrong value, like every option
+            if (Array.IndexOf(Backends, lower) < 0)
+                throw new ArgumentException($"Unknown backend '{value}'; expected auto|gdi|wgc.", name);
+            return lower;
+        }
+    }
+
+    /// <summary>A-10: releases the D3D device the WGC backend holds; the DI container disposes the singleton.</summary>
+    public void Dispose()
+    {
+        lock (_wgcGate)
+        {
+            _wgc?.Dispose();
+            _wgc = null;
+        }
+    }
+
+    /// <summary>
+    /// frame (gdi or wgc, A-10) → cursor overlay (A-11, on the full-resolution frame) →
+    /// <see cref="ScaleMath.Fit"/> → <see cref="Downscale"/> (only when the size changes) →
+    /// <see cref="Encode"/> (A-9). Both sources hand over a writable Skia bitmap; the cursor's icon
+    /// path draws through a GDI view over that same memory.
     /// </summary>
     public Task<ScreenshotResult> CaptureAsync(ScreenRegion? region = null, CaptureOptions? options = null, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
 
         var o = options ?? new CaptureOptions();
+        // Decided before anything is allocated: a bad backend is a bad argument, not a wasted capture.
+        var backend = ResolveBackend(o.Backend, _options.Backend);
         var sw = o.Profile ? Stopwatch.StartNew() : null;
         long captureMs = 0, cursorMs = 0, resizeMs = 0;
 
@@ -40,55 +92,46 @@ public sealed class ScreenshotService : IScreenshotService
         int screenH = PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CYSCREEN);
         var r = region ?? new ScreenRegion(0, 0, screenW, screenH);
 
-        using var bmp = new Bitmap(r.Width, r.Height, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(bmp))
-            g.CopyFromScreen(r.X, r.Y, 0, 0, new Size(r.Width, r.Height));
-
-        ct.ThrowIfCancellationRequested();
-        if (sw is not null) captureMs = sw.ElapsedMilliseconds;
-
-        // The caller's own read wins (the tool reports that same point in the metadata, so the
-        // picture and the numbers cannot disagree); a live read is the fallback for direct callers.
-        string? cursorDrawn = null;
-        if (o.IncludeCursor)
+        var (frame, produced) = AcquireFrame(r, backend);
+        using (frame)
         {
-            var at = o.Cursor;
-            if (at is null && PInvoke.GetCursorPos(out var live)) at = new CursorPosition(live.X, live.Y);
-            if (at is not null) cursorDrawn = DrawCursor(bmp, r, at, TryDrawCursorIcon);
-        }
-        if (sw is not null) cursorMs = sw.ElapsedMilliseconds - captureMs;
+            ct.ThrowIfCancellationRequested();
+            if (sw is not null) captureMs = sw.ElapsedMilliseconds;
 
-        // Zero-copy: wrap the locked GDI pixel buffer in an SKBitmap via
-        // InstallPixels (stride-aware; avoids assumption that Stride == Width*4).
-        var bd = bmp.LockBits(
-            new Rectangle(0, 0, bmp.Width, bmp.Height),
-            ImageLockMode.ReadOnly,
-            PixelFormat.Format32bppArgb);
-        try
-        {
-            var info = new SKImageInfo(bmp.Width, bmp.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
-            using var skBmp = new SKBitmap();
-            if (!skBmp.InstallPixels(info, bd.Scan0, bd.Stride))
-                throw new InvalidOperationException("SKBitmap.InstallPixels failed to wrap GDI bitmap memory.");
+            // The caller's own read wins (the tool reports that same point in the metadata, so the
+            // picture and the numbers cannot disagree); a live read is the fallback for direct callers.
+            string? cursorDrawn = null;
+            if (o.IncludeCursor)
+            {
+                var at = o.Cursor;
+                if (at is null && PInvoke.GetCursorPos(out var live)) at = new CursorPosition(live.X, live.Y);
+                if (at is not null)
+                {
+                    // A GDI bitmap over the Skia pixels: DrawIconEx needs an HDC, the ring locks it read-write.
+                    using var gdiView = new Bitmap(frame.Width, frame.Height, frame.RowBytes, PixelFormat.Format32bppPArgb, frame.GetPixels());
+                    cursorDrawn = DrawCursor(gdiView, r, at, TryDrawCursorIcon);
+                }
+            }
+            if (sw is not null) cursorMs = sw.ElapsedMilliseconds - captureMs;
 
             ct.ThrowIfCancellationRequested();
 
-            var (width, height, coordinateScale) = ScaleMath.Fit(bmp.Width, bmp.Height, o.MaxWidth, o.MaxHeight, o.Scale);
+            var (width, height, coordinateScale) = ScaleMath.Fit(frame.Width, frame.Height, o.MaxWidth, o.MaxHeight, o.Scale);
 
             // A-6: annotations go on AFTER the downscale (so 2 px boxes and chips stay legible at the
             // output size), mapped through the same coordinate scale the metadata reports.
             byte[] bytes;
             int drawn;
             long beforeResize = sw?.ElapsedMilliseconds ?? 0;
-            if (width != bmp.Width || height != bmp.Height)
+            if (width != frame.Width || height != frame.Height)
             {
-                using var scaled = Downscale(skBmp, width, height);
+                using var scaled = Downscale(frame, width, height);
                 if (sw is not null) resizeMs = sw.ElapsedMilliseconds - beforeResize;
                 (bytes, drawn) = EncodeAnnotated(scaled, o.Format, o.Quality, o.Annotations, r, coordinateScale, o.Grid);
             }
             else
             {
-                (bytes, drawn) = EncodeAnnotated(skBmp, o.Format, o.Quality, o.Annotations, r, coordinateScale, o.Grid);
+                (bytes, drawn) = EncodeAnnotated(frame, o.Format, o.Quality, o.Annotations, r, coordinateScale, o.Grid);
             }
 
             StageTiming[]? stages = null;
@@ -96,12 +139,65 @@ public sealed class ScreenshotService : IScreenshotService
             {
                 long encodeMs = sw.ElapsedMilliseconds - beforeResize - resizeMs;
                 stages = [new("capture", captureMs), new("cursor", cursorMs), new("resize", resizeMs), new("encode", encodeMs)];
-                _log.LogInformation("screenshot: capture {CaptureMs} ms, cursor {CursorMs} ms, resize {ResizeMs} ms, encode {EncodeMs} ms ({W}x{H} -> {OutW}x{OutH})",
-                    captureMs, cursorMs, resizeMs, encodeMs, bmp.Width, bmp.Height, width, height);
+                _log.LogInformation("screenshot ({Backend}): capture {CaptureMs} ms, cursor {CursorMs} ms, resize {ResizeMs} ms, encode {EncodeMs} ms ({W}x{H} -> {OutW}x{OutH})",
+                    produced, captureMs, cursorMs, resizeMs, encodeMs, frame.Width, frame.Height, width, height);
             }
 
             return Task.FromResult(new ScreenshotResult(
-                bytes, width, height, o.Format, bmp.Width, bmp.Height, coordinateScale, cursorDrawn, drawn, stages));
+                bytes, width, height, o.Format, frame.Width, frame.Height, coordinateScale, cursorDrawn, drawn, stages, produced));
+        }
+    }
+
+    /// <summary>
+    /// The frame for <paramref name="r"/> as a writable Skia bitmap, and which backend made it.
+    /// "wgc" asks the compositor and refuses loudly when it cannot serve; "auto" prefers the
+    /// compositor where it is supported and falls back to GDI silently; "gdi" is the classic copy.
+    /// </summary>
+    private (SKBitmap Frame, string Backend) AcquireFrame(ScreenRegion r, string backend)
+    {
+        if (backend != "gdi" && (backend == "wgc" || WgcCaptureBackend.IsSupported() || WgcFrameSource is not null))
+        {
+            var wgc = TryWgc(r);
+            if (wgc is not null) return (wgc, "wgc");
+            if (backend == "wgc")
+                throw new InvalidOperationException(
+                    $"backend 'wgc' could not capture {r.X},{r.Y},{r.Width},{r.Height}: Windows.Graphics.Capture is unavailable or refused the rect (session 0, no compositor, no monitor under it). Use backend 'auto' or 'gdi'.");
+        }
+        return (GdiFrame(r), "gdi");
+    }
+
+    private SKBitmap? TryWgc(ScreenRegion r)
+    {
+        try
+        {
+            if (WgcFrameSource is not null) return WgcFrameSource(r);
+            var monitors = new WindowService().EnumerateMonitorsAsync().GetAwaiter().GetResult();
+            WgcCaptureBackend backend;
+            lock (_wgcGate) backend = _wgc ??= new WgcCaptureBackend();
+            return backend.TryCapture(r, monitors, out var bmp) ? bmp : null;
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "screenshot: wgc capture failed");
+            return null;
+        }
+    }
+
+    /// <summary>The classic screen copy, copied out of the locked GDI buffer into a bitmap the pipeline may write to.</summary>
+    private static SKBitmap GdiFrame(ScreenRegion r)
+    {
+        using var bmp = new Bitmap(r.Width, r.Height, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+            g.CopyFromScreen(r.X, r.Y, 0, 0, new Size(r.Width, r.Height));
+
+        var bd = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            var info = new SKImageInfo(bmp.Width, bmp.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
+            using var view = new SKBitmap();
+            if (!view.InstallPixels(info, bd.Scan0, bd.Stride))
+                throw new InvalidOperationException("SKBitmap.InstallPixels failed to wrap GDI bitmap memory.");
+            return view.Copy();
         }
         finally
         {
