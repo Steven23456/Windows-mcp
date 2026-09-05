@@ -46,7 +46,9 @@
 - **`get_state` is bounded by the element budget** (parity A-4). Same foreground root and
   three-level shape; when `--max-tree-elements` stops the walk the root carries `Truncated: true`
   and `ElementLimit` (absent otherwise, so the JSON is unchanged until a walk is cut short).
-  `ElementInfo` gained a trailing `Scroll` (populated by `snapshot`; `find_element` not yet).
+  `ElementInfo` gained a trailing `Scroll` (populated by `snapshot`; `find_element` not yet). The
+  tool's `[Description]` now states the depth and the budget and points at `snapshot` for a
+  whole-desktop read with centre coordinates and action hints (roadmap C4).
 - **`screenshot` returns the image as MCP image content** (parity A-7). The tool result is now a
   text block with one JSON metadata object (`{width, height, format, coordinateSpace:
   "virtual-desktop", region, path?}` — A-8/A-9/A-11 below add `displays`, `originalWidth`/

@@ -1,11 +1,11 @@
 ---
 name: windows
-description: "Playbook for driving Windows via the windows-mcp server's 64 tools — UI automation, system inspection, files, registry, services, processes, disk, network, security, and startup analysis. Use when the user says 'automate this Windows app', 'click/type into that window', 'take a screenshot' or 'OCR the screen', 'audit my startup items', 'why is my PC booting slowly', 'clean up orphaned processes', 'what's running', 'check Defender/firewall status', 'run a security audit', 'read/set a registry value', 'inspect a service or scheduled task', 'find/hash/inspect a file', 'check disk or storage health', 'baseline/check file integrity', 'what changed on my C: drive', 'watch a folder for changes', or any Windows desktop-automation or system-inspection task. Steers toward the windows-mcp tools over ad-hoc PowerShell, gives composed multi-tool workflows, and flags destructive tools. Does NOT add tools; it is guidance over the windows-mcp server. Not cross-platform; the server runs unelevated so admin-only operations may need elevation the skill cannot grant."
+description: "Playbook for driving Windows via the windows-mcp server's 65 tools — UI automation, system inspection, files, registry, services, processes, disk, network, security, and startup analysis. Use when the user says 'automate this Windows app', 'click/type into that window', 'take a screenshot' or 'OCR the screen', 'audit my startup items', 'why is my PC booting slowly', 'clean up orphaned processes', 'what's running', 'check Defender/firewall status', 'run a security audit', 'read/set a registry value', 'inspect a service or scheduled task', 'find/hash/inspect a file', 'check disk or storage health', 'baseline/check file integrity', 'what changed on my C: drive', 'watch a folder for changes', or any Windows desktop-automation or system-inspection task. Steers toward the windows-mcp tools over ad-hoc PowerShell, gives composed multi-tool workflows, and flags destructive tools. Does NOT add tools; it is guidance over the windows-mcp server. Not cross-platform; the server runs unelevated so admin-only operations may need elevation the skill cannot grant."
 ---
 
 # Windows
 
-A judgment layer over the `windows-mcp` server's 64 atomic tools for Windows desktop automation and system inspection — UI driving, screenshots/OCR, files, registry, services, processes, disk, network, and security/startup analysis. This skill adds no tools of its own: every action below is one of the server's existing MCP tools, composed into the right order with the right safety checks. Its job is to steer tool selection (MCP vs. raw PowerShell), sequence multi-step workflows correctly, and flag which tools are destructive enough to need confirmation first.
+A judgment layer over the `windows-mcp` server's 65 atomic tools for Windows desktop automation and system inspection — UI driving, screenshots/OCR, files, registry, services, processes, disk, network, and security/startup analysis. This skill adds no tools of its own: every action below is one of the server's existing MCP tools, composed into the right order with the right safety checks. Its job is to steer tool selection (MCP vs. raw PowerShell), sequence multi-step workflows correctly, and flag which tools are destructive enough to need confirmation first.
 
 **Skill root**: this skill ships inside the `windows-mcp` plugin (repo
 `Steven23456/Windows-mcp`, `skills/windows/`). Slash trigger: `/windows`.
@@ -29,9 +29,9 @@ Do NOT use this skill for:
 
 ## Tool selection: windows-mcp tools vs. raw PowerShell
 
-**Default to the MCP tool.** It is faster than a PowerShell cold-start, returns structured JSON instead of text to parse, and runs unelevated in one consistent place. Reach for raw PowerShell only when none of the 64 tools express what's needed.
+**Default to the MCP tool.** It is faster than a PowerShell cold-start, returns structured JSON instead of text to parse, and runs unelevated in one consistent place. Reach for raw PowerShell only when none of the 65 tools express what's needed.
 
-**Fall back to the `powershell` tool** only for one-off scripting the 64 tools don't cover. Multi-line scripts are fine — the tool passes the script as one unit. For anything that may run longer than a few minutes (installers, `DISM`, bulk hashes) pass `background: true` and poll with `job`.
+**Fall back to the `powershell` tool** only for one-off scripting the 65 tools don't cover. Multi-line scripts are fine — the tool passes the script as one unit. For anything that may run longer than a few minutes (installers, `DISM`, bulk hashes) pass `background: true` and poll with `job`.
 
 The MCP server **runs unelevated**. Admin-only operations — `registry_set` under `HKLM`, `service` start/stop, some `scheduled_task` actions — can return access-denied. Recognize that signature and surface it to the user instead of retrying blindly; the skill cannot grant elevation it doesn't have.
 
@@ -41,14 +41,14 @@ The MCP server **runs unelevated**. Admin-only operations — `registry_set` und
 | List/inspect/kill a process | `process`, `process_inspect` |
 | Read/search/hash a file | `file_read`, `file_search`, `file_hash`, `file_info` |
 | Read a registry value | `registry_get` |
-| Drive a GUI app | `get_state` → `click`/`type` → `assert_element` |
+| Drive a GUI app | `snapshot` → `interact_element`/`click`/`type` → `assert_element` |
 | One-off scripting no tool covers | `powershell` (`background: true` for long runs, then `job`) |
 
 If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mcp__plugin_windows-mcp_Windows-mcp__<tool>`.
 
-## The 64 tools, grouped by domain
+## The 65 tools, grouped by domain
 
-**UI automation / input (25)** — drive and read a foreground GUI application: `click`, `drag`, `hover`, `key`, `shortcut`, `type`, `scroll`, `focus`, `get_state`, `get_element`, `get_text`, `get_table`, `find_element`, `assert_element`, `interact_element`, `wait_for`, `switch_to_window`, `window`, `multi_monitor`, `screenshot`, `ocr`, `clipboard`, `file_dialog`, `notification`, `launch`
+**UI automation / input (26)** — drive and read the desktop and its GUI applications: `snapshot`, `click`, `drag`, `hover`, `key`, `shortcut`, `type`, `scroll`, `focus`, `get_state`, `get_element`, `get_text`, `get_table`, `find_element`, `assert_element`, `interact_element`, `wait_for`, `switch_to_window`, `window`, `multi_monitor`, `screenshot`, `ocr`, `clipboard`, `file_dialog`, `notification`, `launch`
 
 **Processes / shell (5)** — enumerate, inspect, start, or kill processes; run arbitrary scripts: `process`, `process_inspect`, `start_process`, `powershell` (with `background: true` for long-running jobs), `job`
 
@@ -70,7 +70,7 @@ If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mc
 
 **Misc (2)** — utility operations: `archive`, `audio`
 
-(25+5+7+7+2+2+2+4+5+3+2 = 64.) If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mcp__plugin_windows-mcp_Windows-mcp__<tool>`.
+(26+5+7+7+2+2+2+4+5+3+2 = 65.) If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mcp__plugin_windows-mcp_Windows-mcp__<tool>`.
 
 ## Workflow playbooks
 
@@ -106,16 +106,20 @@ Run all four and compose the results into one health summary with a per-area ver
 ### 4. UI-automation loop
 
 ```
-window(action:"list")                       (what is open, z-order, which is active)
-  → get_state                               (read the element tree)
-  → interact_element / click / type / key   (act)
+snapshot                                    (windows, cursor, every el_N with a centre + action)
+  → interact_element / click / type / key   (act, using the el_N ids or their centres)
   → assert_element / wait_for               (confirm the state changed)
+  → snapshot                                (re-read: ids are stale after acting)
   → repeat
 ```
 
-Read the tree before acting, act, then confirm the action landed before moving on — don't chain blind actions. **The target app must be foregrounded on an interactive desktop; these tools fail headless or when the app is in the background.** Prefer `find_element`/`get_element` to locate targets by name/role over hardcoded coordinates, which break when the window moves or resizes.
+**Start the loop with `snapshot`.** One call returns what used to take `window(action:"list")` + `get_state` + a `find_element` per control: the z-ordered window list, the active window, the cursor, and every interactive element as a row `el_N (x,y) type "name" [action: …]` — the centre coordinates are virtual-desktop pixels `click`/`drag`/`scroll` take unchanged, and the action tag (`click`/`fill`/`toggle`/`select`/`slide`/`scroll`) says which verb the control expects. Scrollable regions follow with their `[v: N%] [h: N%]` and a `[reached top]`/`[reached bottom]` tag. The default output is compact text; ask for `format:"json"` only when something must be parsed (`include_tree:true` adds the element tree there).
 
-Start with `window(action:"list")` rather than guessing what is open or launching a second copy of an app that is already running. It returns every user-visible top-level window in z-order (`ZOrder` 0 = frontmost) with `Title`, `Pid`/`ProcessName`, `State` (`Normal|Minimized|Maximized`), `Bounds` in virtual-desktop pixels, `IsActive`, `IsBrowser`, and `MonitorIndex` into `multi_monitor`'s list (`-1` = on no monitor, e.g. minimized). `window(action:"active")` returns just the foreground window, or `{"found":false}`. **Target by `Title`** — that string is what `switch_to_window`/`focus` and `window(action:"minimize"|"maximize"|"restore"|"close")` match (exact), and what `find_element(scope:"window", window:…)` matches exact-then-substring; the reported `Hwnd` is informational, no tool accepts it. Minimized windows are listed by default (`include_minimized:false` drops them); untitled ones are not (`include_hidden:true` adds them). Check `IsActive`/`State` before a `get_state` or a coordinate `click` — a backgrounded or minimized target is the usual cause of an empty tree.
+Pass those `el_N` ids straight to `interact_element`, `get_element` and `get_text`, or click the printed centre. **The ids are only valid until the next `snapshot`** — a new one evicts the previous one's ids (an id from `find_element` in between survives), so re-snapshot after acting rather than reusing a row from two turns ago. Read, act, confirm, re-read; don't chain blind actions.
+
+Narrow the view when the desktop is busy: `scope:"foreground"`, or `scope:"window"` with `window:<title>` (exact then substring). If the footer says the walk was truncated, narrow the scope or raise `max_elements` (the default budget is the server's `--max-tree-elements`, 500). **The target app must be on an interactive desktop, and a minimised window is listed but not walked.** Prefer element ids over hardcoded coordinates, which break when the window moves or resizes. `get_state` remains for the raw three-level JSON tree of the foreground window; `snapshot` is the cheaper read for driving the UI.
+
+`window(action:"list")` is still the right call when all you need is the window inventory — checking what is open before launching a second copy of an app that is already running, without paying for an element walk. It returns every user-visible top-level window in z-order (`ZOrder` 0 = frontmost) with `Title`, `Pid`/`ProcessName`, `State` (`Normal|Minimized|Maximized`), `Bounds` in virtual-desktop pixels, `IsActive`, `IsBrowser`, and `MonitorIndex` into `multi_monitor`'s list (`-1` = on no monitor, e.g. minimized). `window(action:"active")` returns just the foreground window, or `{"found":false}`. **Target by `Title`** — that string is what `switch_to_window`/`focus` and `window(action:"minimize"|"maximize"|"restore"|"close")` match (exact), and what `find_element(scope:"window", window:…)` matches exact-then-substring; the reported `Hwnd` is informational, no tool accepts it. Minimized windows are listed by default (`include_minimized:false` drops them); untitled ones are not (`include_hidden:true` adds them). Check `IsActive`/`State` before a `get_state` or a coordinate `click` — a backgrounded or minimized target is the usual cause of an empty tree.
 
 Prefer `interact_element` over a coordinate `click` for a named control: it acts through the UIA pattern (Invoke, SelectionItem, Toggle, Value) and falls back to a physical click at the element's centre, reports which one fired in `Method`, and errors — instead of silently doing nothing — when a pattern is unsupported. Keyboard chords go through `shortcut` (`ctrl+c`, `ctrl+shift+s`, `win+r`, `alt+f4`, a bare `win`); a single key through `key` (`a`, `enter`, `f5`). Coordinates for `click`/`drag`/`hover`/`scroll` are physical pixels on the virtual desktop with the origin at the primary monitor's top-left, so a monitor left of or above it has negative coordinates — take them from `multi_monitor` or an element's `Bounds`.
 

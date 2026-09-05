@@ -5,7 +5,7 @@ Guidance for Claude Code when working in this repository.
 ## Overview
 
 Windows-mcp is a **C# / .NET 10** Model Context Protocol (MCP) server for Windows desktop
-automation and system inspection. It exposes 64 tools over MCP — **stdio** by default, or
+automation and system inspection. It exposes 65 tools over MCP — **stdio** by default, or
 **Streamable HTTP/HTTPS** with `--transport http` for clients on other machines (README: "Run
 over HTTP/HTTPS") — covering UI automation, input, screen/OCR, windows, files, disk,
 processes/shell, services, scheduled tasks, registry, network, web, system, and a
@@ -55,6 +55,9 @@ bundle/WindowsMcp.exe --help
 
 # Shrink every capture process-wide (both transports; 0.1-1.0, multiplies each call's own scale):
 bundle/WindowsMcp.exe --screenshot-scale 0.5      # or $env:WINDOWSMCP_SCREENSHOT_SCALE = "0.5"
+
+# Bound every UI walk process-wide (snapshot and get_state; a call's own max_elements wins):
+bundle/WindowsMcp.exe --max-tree-elements 200     # or $env:WINDOWSMCP_MAX_TREE_ELEMENTS = "200"
 ```
 
 - **`[Trait("Category","UIAutomation")]` tests need an interactive desktop** with the target
@@ -149,7 +152,7 @@ behaviour, a one-line typo).
 4. Register any **new** service singleton in `Hosting/WindowsMcpHost.AddWindowsMcp` (tools
    auto-register; both transports pick it up from there). A process-level option from
    `ServerOptions` crosses into the tool layer as a registered public options record (see
-   `ScreenshotOptions`), never read from the environment inside a service.
+   `ScreenshotOptions`, `UiTreeOptions`), never read from the environment inside a service.
 5. `test-agent` again for the coverage close-out, then `docs-agent` for `docs/architecture/*`
    counts and `CHANGELOG.md` under `## [Unreleased]`.
 

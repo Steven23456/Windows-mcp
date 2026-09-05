@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 64 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 65 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
 
 ## Purpose
 
@@ -78,7 +78,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 ## Available Tools
 
-Windows-MCP exposes **64 MCP tools** across 19 tool classes:
+Windows-MCP exposes **65 MCP tools** across 19 tool classes:
 
 ### Input Tools (`InputTools` — 8 tools)
 | Tool | Purpose |
@@ -92,10 +92,11 @@ Windows-MCP exposes **64 MCP tools** across 19 tool classes:
 | `Scroll` | Scroll the mouse wheel (up/down/left/right) |
 | `Clipboard` | Get or set clipboard text |
 
-### UI Automation Tools (`UIAutomationTools` — 8 tools)
+### UI Automation Tools (`UIAutomationTools` — 9 tools)
 | Tool | Purpose |
 |------|---------|
-| `GetState` | Capture the UI element tree of the foreground window (three levels deep) |
+| `Snapshot` | One call for the whole desktop: window list, foreground window, cursor, every interactive element with its centre coordinates and an action hint, and the scrollable regions with their percentages; compact text by default, `format:"json"` for the DTOs (`include_tree` adds the element tree). `scope`: desktop / foreground / window; `max_elements` caps the walk |
+| `GetState` | Capture the UI element tree of the foreground window (three levels deep, bounded by the element budget) |
 | `FindElement` | Find elements whose name/value contains text (kind: any / interactive / text / scrollable) |
 | `GetElement` | Get properties of a specific UI element by id |
 | `InteractElement` | Act on a UI element by id: click / invoke / toggle / select / focus / type, through the UIA pattern or a physical fallback; returns which one fired |

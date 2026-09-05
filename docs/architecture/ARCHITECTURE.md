@@ -14,10 +14,10 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Tool Layer                                         │
-│                 (19 [McpServerToolType] classes, 64 tools)                   │
+│                 (19 [McpServerToolType] classes, 65 tools)                   │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐  │
 │  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │  │
-│  │  8 tools   │ │  8 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │  │
+│  │  8 tools   │ │  9 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │  │
 │  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘  │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐  │
 │  │ProcessTools│ │ScreenTools │ │  WebTools  │ │RegistryTls │ │NetworkTls  │  │
@@ -126,7 +126,7 @@ public sealed class InputTools
 | Tool Class | Tools | Services Injected |
 |------------|-------|------------------|
 | `InputTools` | 8 | `IInputService`, `IClipboardService` |
-| `UIAutomationTools` | 8 | `IUIAutomationService` |
+| `UIAutomationTools` | 9 | `IUIAutomationService` |
 | `FileTools` | 9 | `IFileSystemService`, `IInputService`, `IFileStreamService` |
 | `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService` |
 | `WindowTools` | 5 | `IWindowService` |
@@ -174,10 +174,11 @@ public interface IInputService
 
 ### 4. Service Implementation Layer
 
-All 36 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as the `ScreenshotOptions` record the screen tools read:
+All 36 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as two options records — `ScreenshotOptions` (read by the screen tools) and `UiTreeOptions` (injected into `UIAutomationService`):
 
 ```csharp
 services.AddSingleton(new ScreenshotOptions(options.ScreenshotScale));  // --screenshot-scale
+services.AddSingleton(new UiTreeOptions(options.MaxTreeElements));      // --max-tree-elements
 services.AddSingleton<IInputService, InputService>();
 services.AddSingleton<IScreenshotService, ScreenshotService>();
 // ... (36 registrations)
@@ -289,6 +290,8 @@ Windows-mcp.slnx
 │   │   ├── Services/                      (36 service implementations + helpers)
 │   │   │   ├── InputService.cs
 │   │   │   ├── UIAutomationService.cs
+│   │   │   ├── UiTree/                    (snapshot core: UiNode, UiClassifier,
+│   │   │   │                               ElementBudget, UiTraverser, SnapshotRenderer)
 │   │   │   └── ...
 │   │   └── Startup/                       (startup-report renderer + approval decoding)
 │   └── WindowsMcp.Abstractions/           ← Contracts assembly
