@@ -208,7 +208,7 @@ for the `bundle/` folder.
 dotnet build                                       # incremental
 dotnet test --filter "Category=Unit"               # fast loop (mocked, seconds)
 dotnet test --filter "Category=Integration"        # exercises real Windows APIs
-dotnet test --filter "Category=UIAutomation"       # launches Notepad fixture
+dotnet test --filter "Category=UIAutomation"       # needs an interactive desktop (Notepad fixture, real input injection)
 dotnet test                                        # full suite
 ```
 

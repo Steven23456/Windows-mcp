@@ -8,7 +8,7 @@ place those notes link back to for the cross-item decisions. ·
 closed). Phase 1 has since shipped — A-7, A-9, A-8, A-11 and A-13 — phase 2's A-1 with it, and
 phase 3's A-2 (with A-4 and A-3 inside it), which is the one new tool: **65 tools**; where the
 code deviates from the plan below, the item carries a **Shipped as** line and its design note has
-the reasoning. Phases 4 and 5 have not started. ·
+the reasoning. Phase 4's A-6 has since shipped too; phase 5 has not started. ·
 **Baseline facts** used below were read from the code on that commit; the `file:line` anchors
 will drift, the member names will not.
 

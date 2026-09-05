@@ -140,7 +140,8 @@ behaviour, a one-line typo).
   for the `SYSLIB0057` precedent), or add to `NoWarn` only for a genuinely global case.
 - DTOs are `record`s; services are `sealed`; tool methods are `async Task<string>` returning
   JSON (and/or text) — or `async Task<CallToolResult>` when the result carries non-text content,
-  as `screenshot` does (a text metadata block plus an image block) — and carry a
+  as `screenshot` does (a text metadata block plus an image block; three blocks with
+  `annotate:true`, the element list in between) — and carry a
   `[McpServerTool, Description(...)]` attribute.
 
 ## Adding a tool

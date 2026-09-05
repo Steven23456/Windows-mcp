@@ -3,15 +3,16 @@
 **Baseline:** 2026-09-04
 **Upstream:** [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) `main` = **v0.8.5**
 (released 2026-08-01; Python ≥ 3.14, FastMCP 3, 20 tools).
-**Ours:** `main` @ `8cb40b6` + the phase-2/3 branches, 65 tools, plugin `0.7.3`, `CHANGELOG.md
-[Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1 and
-phase 3's A-2/A-3/A-4. SDK `ModelContextProtocol` 2.2.0.
+**Ours:** `main` @ `8cb40b6` + the phase-2/3/4 branches, 65 tools, plugin `0.7.3`, `CHANGELOG.md
+[Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1,
+phase 3's A-2/A-3/A-4 and phase 4's A-6. SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
 This is the working list of everything upstream can do that this server cannot (plus nine
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 — **all nine are
 now fixed**; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
-phase 3 shipped A-2 with A-3 and A-4 inside it, and the rest of section A is the next work).
+phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and the rest of section A is
+the next work).
 Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
 implementation sketch, files to touch, tests, and a "done when" bar.
