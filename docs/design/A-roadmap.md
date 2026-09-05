@@ -8,7 +8,7 @@ place those notes link back to for the cross-item decisions. ·
 closed). Phase 1 has since shipped — A-7, A-9, A-8, A-11 and A-13 — phase 2's A-1 with it, and
 phase 3's A-2 (with A-4 and A-3 inside it), which is the one new tool: **65 tools**; where the
 code deviates from the plan below, the item carries a **Shipped as** line and its design note has
-the reasoning. Phases 4 and 5 have not started. ·
+the reasoning. Phase 4's A-6 has since shipped too; phase 5 has not started. ·
 **Baseline facts** used below were read from the code on that commit; the `file:line` anchors
 will drift, the member names will not.
 
@@ -296,6 +296,10 @@ without a desktop:
   with `output:"file"` writes the annotated bytes; element ordering identical between text
   and drawing (assert on a fake node list rendered to a bitmap, sample pixel colours).
 - **Done when.** Label N sits on element N from the same call.
+- **Shipped as** ([note](A-6-annotated-screenshot.md)): annotations travel in `CaptureOptions` and are
+  drawn after the downscale on a copy; the walk is always `scope=desktop` (a capture can show
+  several windows); the cursor is A-11's, not redrawn; `LabelPlacement.Clamp` shipped as
+  `Annotator.ChipRect`; grid divisions capped at 64.
 
 ### Phase 5 — long tail
 

@@ -2,6 +2,20 @@
 
 ### Added
 
+- **`screenshot(annotate:true)` — boxes, label chips and a captioned grid on the capture** (parity
+  A-6). The same call walks the desktop (one `snapshot`), keeps the interactive elements inside
+  the captured rect, draws a 2 px coloured box with a label chip around each — the labels are the
+  snapshot's `el_N` ids — and returns **three** content blocks: metadata, the snapshot's element
+  rows filtered to what the picture contains, then the image, so label N in the picture is row N
+  of the text from the same call and the ids go straight to `click`/`interact_element`.
+  `grid_columns`/`grid_rows` (0–64, usable without annotate) overlay guide lines captioned with
+  virtual-desktop coordinates. Annotations are drawn after the downscale, on a copy of the capture
+  (the unscaled path's bitmap is a read-only GDI view), and the cursor is A-11's. Metadata gains
+  `annotated`, `annotations` (boxes that landed) and `grid`. Because the walk is a snapshot walk
+  it evicts the previous snapshot's ids. New pure `Services/Annotator.cs` (palette, `ToImage`,
+  `ChipRect`, `UseDarkText`, `Draw`); `CaptureOptions` gained `Annotations`/`Grid`,
+  `ScreenshotResult` gained `AnnotationsDrawn`; `ScreenTools` now takes `IUIAutomationService`.
+  Design note: `docs/design/A-6-annotated-screenshot.md`.
 - **`snapshot` — one call for the whole desktop** (parity A-2, with A-3 and A-4 inside; 64 → 65
   tools). Every open window (z-order, topmost first), the foreground one, the cursor, and every
   interactive element with its centre coordinates and an action hint

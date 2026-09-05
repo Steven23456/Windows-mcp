@@ -6,12 +6,15 @@ using Xunit;
 
 namespace WindowsMcp.Tests.Services;
 
-public class InputServiceTests
+// Tests that INJECT input (click, type, move the pointer) carry Category=UIAutomation: they act on
+// whatever window has focus, so a headless or background run must never execute them. The
+// read-only ones (a cursor read, argument validation) stay Integration/Unit.
+public class InputServiceTests
 {
     // Recategorized to Integration: SendInput / SetCursorPos fail under the test runner (UIPI
     // elevation mismatch). The service logic is correct; a real desktop session is required.
     [Fact]
-    [Trait("Category", "Integration")]
+    [Trait("Category", "UIAutomation")]
     public async Task ClickAsync_returns_result_with_correct_coordinates_and_button()
     {
         var service = new InputService();
@@ -20,7 +23,7 @@ public class InputServiceTests
     }
 
     [Fact]
-    [Trait("Category", "Integration")]
+    [Trait("Category", "UIAutomation")]
     public async Task TypeAsync_reports_character_count_for_unicode_input()
     {
         var service = new InputService();
@@ -31,7 +34,7 @@ public class InputServiceTests
     // D-3: the cursor must land exactly where asked on EVERY monitor, including ones left of /
     // above the primary (negative coordinates). On a one-monitor box this still checks the primary.
     [Fact]
-    [Trait("Category", "Integration")]
+    [Trait("Category", "UIAutomation")]
     public async Task HoverAsync_lands_exactly_on_every_monitor()
     {
         var monitors = await new WindowService().EnumerateMonitorsAsync();
@@ -53,7 +56,7 @@ public class InputServiceTests
     // D-3: SetCursorPos silently clamps an off-screen point to the nearest edge; the service must
     // notice and fail loudly rather than click somewhere else.
     [Fact]
-    [Trait("Category", "Integration")]
+    [Trait("Category", "UIAutomation")]
     public async Task HoverAsync_rejects_a_point_outside_the_virtual_screen()
     {
         var service = new InputService();
@@ -113,7 +116,7 @@ public class InputServiceTests
     /// <c>GetCursorPositionAsync</c> reports — the property the screenshot metadata rests on.
     /// </summary>
     [Fact]
-    [Trait("Category", "Integration")]
+    [Trait("Category", "UIAutomation")]
     public async Task GetCursorPositionAsync_reports_where_the_cursor_was_just_moved()
     {
         var monitors = await new WindowService().EnumerateMonitorsAsync();

@@ -150,7 +150,7 @@ Windows-MCP exposes **65 MCP tools** across 19 tool classes:
 ### Screen Tools (`ScreenTools` — 2 tools)
 | Tool | Purpose |
 |------|---------|
-| `Screenshot` | Capture the primary display, other monitors (`display`) or a region; returns MCP image content plus metadata (captured rect, monitor inventory, cursor, coordinate scale) |
+| `Screenshot` | Capture the primary display, other monitors (`display`) or a region; returns MCP image content plus metadata (captured rect, monitor inventory, cursor, coordinate scale). `annotate:true` also walks the desktop and returns labelled boxes on the picture with the matching `el_N` element list as a second text block; `grid_columns`/`grid_rows` overlay guide lines captioned with virtual-desktop coordinates |
 | `Ocr` | Extract text from a screen region via OCR (same `region`/`display` selection, always full resolution) |
 
 ### Process Tools (`ProcessTools` — 6 tools)

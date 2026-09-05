@@ -228,11 +228,11 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 ### `ScreenTools` — 2 tools
 `src/WindowsMcp/Tools/ScreenTools.cs`
 
-**Injected:** `IScreenshotService`, `IOcrService`, `IWindowService` (monitor inventory), `IInputService` (cursor position), plus the `ScreenshotOptions` record (`--screenshot-scale`)
+**Injected:** `IScreenshotService`, `IOcrService`, `IWindowService` (monitor inventory), `IInputService` (cursor position), `IUIAutomationService` (the element walk `annotate` draws and lists), plus the `ScreenshotOptions` record (`--screenshot-scale`)
 
 | Method | Description |
 |--------|-------------|
-| `Screenshot` | Capture the primary display, selected monitors (`display="all"`/`"0,2"`) or an `x,y,w,h` region (virtual-desktop pixels, validated against the virtual screen). Returns a `CallToolResult`: a JSON metadata text block (encoded and original size, captured `region`, `displays`, `cursor`, `cursorDrawn?`, `coordinateScale?`/`note?`) plus an `ImageContentBlock` (`output="inline"`, default; `"base64"` is an alias). `output="file"` saves to `%TEMP%\WindowsMcp` and returns the path in the metadata instead. Downscaled to fit `max_width`×`max_height` (1920×1080), with `scale`/`quality` on top; jpeg inline, png to file |
+| `Screenshot` | Capture the primary display, selected monitors (`display="all"`/`"0,2"`) or an `x,y,w,h` region (virtual-desktop pixels, validated against the virtual screen). Returns a `CallToolResult`: a JSON metadata text block (encoded and original size, captured `region`, `displays`, `cursor`, `cursorDrawn?`, `coordinateScale?`/`note?`) plus an `ImageContentBlock` (`output="inline"`, default; `"base64"` is an alias). `output="file"` saves to `%TEMP%\WindowsMcp` and returns the path in the metadata instead. Downscaled to fit `max_width`×`max_height` (1920×1080), with `scale`/`quality` on top; jpeg inline, png to file. `annotate:true` adds one `SnapshotAsync(desktop)` before the capture, draws a 2 px coloured box and a label chip (the snapshot's `el_N` ids) around every interactive element overlapping the captured rect, inserts the rendered element list as a second text block, and adds `annotated`/`annotations` to the metadata; `grid_columns`/`grid_rows` (0–64, no walk needed) overlay guide lines captioned with virtual-desktop coordinates and add `grid` |
 | `Ocr` | Extract text from the primary display, a `display` selection, or a region — same parser, always captured at full resolution |
 
 ---
@@ -368,7 +368,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | Interface | Key Methods |
 |-----------|-------------|
 | `IInputService` | `ClickAsync`, `DragAsync`, `HoverAsync`, `TypeAsync`, `PressKeyAsync`, `PressShortcutAsync`, `ScrollAsync`, `GetCursorPositionAsync` → `CursorPosition` |
-| `IScreenshotService` | `CaptureAsync(region?, options?)` → `ScreenshotResult` (`CaptureOptions`: format, max size, scale, quality, cursor) |
+| `IScreenshotService` | `CaptureAsync(region?, options?)` → `ScreenshotResult` (`CaptureOptions`: format, max size, scale, quality, cursor, annotations, grid) |
 | `IOcrService` | `ExtractTextAsync(region?)` → text |
 | `IClipboardService` | `GetTextAsync`, `SetTextAsync` |
 | `IAudioService` | `GetAsync` → `AudioState`, `SetVolumeAsync`, `SetMutedAsync` |
@@ -413,7 +413,7 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 21 f
 | File | Key Types |
 |------|-----------|
 | `InputDtos.cs` | `ClickResult`, `DragResult`, `TypeResult`, `CursorPosition`, `MouseButton` (enum) |
-| `ScreenDtos.cs` | `ScreenRegion`, `CaptureOptions`, `ScreenshotResult`, `ScreenshotOptions`, `ImageFormat` (enum) |
+| `ScreenDtos.cs` | `ScreenRegion`, `CaptureOptions` (trailing `Annotations`/`Grid`), `AnnotationBox`, `GridSpec`, `ScreenshotResult` (trailing `AnnotationsDrawn`), `ScreenshotOptions`, `ImageFormat` (enum) |
 | `UIAutomationDtos.cs` | `ElementInfo` (trailing `Scroll`), `Bounds`, `ScrollInfo`, `ElementTree` (trailing `Truncated`/`ElementLimit`, omitted from JSON when default), `FindElementResult`, `FindKind` (enum), `FindScope` (enum), `TableData`, `InteractResult`, `AssertResult`, `SnapshotScope` (enum), `SnapshotRequest`, `UiTreeOptions`, `SnapshotElement`, `SnapshotScrollable`, `SnapshotResult` |
 | `WindowDtos.cs` | `WindowAction`, `MonitorInfo`, `WindowInfo`, `WindowProbe`, `WindowState` (enum, serialised by name) |
 | `ProcessDtos.cs` | `ProcessDto`, `ProcessDetailDto`, `ModuleInfo`, `ProcessLineageDto`, `ProcessGroupDto` |
@@ -439,7 +439,8 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 21 f
 // Models/ScreenDtos.cs
 public record ScreenRegion(int X, int Y, int Width, int Height);
 public record ScreenshotResult(byte[] Bytes, int Width, int Height, ImageFormat Format,
-    int OriginalWidth, int OriginalHeight, double CoordinateScale, string? CursorDrawn = null);
+    int OriginalWidth, int OriginalHeight, double CoordinateScale, string? CursorDrawn = null,
+    int AnnotationsDrawn = 0);
 
 // IAudioService.cs (small result types may sit next to their interface)
 public record AudioState(int Level, bool Muted);
@@ -516,10 +517,11 @@ capacity is exceeded and counts trimmed chars — the unit-testable core of job 
 
 GDI capture + **SkiaSharp** downscale and encode:
 - `CaptureAsync(region?, options?)` — `Graphics.CopyFromScreen` of the given `ScreenRegion` (null = the primary display). With `CaptureOptions.IncludeCursor` the pointer is composited onto the full-resolution GDI bitmap first (real cursor icon through `DrawIconEx`, else `CursorOverlay.DrawRing`); the buffer is then wrapped zero-copy into an `SKBitmap`, resized to `ScaleMath.Fit(...)` with a Mitchell cubic filter when that changes the size, and encoded as PNG or JPEG at `Quality`. Resize and encode both run before `UnlockBits` — the `SKBitmap` points into the GDI buffer
-- Returns `ScreenshotResult(Bytes, Width, Height, Format, OriginalWidth, OriginalHeight, CoordinateScale, CursorDrawn)`; the `screenshot` tool turns that into an image content block plus a metadata text block (`output="file"` writes to `%TEMP%\WindowsMcp` and returns the path instead)
+- `EncodeAnnotated(bmp, format, quality, boxes, captured, coordinateScale, grid)` — the encode step both paths route through. With no boxes and no grid it is byte-identical to `Encode`; otherwise it copies the bitmap first (the unscaled path's `SKBitmap` is a zero-copy view of a read-only GDI lock), hands the copy to `Annotator.Draw`, and reports how many boxes landed. Drawing happens **after** the downscale, so a 2 px box and an 11 px chip stay legible at the output size and map through the same `CoordinateScale` the metadata reports
+- Returns `ScreenshotResult(Bytes, Width, Height, Format, OriginalWidth, OriginalHeight, CoordinateScale, CursorDrawn, AnnotationsDrawn)`; the `screenshot` tool turns that into an image content block plus a metadata text block (`output="file"` writes to `%TEMP%\WindowsMcp` and returns the path instead)
 - Which rect to capture is the tool's decision (`RegionMath` over `IWindowService.EnumerateMonitorsAsync`); the service captures whatever rect it is handed
 
-### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `UiText`, `WindowFilter`)
+### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `Annotator`, `UiText`, `WindowFilter`)
 
 `internal static` classes in `Services/` with no Win32, no screen and no UIA dependency, so every
 rule is unit-tested headless:
@@ -527,6 +529,7 @@ rule is unit-tested headless:
 - `RegionMath` — `ParseRegion("x,y,w,h")`, `ParseDisplays("all" | "0,2")`, `Union`, `VirtualScreen`, `Primary`, and `Validate`, which **rejects** a region outside the virtual screen rather than clipping it. Shared by `screenshot` and `ocr` so the two cannot drift
 - `CursorMath.MonitorIndexOf(x, y, monitors)` — the monitor a virtual-desktop point sits on, `-1` for none
 - `CursorOverlay` — `RingPoint` (cursor rebased onto the captured rect, null when outside) and `DrawRing` (white 3 px ring at radius 12, black 2 px at radius 8)
+- `Annotator` — A-6's drawing core (SkiaSharp only, no screen): a twelve-colour opaque `Palette` indexed by list position via `ColorFor`, so a colour always means the same label even when an off-image box is skipped; `ToImage` maps virtual-desktop `Bounds` to image pixels (subtract the captured origin, divide by the coordinate scale, round half **away from zero**, widen a sub-pixel box to 1 px, clip — null when nothing is in the picture); `ChipRect` places the label chip just above the box's top-left, inside the box when there is no room, never off the image; `UseDarkText` picks black or white by luminance; `Draw` paints the grid first, then each box as a 2 px stroke plus a filled chip, and returns how many were drawn. Grid lines are translucent dark grey at every interior division, captioned with the **virtual-desktop** coordinate, not the image pixel
 - `UiText.Sanitize` — strips Private Use Area code points, replaces lone UTF-16 surrogates with U+FFFD, drops C0/C1 controls except tab/LF/CR, trims; returns the same instance when nothing needed changing
 - `WindowFilter` — A-1's judgement over the `WindowProbe` records `WindowService` gathers, so every rule is provable on hand-written probes with no desktop attached. `Keep` drops a window that is not visible, a `WS_EX_TOOLWINDOW` without `WS_EX_APPWINDOW`, a DWM-cloaked one (UWP ghosts, other virtual desktops), a zero-area one, the shell chrome classes (`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`, `Progman`, `WorkerW`, `IME`, `MSCTFIME UI`), an untitled one unless `includeHidden` (the title is judged **after** `UiText.Sanitize`) and a minimized one unless `includeMinimized`; `StateOf` reads `Minimized` before `Maximized` (a minimized window keeps `WS_MAXIMIZE`); `IsBrowser` matches `chrome, msedge, firefox, brave, opera, vivaldi` with or without `.exe`; `Build` projects the survivors onto `WindowInfo`, renumbering `ZOrder` from 0 and taking `MonitorIndex` from the window's centre via `CursorMath.MonitorIndexOf`; `ActiveOf` picks the entry flagged `IsActive`, so `active` reports the list's real `ZOrder`
 

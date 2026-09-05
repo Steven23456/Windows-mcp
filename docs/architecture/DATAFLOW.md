@@ -328,6 +328,10 @@ PID reuse mid-walk). A snapshot row with no CIM date cannot be validated and is 
      │               │ monitors, region │                         │
      │               │ or display; then │                         │
      │               │ read the cursor  │                         │
+     │               │ annotate: one    │                         │
+     │               │ SnapshotAsync    │                         │
+     │               │ (desktop), keep  │                         │
+     │               │ what overlaps r  │                         │
      │               │ CaptureAsync(r,  │                         │
      │               │  CaptureOptions) │                         │
      │               ├─────────────────►│                         │
@@ -336,10 +340,12 @@ PID reuse mid-walk). A snapshot row with no CIM date cannot be validated and is 
      │               │                  │◄────────────────────────┤
      │               │                  │ cursor: icon or ring    │
      │               │                  │ ScaleMath.Fit → resize  │
+     │               │                  │ Annotator.Draw on a copy│
      │               │                  │ SKBitmap.Encode(jpg/png)│
      │               │                  ├────────────────────────►│
      │               │ ScreenshotResult │◄────────────────────────┤
      │ metadata text │◄─────────────────┤                         │
+     │ + element list│                  │                         │
      │ + image block │                  │                         │
      │◄──────────────┤                  │                         │
      │               │                  │                         │
@@ -353,6 +359,17 @@ PID reuse mid-walk). A snapshot row with no CIM date cannot be validated and is 
      │               │ recognised text  │◄────────────────────────┤
      │◄──────────────┤◄─────────────────┤                         │
 ```
+
+**Annotate path (A-6).** The snapshot walk runs **after** the rect is resolved and the cursor read
+and **before** the capture, so label N in the picture is row N of the text block from the same
+call. Only elements and scrollables whose bounds overlap the captured rect are kept (half-open —
+one touching the far edge is out), in snapshot order; the kept elements become
+`AnnotationBox(ElementId, Bounds)` in `CaptureOptions.Annotations`. `ScreenshotService` draws them
+after the downscale on a copy of the bitmap and returns `AnnotationsDrawn` (boxes that landed, not
+boxes requested). The tool then emits metadata (`annotated`, `annotations`, and `grid` when a grid
+was asked for), `SnapshotRenderer.Render` of the filtered snapshot, and the image — three blocks
+inline, two with `output="file"`. A grid alone (`grid_columns`/`grid_rows` without `annotate`)
+needs no walk. Because the walk is a snapshot walk, it evicts the previous `snapshot`'s `el_N` ids.
 
 ---
 
@@ -572,7 +589,8 @@ All tool methods return `Task<string>` — except `screenshot`, which returns
 
 `screenshot`'s `CallToolResult` is a `TextContentBlock` of metadata JSON followed by an
 `ImageContentBlock`; with `output="file"` the image block is omitted and the metadata carries
-the path.
+the path. With `annotate:true` a second `TextContentBlock` — the rendered element list — sits
+between the two, so an inline annotated capture carries three blocks and a file one carries two.
 
 ### JSON Response Examples
 

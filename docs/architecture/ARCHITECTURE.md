@@ -131,7 +131,7 @@ public sealed class InputTools
 | `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService` |
 | `WindowTools` | 5 | `IWindowService` |
 | `ProcessTools` | 6 | `IProcessService`, `IServiceControlService`, `ITaskSchedulerService`, `IEventLogService` |
-| `ScreenTools` | 2 | `IScreenshotService`, `IOcrService`, `IWindowService`, `IInputService` (+ the `ScreenshotOptions` record) |
+| `ScreenTools` | 2 | `IScreenshotService`, `IOcrService`, `IWindowService`, `IInputService`, `IUIAutomationService` (+ the `ScreenshotOptions` record) |
 | `WebTools` | 2 | `IWebService` |
 | `RegistryTools` | 2 | `IRegistryService` |
 | `NetworkTools` | 2 | `INetworkService`, `IFirewallService` |

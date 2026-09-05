@@ -488,6 +488,77 @@ public class HttpTransportTests
             "the metadata list in the description tells the model the cursor field is there");
     }
 
+    // ---- A-6 -------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A-6 (R5) through the real transport with all four collaborators swapped at the
+    /// <c>BuildHttpApp</c> seam. <c>annotate</c> makes <c>screenshot</c> depend on
+    /// <see cref="IUIAutomationService"/> as well, and this is the only place that new DI edge is
+    /// resolved for real; the three content blocks (metadata, element list, picture) also have to
+    /// survive the JSON-RPC round trip in that order.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_annotate_returns_the_element_list_beside_the_image_over_http()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var screenshotService = new Mock<IScreenshotService>();
+        screenshotService
+            .Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ScreenshotResult(png, 1920, 1080, ImageFormat.Png, 1920, 1080, 1.0, null, 1));
+
+        var windowService = new Mock<IWindowService>();
+        windowService
+            .Setup(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new MonitorInfo(0, "Monitor0", 0, 0, 1920, 1080, true)]);
+
+        var inputService = new Mock<IInputService>();
+        inputService
+            .Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CursorPosition(612, 388));
+
+        var uia = new Mock<IUIAutomationService>();
+        uia.Setup(s => s.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FixedSnapshot);   // el_12 at (600,380,24,16) — inside the primary rect
+
+        await using var server = await Harness.StartAsync(configureServices: services =>
+        {
+            services.AddSingleton(screenshotService.Object);
+            services.AddSingleton(windowService.Object);
+            services.AddSingleton(inputService.Object);
+            services.AddSingleton(uia.Object);
+        });
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var screenshot = ScreenshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?>
+        {
+            ["format"] = "png",
+            ["annotate"] = true,
+        });
+
+        result.IsError.Should().NotBe(true);
+        result.Content.Should().HaveCount(3, "metadata, the element list, then the annotated picture");
+        result.Content[2].Should().BeOfType<ImageContentBlock>();
+
+        using var meta = JsonDocument.Parse(result.Content[0].Should().BeOfType<TextContentBlock>().Subject.Text);
+        meta.RootElement.GetProperty("annotated").GetBoolean().Should().BeTrue();
+        meta.RootElement.GetProperty("annotations").GetInt32().Should()
+            .Be(1, "the count the capture service reported reaches the client");
+
+        result.Content[1].Should().BeOfType<TextContentBlock>().Subject.Text.Should()
+            .Contain("el_12", "label N in the picture is row N of this block, from the same call");
+
+        uia.Verify(s => s.SnapshotAsync(
+            It.Is<SnapshotRequest>(r => r.Scope == SnapshotScope.Desktop), It.IsAny<CancellationToken>()),
+            Times.Once, "one desktop walk per annotated screenshot, through the real host");
+        screenshotService.Verify(s => s.CaptureAsync(
+            It.IsAny<ScreenRegion?>(),
+            It.Is<CaptureOptions>(o => o.Annotations != null && o.Annotations.Count == 1
+                                       && o.Annotations[0].Label == "el_12"),
+            It.IsAny<CancellationToken>()),
+            Times.Once, "the boxes are built from the snapshot and handed to the capture");
+    }
+
     // ---- A-2 -------------------------------------------------------------------------------
 
     /// <summary>

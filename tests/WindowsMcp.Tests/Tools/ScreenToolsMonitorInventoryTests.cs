@@ -58,8 +58,13 @@ public class ScreenToolsMonitorInventoryTests
         return mock;
     }
 
+    /// <summary>
+    /// A-6: the element source is mocked too — these tests never pass <c>annotate</c>, so a real
+    /// desktop walk would be cost with no assertion behind it.
+    /// </summary>
     private static ScreenTools MakeTools(IScreenshotService shot) =>
-        new(shot, new Mock<IOcrService>().Object, new WindowService(), InputMock().Object);
+        new(shot, new Mock<IOcrService>().Object, new WindowService(), InputMock().Object,
+            new Mock<IUIAutomationService>().Object);
 
     private static JsonElement Meta(CallToolResult result)
     {
