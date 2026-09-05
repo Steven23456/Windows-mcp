@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
+using WindowsMcp.Services.UiTree;
 
 namespace WindowsMcp.Services;
 
@@ -210,23 +211,14 @@ public sealed class UIAutomationService : IUIAutomationService
     private const int MaxMatches = 20;
 
     /// <summary>
-    /// D-6: upstream's <c>INTERACTIVE_CONTROL_TYPE_NAMES</c> (<c>tree/config.py</c>) plus
-    /// <see cref="ControlType.Document"/>. Upstream's <c>TextBox</c> is omitted — there is no such
-    /// UIA control type; it is <see cref="ControlType.Edit"/>, already here. <c>Document</c> is in
-    /// because <c>find_element</c> has one flat kind and a text area you type into is something you
-    /// interact with (modern Notepad's editor is a Document, not an Edit). Upstream's
-    /// LegacyIAccessible role fallback is deliberately not ported: it costs a second cross-process
-    /// read per element, and belongs with A-2's classifier where a cache makes it affordable.
-    /// One named set so A-2 can take it over without the two drifting apart.
+    /// D-6's interactive set, now owned by <see cref="UiClassifier"/> (A-2) so the find path and
+    /// the snapshot classify from one list. Same instance, so the two cannot drift.
     /// </summary>
-    internal static readonly ControlType[] InteractiveControlTypes =
-    [
-        ControlType.Button, ControlType.ListItem, ControlType.MenuItem, ControlType.Edit,
-        ControlType.CheckBox, ControlType.RadioButton, ControlType.ComboBox, ControlType.Hyperlink,
-        ControlType.SplitButton, ControlType.TabItem, ControlType.TreeItem, ControlType.DataItem,
-        ControlType.HeaderItem, ControlType.Spinner, ControlType.Slider, ControlType.ScrollBar,
-        ControlType.Document,
-    ];
+    internal static ControlType[] InteractiveControlTypes => UiClassifier.InteractiveControlTypes;
+
+    // TODO(A-2): stub added by test-agent, replace with the implementation
+    public Task<SnapshotResult> SnapshotAsync(SnapshotRequest request, CancellationToken ct = default)
+        => throw new NotImplementedException("A-2: cycle B");
 
     public Task<FindElementResult> FindElementAsync(string text, FindKind kind = FindKind.Any,
         FindScope scope = FindScope.Foreground, string? windowTitle = null,
