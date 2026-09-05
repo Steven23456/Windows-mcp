@@ -33,7 +33,6 @@ public interface IUIAutomationService : IDisposable
         string? windowTitle = null, bool includeOffscreen = false, CancellationToken ct = default);
     Task FocusAsync(string elementId, CancellationToken ct = default);
 
-    // TODO(A-2): stub added by test-agent, replace with the implementation
     /// <summary>
     /// A-2: the whole labelled desktop in one call — window list (A-1), cursor (A-11), every
     /// interactive element with its centre and action hint, the scrollable regions (A-3), and the

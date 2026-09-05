@@ -26,7 +26,10 @@ public class UIAutomationServiceTests : IClassFixture<NotepadFixture>
         _np.BringToForeground();
     }
 
-    private static UIAutomationService NewService() => new(new InputService());
+    // A-2 (R2): the service now takes the window inventory too. Real WindowService here — these
+    // tests already need the live desktop, and a mock would hide a wiring break in the snapshot's
+    // header and root list.
+    private static UIAutomationService NewService() => new(new InputService(), new WindowService());
 
     [Fact]
     public async Task GetStateAsync_returns_tree_with_notepad_root()
@@ -454,7 +457,7 @@ public class UIAutomationServiceUnitTests
     [Fact]
     public async Task GetStateAsync_throws_after_dispose()
     {
-        var svc = new UIAutomationService(new Mock<IInputService>().Object);
+        var svc = new UIAutomationService(new Mock<IInputService>().Object, new Mock<IWindowService>().Object);
         svc.Dispose();
         Func<Task> act = () => svc.GetStateAsync();
         await act.Should().ThrowAsync<ObjectDisposedException>();
@@ -468,7 +471,7 @@ public class UIAutomationServiceUnitTests
     [InlineData("hovering", null, "*Unknown assertion state 'hovering'*")]
     public async Task AssertElementAsync_rejects_bad_arguments(string state, string? expected, string message)
     {
-        using var svc = new UIAutomationService(new Mock<IInputService>().Object);
+        using var svc = new UIAutomationService(new Mock<IInputService>().Object, new Mock<IWindowService>().Object);
         Func<Task> act = () => svc.AssertElementAsync("el_0", state, expected);
         await act.Should().ThrowAsync<ArgumentException>().WithMessage(message);
     }
@@ -476,7 +479,7 @@ public class UIAutomationServiceUnitTests
     [Fact]
     public async Task AssertElementAsync_exists_fails_for_an_unknown_id()
     {
-        using var svc = new UIAutomationService(new Mock<IInputService>().Object);
+        using var svc = new UIAutomationService(new Mock<IInputService>().Object, new Mock<IWindowService>().Object);
 
         var result = await svc.AssertElementAsync("el_404", "exists");
 
@@ -487,7 +490,7 @@ public class UIAutomationServiceUnitTests
     [Fact]
     public async Task AssertElementAsync_other_states_throw_for_an_unknown_id()
     {
-        using var svc = new UIAutomationService(new Mock<IInputService>().Object);
+        using var svc = new UIAutomationService(new Mock<IInputService>().Object, new Mock<IWindowService>().Object);
         Func<Task> act = () => svc.AssertElementAsync("el_404", "enabled");
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
@@ -588,7 +591,7 @@ public class UIAutomationServiceUnitTests
     [Fact]
     public async Task FindElementAsync_rejects_window_scope_without_a_title()
     {
-        using var svc = new UIAutomationService(new Mock<IInputService>().Object);
+        using var svc = new UIAutomationService(new Mock<IInputService>().Object, new Mock<IWindowService>().Object);
         Func<Task> act = () => svc.FindElementAsync("x", FindKind.Any, FindScope.Window);
         await act.Should().ThrowAsync<ArgumentException>().WithMessage("*requires windowTitle*");
     }
@@ -596,7 +599,7 @@ public class UIAutomationServiceUnitTests
     [Fact]
     public async Task FindElementAsync_rejects_a_window_title_with_another_scope()
     {
-        using var svc = new UIAutomationService(new Mock<IInputService>().Object);
+        using var svc = new UIAutomationService(new Mock<IInputService>().Object, new Mock<IWindowService>().Object);
         Func<Task> act = () => svc.FindElementAsync("x", FindKind.Any, FindScope.Desktop, "Notepad");
         await act.Should().ThrowAsync<ArgumentException>().WithMessage("*only used with scope=window*");
     }

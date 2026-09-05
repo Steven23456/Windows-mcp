@@ -65,9 +65,9 @@ function names are the stable anchor.
 | D-8 | `powershell` ships the CLIXML progress stream to the model on every call | P2 | S | — | ☑ |
 | D-9 | `job output` still returns raw CLIXML on stderr | P3 | S | D-8 | ☑ |
 | A-1 | Whole-desktop window inventory | P1 | M | — | ☑ |
-| A-2 | Desktop-wide labeled interactive-element snapshot | P1 | L | A-1 | ☐ |
-| A-3 | Scrollable regions with scroll percentages | P2 | S | A-2 | ☐ |
-| A-4 | Element budget, truncation note, UIA caching | P1 | M | A-2 | ☐ |
+| A-2 | Desktop-wide labeled interactive-element snapshot | P1 | L | A-1 | ☑ |
+| A-3 | Scrollable regions with scroll percentages | P2 | S | A-2 | ☑ |
+| A-4 | Element budget, truncation note, UIA caching | P1 | M | A-2 | ☑ |
 | A-5 | Browser DOM mode (Chromium; Firefox IA2) | P2 | L | A-2 | ☐ |
 | A-6 | Annotated screenshot (boxes, labels, grid, cursor) | P2 | M | A-2, A-7 | ☐ |
 | A-7 | Return screenshot as MCP image content | P1 | S | — | ☑ |
@@ -489,7 +489,7 @@ interactively), `tests/.../Tools/WindowToolsTests.cs`.
 above in z-order, and `action="active"` returns the foreground one.
 
 ### A-2 — Desktop-wide labeled interactive-element snapshot  `P1 · L`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-2-desktop-snapshot.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream behaviour.** `Snapshot` (`tools/snapshot.py`, helpers in `tools/_snapshot_helpers.py`)
 walks **every** window (active first, then the others) and returns three text blocks rendered by
@@ -515,11 +515,10 @@ come from `_ACTION_MAP` (edit→fill, checkbox→toggle, combobox→select, slid
 document→scroll, else click). Rendering: `_render_tree()`, `_node_meta_str()`,
 `_render_semantic_node()`.
 
-**Ours today.** `get_state` (`Services/UIAutomationService.cs:74`) builds a JSON `ElementTree`
-of the **foreground window only, three levels deep**, with no interactive/informative
-classification, no action hints, no metadata beyond value/checked/selected, and no window list.
-`ElementInfo` has `Bounds` but no centre. Element IDs (`el_N`) accumulate in `_elementCache`
-forever.
+**Ours (before A-2).** `get_state` built a JSON `ElementTree` of the foreground window only,
+three levels deep, with no classification, no action hints, no centres and no window list, and
+`el_N` ids accumulated forever. Now `snapshot` (see the design note); `get_state` is kept,
+budgeted.
 
 **Implementation sketch.**
 - New `IUIAutomationService.SnapshotAsync(SnapshotOptions)` → `SnapshotResult`:
@@ -555,13 +554,15 @@ action hints and metadata, in the compact text form, bounded by the element cap,
 coordinates work unchanged with `click`/`type`/`scroll`.
 
 ### A-3 — Scrollable regions with scroll percentages  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-2-desktop-snapshot.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `scrollable_elements_to_string()` lists each ScrollPattern element with
 `[v:37%]`/`[h:0%]` from `vertical_scroll_percent`/`horizontal_scroll_percent` and the
 `vertical_scrollable`/`horizontal_scrollable` flags (`tree/views.py` `_scroll_meta_str`).
 
-**Ours.** `find_element(kind=scrollable)` returns `ElementInfo` with no scroll data.
+**Ours (before A-3).** `find_element(kind=scrollable)` returned `ElementInfo` with no scroll data.
+Now the snapshot's scrollable list carries `ScrollInfo`; `find_element` still does not populate
+the new `ElementInfo.Scroll` (follow-up in the design note).
 
 **Sketch.** `ScrollableElement` record with `VerticalPercent`, `HorizontalPercent`,
 `VerticallyScrollable`, `HorizontallyScrollable` from `Patterns.Scroll`; include in A-2 output and
@@ -570,7 +571,7 @@ in `find_element(kind=scrollable)`; `scroll(element_id)` (B-3) uses its centre.
 **Done when.** Scrollable list shows percentages and "Reached top/bottom" can be inferred.
 
 ### A-4 — Element budget, truncation note, UIA caching  `P1 · M`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-2-desktop-snapshot.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `tree/budget.py` `TreeElementBudget` — default 500 elements, env
 `WINDOWS_MCP_MAX_TREE_ELEMENTS`; traversal stops early, `TreeState.truncated=true`, and every

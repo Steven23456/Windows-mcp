@@ -3,6 +3,7 @@ using System.Text.Json;
 using ModelContextProtocol.Server;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
+using WindowsMcp.Services.UiTree;
 
 namespace WindowsMcp.Tools;
 
@@ -48,7 +49,45 @@ public sealed class UIAutomationTools
         return (parsed, string.IsNullOrWhiteSpace(window) ? null : window);
     }
 
-    [McpServerTool, Description("Return the full UI element tree of the foreground application.")]
+    private static SnapshotScope ParseSnapshotScope(string scope) => scope.ToLowerInvariant() switch
+    {
+        "desktop" => SnapshotScope.Desktop,
+        "foreground" => SnapshotScope.Foreground,
+        "window" => SnapshotScope.Window,
+        _ => throw new ArgumentException($"Unknown scope '{scope}'; expected desktop|foreground|window")
+    };
+
+    [McpServerTool, Description("One call for the whole desktop (parity A-2): every open window, the foreground one, the cursor, and every interactive element with its centre coordinates and an action hint (click/fill/toggle/select/slide/scroll), plus scrollable regions with their scroll percentages. Default format is compact text; format:'json' returns the same as JSON (with the element tree when include_tree is set). Element ids (el_N) are valid until the next snapshot and work with click (use the centre coordinates), interact_element and get_element. scope: desktop (default, every non-minimised window, topmost first) | foreground | window (with 'window' = a title, exact then substring). max_elements caps the walk (0 = the server default, --max-tree-elements, 500); when the cap is hit the result says it was truncated and how to narrow the view. use_dom is reserved for browser DOM mode (A-5) and is not implemented yet.")]
+    public async Task<string> Snapshot(
+        [Description("desktop | foreground | window")] string scope = "desktop",
+        [Description("Window title, exact or substring, case-insensitive; only with scope=window")] string? window = null,
+        [Description("Also return the element tree (json only)")] bool include_tree = false,
+        [Description("Element budget for this call; 0 = the server default (--max-tree-elements)")] int max_elements = 0,
+        [Description("text (default, compact) | json")] string format = "text",
+        [Description("Reserved for browser DOM mode (A-5); not implemented yet")] bool use_dom = false)
+    {
+        var parsed = ParseSnapshotScope(scope);
+        if (parsed == SnapshotScope.Window && string.IsNullOrWhiteSpace(window))
+            throw new ArgumentException("scope=window requires window: the title of the window to snapshot.", nameof(window));
+        if (parsed != SnapshotScope.Window && !string.IsNullOrWhiteSpace(window))
+            throw new ArgumentException("window is only used with scope=window.", nameof(window));
+        if (max_elements < 0)
+            throw new ArgumentException($"max_elements must be 0 (the server default) or positive, got {max_elements}");
+        bool json = format.ToLowerInvariant() switch
+        {
+            "text" => false,
+            "json" => true,
+            _ => throw new ArgumentException($"Unknown format '{format}'; expected text|json"),
+        };
+        if (use_dom)
+            throw new InvalidOperationException("use_dom is reserved for browser DOM mode (parity A-5) and is not implemented yet.");
+
+        var request = new SnapshotRequest(parsed, string.IsNullOrWhiteSpace(window) ? null : window, include_tree, max_elements);
+        var result = await _uia.SnapshotAsync(request);
+        return json ? JsonSerializer.Serialize(result) : SnapshotRenderer.Render(result);
+    }
+
+    [McpServerTool, Description("Return the UI element tree of the foreground application (three levels deep, bounded by --max-tree-elements; the root reports Truncated/ElementLimit when the budget stopped the walk). For the whole desktop with centre coordinates and action hints, use snapshot.")]
     public async Task<string> GetState()
     {
         var tree = await _uia.GetStateAsync();

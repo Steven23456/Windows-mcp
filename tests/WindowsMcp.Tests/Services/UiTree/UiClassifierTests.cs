@@ -298,4 +298,43 @@ public class UiClassifierTests
     [InlineData("  ", null)]
     public void ShortcutOf_is_null_when_the_element_advertises_no_shortcut(string? accelerator, string? access)
         => UiClassifier.ShortcutOf(Node(acceleratorKey: accelerator, accessKey: access)).Should().BeNull();
+
+    // ---- UIAutomationService.Project (pure projection of one node) ---------------------------
+
+    [Fact]
+    public void Project_never_carries_a_password_fields_value_even_into_json()
+    {
+        var node = NodeFixtures.Node("Edit") with { IsPassword = true, Value = "hunter2", Bounds = new Bounds(0, 0, 10, 10) };
+
+        var (element, _) = WindowsMcp.Services.UIAutomationService.Project(node, "el_1");
+
+        element.Should().NotBeNull();
+        element!.IsPassword.Should().BeTrue();
+        element.Value.Should().BeNull("the renderer's [password] tag is one code path; format:json is another, and neither may leak");
+    }
+
+    [Fact]
+    public void Project_puts_an_interactive_scrollable_node_in_both_lists_with_one_id()
+    {
+        var node = NodeFixtures.Node("Document") with
+        {
+            Bounds = new Bounds(0, 0, 100, 50),
+            Scroll = new ScrollInfo(37, 0, true, false),
+        };
+
+        var (element, region) = WindowsMcp.Services.UIAutomationService.Project(node, "el_7");
+
+        element!.ElementId.Should().Be("el_7");
+        region!.ElementId.Should().Be("el_7");
+        element.CenterX.Should().Be(50);
+        region.Scroll.VerticalPercent.Should().Be(37);
+    }
+
+    [Fact]
+    public void Project_returns_nothing_for_a_node_without_bounds()
+    {
+        var node = NodeFixtures.Node("Button") with { Bounds = null };
+
+        WindowsMcp.Services.UIAutomationService.Project(node, "el_1").Should().Be(((SnapshotElement?)null, (SnapshotScrollable?)null));
+    }
 }

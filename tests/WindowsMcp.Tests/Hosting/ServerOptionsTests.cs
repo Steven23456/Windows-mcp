@@ -76,8 +76,9 @@ public class ServerOptionsTests
     public void Usage_documents_every_option()
     {
         foreach (var opt in new[] { "--transport", "--port", "--bind", "--cert-thumbprint", "--api-key", "--help",
-                                    "--screenshot-scale",
-                                    "WINDOWSMCP_API_KEY", "WINDOWSMCP_TRANSPORT", "WINDOWSMCP_SCREENSHOT_SCALE", "/mcp" })
+                                    "--screenshot-scale", "--max-tree-elements",
+                                    "WINDOWSMCP_API_KEY", "WINDOWSMCP_TRANSPORT", "WINDOWSMCP_SCREENSHOT_SCALE",
+                                    "WINDOWSMCP_MAX_TREE_ELEMENTS", "/mcp" })
             ServerOptions.Usage.Should().Contain(opt);
     }
 
@@ -354,6 +355,121 @@ public class ServerOptionsTests
     public void Repeated_screenshot_scale_is_an_error()
     {
         var act = () => Parse("--screenshot-scale", "0.5", "--screenshot-scale", "0.6");
+
+        act.Should().Throw<OptionsException>().WithMessage("*more than once*");
+    }
+
+    // ---- A-2 / A-4 (R1) — --max-tree-elements / WINDOWSMCP_MAX_TREE_ELEMENTS -----------------
+    // The element budget every UI walk spends (snapshot AND get_state). Like --screenshot-scale it
+    // configures a tool rather than a listener, so it is parsed BEFORE the stdio early return and
+    // applies to both transports; unlike it, the value is a count, so the accepted set is the
+    // whole numbers from 1 up.
+
+    [Fact]
+    public void Max_tree_elements_defaults_to_500_under_both_transports()
+    {
+        Parse().MaxTreeElements.Should().Be(500);
+        Parse("--transport", "http").MaxTreeElements.Should().Be(500);
+        ServerOptions.Stdio.MaxTreeElements.Should().Be(500, "the no-argument configuration carries the default too");
+    }
+
+    [Fact]
+    public void Max_tree_elements_applies_to_stdio_too_it_is_not_an_http_only_option()
+    {
+        var fromFlag = Parse("--max-tree-elements", "200");
+
+        fromFlag.Transport.Should().Be(TransportKind.Stdio);
+        fromFlag.MaxTreeElements.Should().Be(200);
+
+        ServerOptions.Parse([], Env(("WINDOWSMCP_MAX_TREE_ELEMENTS", "200")))
+            .MaxTreeElements.Should().Be(200);
+    }
+
+    [Fact]
+    public void Max_tree_elements_comes_from_the_environment_under_http_as_well()
+    {
+        var o = ServerOptions.Parse(["--transport", "http"], Env(("WINDOWSMCP_MAX_TREE_ELEMENTS", "200")));
+
+        o.Transport.Should().Be(TransportKind.Http);
+        o.MaxTreeElements.Should().Be(200);
+    }
+
+    [Fact]
+    public void Max_tree_elements_on_the_command_line_beats_the_environment()
+    {
+        var env = Env(("WINDOWSMCP_MAX_TREE_ELEMENTS", "200"));
+
+        ServerOptions.Parse(["--max-tree-elements", "50"], env).MaxTreeElements.Should().Be(50);
+        ServerOptions.Parse(["--max-tree-elements=50"], env).MaxTreeElements.Should().Be(50);
+    }
+
+    [Fact]
+    public void Blank_max_tree_elements_in_the_environment_counts_as_unset()
+    {
+        ServerOptions.Parse([], Env(("WINDOWSMCP_MAX_TREE_ELEMENTS", "   "))).MaxTreeElements.Should().Be(500);
+        ServerOptions.Parse([], Env(("WINDOWSMCP_MAX_TREE_ELEMENTS", ""))).MaxTreeElements.Should().Be(500);
+    }
+
+    [Theory]
+    [InlineData("1", 1)]            // the floor: one element is a legal (useless) budget, zero is not
+    [InlineData("2", 2)]
+    [InlineData("500", 500)]
+    [InlineData("5000", 5000)]
+    [InlineData("2147483647", int.MaxValue)]
+    public void Valid_max_tree_elements_are_accepted(string raw, int expected)
+    {
+        Parse("--max-tree-elements", raw).MaxTreeElements.Should().Be(expected);
+        ServerOptions.Parse([], Env(("WINDOWSMCP_MAX_TREE_ELEMENTS", raw))).MaxTreeElements.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("0")]            // a budget of 0 walks nothing and reports every desktop truncated
+    [InlineData("-1")]
+    [InlineData("abc")]
+    [InlineData("1.5")]          // a count, not a scale
+    [InlineData("1e3")]          // no exponent forms; the value is user-facing
+    [InlineData("1,000")]
+    [InlineData("0x10")]
+    [InlineData("2147483648")]   // one past int.MaxValue: overflow is a refusal, not a wrap
+    [InlineData("+5")]           // digits only: a signed form is a typo, not a budget
+    [InlineData(" 5")]           // and no surrounding whitespace, so '--max-tree-elements " 5"' is not silently accepted
+    [InlineData("5 ")]
+    public void Invalid_max_tree_elements_are_rejected_from_the_command_line(string raw)
+    {
+        var act = () => Parse("--max-tree-elements", raw);
+
+        var message = act.Should().Throw<OptionsException>().Which.Message;
+        message.Should().Contain("max-tree-elements", "the message names the option");
+        message.Should().MatchRegex("(at least 1|from 1|>= ?1|minimum of 1|1 or more|greater than 0)",
+            "the message names the minimum, so the operator knows what to pass instead");
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("abc")]
+    [InlineData("1.5")]
+    public void Invalid_max_tree_elements_are_rejected_from_the_environment_too(string raw)
+    {
+        var act = () => ServerOptions.Parse([], Env(("WINDOWSMCP_MAX_TREE_ELEMENTS", raw)));
+
+        act.Should().Throw<OptionsException>().Which.Message.Should().Contain("max-tree-elements");
+    }
+
+    [Fact]
+    public void Max_tree_elements_flag_without_a_value_is_an_error()
+    {
+        var missing = () => Parse("--max-tree-elements");
+        var empty = () => Parse("--max-tree-elements=");
+
+        missing.Should().Throw<OptionsException>().WithMessage("*requires a value*");
+        empty.Should().Throw<OptionsException>().WithMessage("*requires a value*");
+    }
+
+    [Fact]
+    public void Repeated_max_tree_elements_is_an_error()
+    {
+        var act = () => Parse("--max-tree-elements", "100", "--max-tree-elements", "200");
 
         act.Should().Throw<OptionsException>().WithMessage("*more than once*");
     }
