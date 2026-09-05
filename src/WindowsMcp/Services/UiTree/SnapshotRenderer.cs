@@ -46,8 +46,35 @@ internal static class SnapshotRenderer
         foreach (var s in r.Scrollable)
             lines.Add(ScrollableLine(s));
 
+        // A-5: only when the caller asked for the DOM (Pages is null otherwise). Ids and scroll
+        // targets first (what the model acts on), then the page content, then the footers.
+        if (r.Pages is { } pages)
+        {
+            lines.Add($"Pages ({pages.Length}):");
+            foreach (var page in pages)
+            {
+                if (page.Note is { } note)
+                {
+                    lines.Add($"  window \"{Esc(page.Window)}\": {note}");
+                    continue;
+                }
+                var header = $"  {page.DocumentId} \"{Esc(page.Title ?? "")}\"" + (page.Url is { } url ? $" {url}" : "");
+                if (page.Scroll is { } scroll) header += $"  [v: {Percent(scroll.VerticalPercent)}%]";
+                lines.Add(header);
+                foreach (var text in page.Text)
+                    lines.Add($"    {Esc(text)}");
+            }
+        }
+
         if (r.Truncated)
             lines.Add(ElementBudget.NoteFor(r.ElementLimit));
+
+        // A-14: only when the server was started with --profile-snapshot (Stages is null otherwise).
+        if (r.Stages is { } stages)
+        {
+            var parts = string.Join(", ", stages.Select(s => $"{s.Stage} {s.Ms} ms"));
+            lines.Add(parts.Length == 0 ? $"Timing: (total {r.CaptureMs} ms)" : $"Timing: {parts} (total {r.CaptureMs} ms)");
+        }
 
         return string.Join("\n", lines);
     }

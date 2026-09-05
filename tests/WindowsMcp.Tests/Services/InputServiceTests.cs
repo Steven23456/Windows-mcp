@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using FluentAssertions;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Services;
+using WindowsMcp.Tests.Fixtures;
 using Xunit;
 
 namespace WindowsMcp.Tests.Services;
@@ -9,6 +10,9 @@ namespace WindowsMcp.Tests.Services;
 // Tests that INJECT input (click, type, move the pointer) carry Category=UIAutomation: they act on
 // whatever window has focus, so a headless or background run must never execute them. The
 // read-only ones (a cursor read, argument validation) stay Integration/Unit.
+// The class moves the real pointer and asserts where it landed, so it is serialised against every
+// other pointer/pixel class (see PointerAndPixelCollection).
+[Collection(PointerAndPixelCollection.Name)]
 public class InputServiceTests
 {
     // Recategorized to Integration: SendInput / SetCursorPos fail under the test runner (UIPI

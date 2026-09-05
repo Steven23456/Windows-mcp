@@ -12,7 +12,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 - **Interact with UI Elements**: Click, type, scroll, drag, and manipulate interface elements programmatically
 - **Control Windows**: Enumerate the open windows and the foreground one, then focus, minimize, maximize, restore, or close them
 - **Execute System Commands**: Run PowerShell commands for advanced system operations
-- **Capture Screens**: Take screenshots the model sees inline (any monitor or region, auto-downscaled, cursor drawn) and perform OCR on screen regions
+- **Capture Screens**: Take screenshots the model sees inline (any monitor or region, auto-downscaled, cursor drawn, GDI or Windows.Graphics.Capture frames) and perform OCR on screen regions
 - **Manage System Resources**: Control processes, registry, services, scheduled tasks, and event logs
 
 ## Key Features
@@ -20,7 +20,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 | Feature | Description |
 |---------|-------------|
 | **Native Windows Integration** | Direct access to Windows UI Automation API via `FlaUI.UIA3` |
-| **Dependency Injection** | All 36 services are singleton-scoped, registered in `Hosting/WindowsMcpHost.AddWindowsMcp` via `Microsoft.Extensions.Hosting` |
+| **Dependency Injection** | All 38 services are singleton-scoped, registered in `Hosting/WindowsMcpHost.AddWindowsMcp` via `Microsoft.Extensions.Hosting` |
 | **Source-Generated Tool Discovery** | `[McpServerTool]` attributes are discovered at compile time by the MCP SDK source generator |
 | **Interface-Driven Architecture** | Every service backed by an `IXxxService` interface in a separate Abstractions assembly |
 | **DPI-Aware** | Per-Monitor DPI Awareness V2 enabled at startup for correct multi-monitor coordinate handling |
@@ -58,11 +58,11 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Abstraction Layer  (WindowsMcp.Abstractions)      ││
-│  │        36 IXxxService interfaces + Model DTOs               ││
+│  │        38 IXxxService interfaces + Model DTOs               ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Implementation Layer  (WindowsMcp.Services)       ││
-│  │        36 XxxService singletons registered via DI           ││
+│  │        38 XxxService singletons registered via DI           ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
                                 │
@@ -95,7 +95,7 @@ Windows-MCP exposes **65 MCP tools** across 19 tool classes:
 ### UI Automation Tools (`UIAutomationTools` — 9 tools)
 | Tool | Purpose |
 |------|---------|
-| `Snapshot` | One call for the whole desktop: window list, foreground window, cursor, every interactive element with its centre coordinates and an action hint, and the scrollable regions with their percentages; compact text by default, `format:"json"` for the DTOs (`include_tree` adds the element tree). `scope`: desktop / foreground / window; `max_elements` caps the walk |
+| `Snapshot` | One call for the whole desktop: window list, foreground window, cursor, every interactive element with its centre coordinates and an action hint, and the scrollable regions with their percentages; compact text by default, `format:"json"` for the DTOs (`include_tree` adds the element tree). `scope`: desktop / foreground / window; `max_elements` caps the walk; `use_dom:true` walks every Chromium browser window from its web page (the `RootWebArea` document) instead of the window and adds a `Pages` section with each page's id, title, URL, scroll percent and visible text |
 | `GetState` | Capture the UI element tree of the foreground window (three levels deep, bounded by the element budget) |
 | `FindElement` | Find elements whose name/value contains text (kind: any / interactive / text / scrollable) |
 | `GetElement` | Get properties of a specific UI element by id |
@@ -108,7 +108,7 @@ Windows-MCP exposes **65 MCP tools** across 19 tool classes:
 ### Window Tools (`WindowTools` — 5 tools)
 | Tool | Purpose |
 |------|---------|
-| `Window` | `list` the user-visible top-level windows in z-order or `active` the foreground one; minimize, maximize, restore, or close a window by exact title |
+| `Window` | `list` the user-visible top-level windows in z-order (each with its `DesktopId`) or `active` the foreground one; `desktops` the virtual-desktop inventory and the current one; minimize, maximize, restore, or close a window by exact title |
 | `SwitchToWindow` | Bring a window to the foreground by exact title |
 | `Focus` | Alias of `SwitchToWindow` |
 | `Launch` | Launch an application by name or path (ShellExecute); returns the PID |
@@ -150,7 +150,7 @@ Windows-MCP exposes **65 MCP tools** across 19 tool classes:
 ### Screen Tools (`ScreenTools` — 2 tools)
 | Tool | Purpose |
 |------|---------|
-| `Screenshot` | Capture the primary display, other monitors (`display`) or a region; returns MCP image content plus metadata (captured rect, monitor inventory, cursor, coordinate scale). `annotate:true` also walks the desktop and returns labelled boxes on the picture with the matching `el_N` element list as a second text block; `grid_columns`/`grid_rows` overlay guide lines captioned with virtual-desktop coordinates |
+| `Screenshot` | Capture the primary display, other monitors (`display`) or a region; returns MCP image content plus metadata (captured rect, monitor inventory, cursor, coordinate scale, the `backend` that produced the frame, `flash` when the post-capture glow was shown, `stages` when profiling is on). `backend`: `auto` (default) / `gdi` / `wgc` — `wgc` reads the compositor's own frames, which show the GPU-accelerated and DRM surfaces `gdi` returns black. `annotate:true` also walks the desktop and returns labelled boxes on the picture with the matching `el_N` element list as a second text block; `grid_columns`/`grid_rows` overlay guide lines captioned with virtual-desktop coordinates |
 | `Ocr` | Extract text from a screen region via OCR (same `region`/`display` selection, always full resolution) |
 
 ### Process Tools (`ProcessTools` — 6 tools)

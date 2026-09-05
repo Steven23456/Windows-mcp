@@ -40,7 +40,13 @@ internal sealed record ServerOptions(
     // A-9: process-wide multiplier on every screenshot's own 'scale' argument, [0.1, 1.0].
     double ScreenshotScale = 1.0,
     // A-4: the element budget snapshot/get_state use when a call names none; at least 1.
-    int MaxTreeElements = 500)
+    int MaxTreeElements = 500,
+    // A-14: the post-capture glow (on by default under both transports; one switch).
+    bool Flash = true,
+    // A-14: per-stage timings on snapshot/screenshot results, logged to stderr.
+    bool ProfileSnapshot = false,
+    // A-10: which capture backend every screenshot uses unless the call names its own: auto|gdi|wgc.
+    string ScreenshotBackend = "auto")
 {
     public const int DefaultPort = 8765;
     public const string DefaultBind = "0.0.0.0";
@@ -59,7 +65,7 @@ internal sealed record ServerOptions(
 
     private static readonly string[] HttpOnlyOptions = ["port", "bind", "cert-thumbprint", "api-key"];
     private static readonly HashSet<string> KnownOptions =
-        new(["transport", "screenshot-scale", "max-tree-elements", .. HttpOnlyOptions], StringComparer.OrdinalIgnoreCase);
+        new(["transport", "screenshot-scale", "max-tree-elements", "flash", "profile-snapshot", "screenshot-backend", .. HttpOnlyOptions], StringComparer.OrdinalIgnoreCase);
 
     public static string Usage => $"""
         Usage: WindowsMcp.exe [--transport stdio|http] [options]
@@ -89,10 +95,22 @@ internal sealed record ServerOptions(
           --max-tree-elements <n>   Element budget for snapshot and get_state when a call does not
                                     name its own (default 500, at least 1); the walk stops there and
                                     says so.
+          --flash <on|off>          Draw an orange glow around the captured area for ~3.5 s after
+                                    every screenshot, so a person at the machine sees what the
+                                    agent looked at (default on; a no-op without a desktop).
+          --profile-snapshot <on|off>
+                                    Report per-stage timings on snapshot and screenshot results
+                                    and log them to stderr (default off).
+          --screenshot-backend <auto|gdi|wgc>
+                                    How screenshots read the screen when a call does not say: wgc
+                                    (Windows.Graphics.Capture) sees GPU-accelerated and DRM surfaces
+                                    that gdi returns black for; auto (default) prefers wgc and falls
+                                    back to gdi.
 
         Environment fallbacks (a flag on the command line wins): {EnvPrefix}TRANSPORT,
         {EnvPrefix}PORT, {EnvPrefix}BIND, {EnvPrefix}CERT_THUMBPRINT, {EnvPrefix}API_KEY,
-        {EnvPrefix}SCREENSHOT_SCALE, {EnvPrefix}MAX_TREE_ELEMENTS.
+        {EnvPrefix}SCREENSHOT_SCALE, {EnvPrefix}MAX_TREE_ELEMENTS, {EnvPrefix}FLASH,
+        {EnvPrefix}PROFILE_SNAPSHOT, {EnvPrefix}SCREENSHOT_BACKEND.
         Prefer {EnvPrefix}API_KEY over --api-key: it stays out of process command lines.
 
         Examples:
@@ -174,12 +192,26 @@ internal sealed record ServerOptions(
                 throw new OptionsException($"Invalid --max-tree-elements '{treeRaw}'; expected a whole number of at least 1.");
         }
 
+        var flash = ParseSwitch(Get("flash", "FLASH"), "flash", defaultValue: true);
+        var profile = ParseSwitch(Get("profile-snapshot", "PROFILE_SNAPSHOT"), "profile-snapshot", defaultValue: false);
+        var screenshotBackend = "auto";
+        if (Get("screenshot-backend", "SCREENSHOT_BACKEND") is { } backendRaw)
+        {
+            screenshotBackend = backendRaw.ToLowerInvariant();   // stored canonical; no Trim, like every option
+            if (screenshotBackend is not ("auto" or "gdi" or "wgc"))
+                throw new OptionsException($"Invalid --screenshot-backend '{backendRaw}'; expected auto|gdi|wgc.");
+        }
+
         if (transport == TransportKind.Stdio)
         {
             var stray = HttpOnlyOptions.FirstOrDefault(cli.ContainsKey);
             if (stray is not null)
                 throw new OptionsException($"'--{stray}' only applies with '--transport http'.");
-            return Stdio with { ScreenshotScale = screenshotScale, MaxTreeElements = maxTreeElements };
+            return Stdio with
+            {
+                ScreenshotScale = screenshotScale, MaxTreeElements = maxTreeElements,
+                Flash = flash, ProfileSnapshot = profile, ScreenshotBackend = screenshotBackend,
+            };
         }
 
         var port = DefaultPort;
@@ -216,7 +248,21 @@ internal sealed record ServerOptions(
         }
 
         return new ServerOptions(TransportKind.Http, bind, port, thumbprint, apiKey,
-            ScreenshotScale: screenshotScale, MaxTreeElements: maxTreeElements);
+            ScreenshotScale: screenshotScale, MaxTreeElements: maxTreeElements,
+            Flash: flash, ProfileSnapshot: profile, ScreenshotBackend: screenshotBackend);
+    }
+
+    /// <summary>on|off|true|false|1|0, case-insensitive; null (unset) keeps the default.</summary>
+    /// <exception cref="OptionsException">Anything else.</exception>
+    private static bool ParseSwitch(string? raw, string option, bool defaultValue)
+    {
+        if (raw is null) return defaultValue;
+        return raw.ToLowerInvariant() switch   // no Trim: a padded value is a wrong value, like every other option
+        {
+            "on" or "true" or "1" => true,
+            "off" or "false" or "0" => false,
+            _ => throw new OptionsException($"Invalid --{option} '{raw}'; expected on|off (also true|false, 1|0)."),
+        };
     }
 
     /// <summary>

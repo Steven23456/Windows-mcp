@@ -19,7 +19,7 @@ public enum WindowState { Normal, Minimized, Maximized }
 /// (roadmap C1); <paramref name="ZOrder"/> is the position in the filtered list, 0 = topmost;
 /// <paramref name="MonitorIndex"/> indexes <c>multi_monitor</c>'s inventory and is -1 when the
 /// window's centre is on no monitor (a minimized window parked off-screen);
-/// <paramref name="DesktopId"/> is reserved for A-12 and is null until then.
+/// <paramref name="DesktopId"/> is the virtual desktop the window is on (lower-case GUID, A-12), null when Windows does not say.
 /// </summary>
 public record WindowInfo(
     string Title,
@@ -51,3 +51,12 @@ public record WindowProbe(
     bool IsMaximized,
     int Pid,
     string ProcessName);
+
+/// <summary>
+/// A-12 (phase 1): one Windows virtual desktop. <paramref name="Id"/> is the desktop GUID in
+/// lower-case dashed form with no braces (the same format <see cref="WindowInfo.DesktopId"/>
+/// carries); <paramref name="Index"/> is the zero-based position in the registry's
+/// <c>VirtualDesktopIDs</c> list; <paramref name="Name"/> is the user's name for the desktop,
+/// or <c>Desktop {Index+1}</c> when none is stored.
+/// </summary>
+public record VirtualDesktopInfo(string Id, string Name, int Index, bool IsCurrent);

@@ -58,6 +58,12 @@ bundle/WindowsMcp.exe --screenshot-scale 0.5      # or $env:WINDOWSMCP_SCREENSHO
 
 # Bound every UI walk process-wide (snapshot and get_state; a call's own max_elements wins):
 bundle/WindowsMcp.exe --max-tree-elements 200     # or $env:WINDOWSMCP_MAX_TREE_ELEMENTS = "200"
+
+# The post-capture glow and per-stage timings (both transports; on|off):
+bundle/WindowsMcp.exe --flash off --profile-snapshot on   # or $env:WINDOWSMCP_FLASH / WINDOWSMCP_PROFILE_SNAPSHOT
+
+# Which backend reads the screen when a screenshot call says auto (both transports):
+bundle/WindowsMcp.exe --screenshot-backend wgc    # auto (default: wgc, else gdi) | gdi | wgc; or $env:WINDOWSMCP_SCREENSHOT_BACKEND
 ```
 
 - **`[Trait("Category","UIAutomation")]` tests need an interactive desktop** with the target
@@ -176,8 +182,9 @@ behaviour, a one-line typo).
 - **COM vtable gaps:** when declaring COM interfaces, use `_VtblGap1_N()` to skip unused slots,
   or declare only the leading methods you call (an `InterfaceIsIUnknown` interface binds declared
   methods from vtable slot 3). Never stub later methods with guessed signatures — silent stack
-  corruption. See `ShortcutResolver.cs` (IShellLink/IPersistFile) — currently the only COM
-  interface declarations in `src/`.
+  corruption. See `ShortcutResolver.cs` (IShellLink/IPersistFile), `VirtualDesktopService.cs`
+  (IVirtualDesktopManager) and `WgcCaptureBackend.cs` (IGraphicsCaptureItemInterop,
+  IDirect3DDxgiInterfaceAccess) — the only COM interface declarations in `src/`.
 - **Native interop** for the startup report: `AuthenticodeInspector` (WinVerifyTrust, catalog-
   aware), `LspEnumerator` (`WSCEnumProtocols`), `ShortcutResolver` (IShellLink). Catalog-aware
   trust matters — most Windows components are catalog-signed, not embedded-signed.

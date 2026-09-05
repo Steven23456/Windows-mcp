@@ -57,14 +57,14 @@ public sealed class UIAutomationTools
         _ => throw new ArgumentException($"Unknown scope '{scope}'; expected desktop|foreground|window")
     };
 
-    [McpServerTool, Description("One call for the whole desktop (parity A-2): every open window, the foreground one, the cursor, and every interactive element with its centre coordinates and an action hint (click/fill/toggle/select/slide/scroll), plus scrollable regions with their scroll percentages. Default format is compact text; format:'json' returns the same as JSON (with the element tree when include_tree is set). Element ids (el_N) are valid until the next snapshot and work with click (use the centre coordinates), interact_element and get_element. scope: desktop (default, every non-minimised window, topmost first) | foreground | window (with 'window' = a title, exact then substring). max_elements caps the walk (0 = the server default, --max-tree-elements, 500); when the cap is hit the result says it was truncated (the text form adds how to narrow the view; json carries Truncated and ElementLimit). use_dom is reserved for browser DOM mode (A-5) and is not implemented yet.")]
+    [McpServerTool, Description("One call for the whole desktop (parity A-2): every open window, the foreground one, the cursor, and every interactive element with its centre coordinates and an action hint (click/fill/toggle/select/slide/scroll), plus scrollable regions with their scroll percentages. Default format is compact text; format:'json' returns the same as JSON (with the element tree when include_tree is set). Element ids (el_N) are valid until the next snapshot and work with click (use the centre coordinates), interact_element and get_element. scope: desktop (default, every non-minimised window, topmost first) | foreground | window (with 'window' = a title, exact then substring). max_elements caps the walk (0 = the server default, --max-tree-elements, 500); when the cap is hit the result says it was truncated (the text form adds how to narrow the view; json carries Truncated and ElementLimit). use_dom (browser DOM mode, Chromium: chrome/msedge/brave/opera/vivaldi): for every browser window in scope walk only the web page — the RootWebArea document — instead of the whole window, so the address bar and tab strip are left out, and add a Pages section per browser window: the page document's id, title, URL, vertical scroll percent and the visible page text in document order (below-the-fold text appears after scrolling). The page document itself is scrollable, never interactive. A browser window with no page document (still loading, or Firefox, which is not supported yet) is walked whole and its Pages entry says so.")]
     public async Task<string> Snapshot(
         [Description("desktop | foreground | window")] string scope = "desktop",
         [Description("Window title, exact or substring, case-insensitive; only with scope=window")] string? window = null,
         [Description("Also return the element tree (json only)")] bool include_tree = false,
         [Description("Element budget for this call; 0 = the server default (--max-tree-elements)")] int max_elements = 0,
         [Description("text (default, compact) | json")] string format = "text",
-        [Description("Reserved for browser DOM mode (A-5); not implemented yet")] bool use_dom = false)
+        [Description("Walk browser windows from the web page (the RootWebArea document) instead of the whole window and add a Pages section with each page's title, URL, scroll percent and visible text (default: false; Chromium browsers only)")] bool use_dom = false)
     {
         var parsed = ParseSnapshotScope(scope);
         if (parsed == SnapshotScope.Window && string.IsNullOrWhiteSpace(window))
@@ -79,10 +79,7 @@ public sealed class UIAutomationTools
             "json" => true,
             _ => throw new ArgumentException($"Unknown format '{format}'; expected text|json"),
         };
-        if (use_dom)
-            throw new InvalidOperationException("use_dom is reserved for browser DOM mode (parity A-5) and is not implemented yet.");
-
-        var request = new SnapshotRequest(parsed, string.IsNullOrWhiteSpace(window) ? null : window, include_tree, max_elements);
+        var request = new SnapshotRequest(parsed, string.IsNullOrWhiteSpace(window) ? null : window, include_tree, max_elements, use_dom);
         var result = await _uia.SnapshotAsync(request);
         return json ? JsonSerializer.Serialize(result) : SnapshotRenderer.Render(result);
     }

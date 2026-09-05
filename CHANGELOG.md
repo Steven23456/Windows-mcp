@@ -2,6 +2,55 @@
 
 ### Added
 
+- **Browser DOM mode on `snapshot`, Chromium only** (parity A-5 phase 1). `snapshot(use_dom:true)`
+  walks every browser window in scope (chrome/msedge/brave/opera/vivaldi) from the web page — the
+  `RootWebArea` document — instead of the window, so the address bar and tab strip never appear
+  and the interactive list is the page's links, buttons, inputs, checkboxes, selects and list
+  items with the same `el_N` ids and action hints as everywhere else. The result gains a `Pages`
+  section, one entry per browser window: the page document's id, title, URL, vertical scroll
+  percent and the visible page text in document order (the text form prints it after the
+  scrollable list; JSON carries `Pages`, absent when `use_dom` is off so nothing else changes).
+  The page document is listed as scrollable, never as a control; a text node that only repeats
+  its control's label is not page text. Chromium builds its accessibility tree lazily, so the
+  page finder retries a few times before concluding a browser window has no page; one with none
+  (still loading, or Firefox, which is a documented follow-up) is walked whole and its entry says
+  so. New pure `Services/UiTree/DomCorrection.cs`; `SnapshotRequest +UseDom`,
+  `SnapshotResult +Pages`, `SnapshotPage`. Design note: `docs/design/A-5-browser-dom-mode.md`.
+- **A second screen-capture backend: Windows.Graphics.Capture** (parity A-10). `screenshot`
+  takes `backend: auto | gdi | wgc`. `wgc` reads the compositor's own frames — one
+  `GraphicsCaptureItem` per monitor the rect touches, copied through a D3D11 staging texture and
+  composed into the virtual-desktop rect — so GPU-accelerated, hardware-overlay and DRM-protected
+  surfaces that GDI's screen copy returns black for come out as drawn. `auto` (the default)
+  prefers `wgc` where the OS supports it and falls back to `gdi` silently; `backend:"wgc"` is an
+  error when the compositor cannot serve the rect (session 0, no monitor under it). The
+  metadata `backend` field, reserved since A-7, now always says which backend produced the
+  picture. `--screenshot-backend auto|gdi|wgc` / `WINDOWSMCP_SCREENSHOT_BACKEND` sets the
+  process default a call's `auto` defers to (both transports). Cursor overlay, downscale,
+  annotations and the profiling stages run unchanged on either frame. New
+  `Services/WgcCaptureBackend.cs` (the two COM interfaces it needs are declared in vtable order
+  per the COM rule); `CaptureOptions`/`ScreenshotOptions` carry `Backend`; `ScreenshotService` is
+  `IDisposable`. Design note: `docs/design/A-10-capture-backend.md`.
+- **Virtual desktops, phase 1** (parity A-12). `window(action:"desktops")` lists every virtual
+  desktop (`Id`, `Name` or `Desktop N`, `Index`, `IsCurrent`) and the current one; every window
+  `list`/`active` returns now carries `DesktopId`. Only the documented `IVirtualDesktopManager`
+  (declared in vtable order per the COM rule) and the registry are used; the per-build internal
+  interface is not. On this Windows 11 build the registry holds no `VirtualDesktopIDs` blob, so the
+  service falls back to the `Desktops` subkeys for the list and to the desktop the foreground
+  window is on for the current one. Every failure is an empty list or a null, never an error. New
+  `IVirtualDesktopService`/`VirtualDesktopService`, `VirtualDesktopInfo`; `WindowService` takes an
+  optional `IVirtualDesktopService`. Design note: `docs/design/A-12-virtual-desktops.md`.
+- **A post-capture flash and per-stage profiling** (parity A-14). After every `screenshot` an
+  orange glow is drawn around the captured area for ~3.5 s — a layered, click-through, top-most,
+  non-activating tool window on its own thread (`FlashOverlay`, painted by a pure `FlashGlow`),
+  hidden again before the next capture so it is never in a picture, invisible to `window list`
+  and `snapshot`, and a silent no-op wherever there is no desktop. On by default under both
+  transports; `--flash off` / `WINDOWSMCP_FLASH=off` turns it off. Metadata carries `flash: true`
+  when the glow was actually shown. `--profile-snapshot on` / `WINDOWSMCP_PROFILE_SNAPSHOT=on`
+  adds per-stage timings: `snapshot` reports `header`/`walk` (a `Timing:` line in the text form,
+  `Stages` in JSON) and `screenshot` reports `stages` (`resolve`, `cursor`, `snapshot`, `capture`,
+  `resize`, `encode`) — both also logged to stderr at Information. Off, the responses are
+  byte-identical to before. New `IFlashOverlay`, `StageTiming`; `ScreenshotOptions` and
+  `UiTreeOptions` carry the switches. Design note: `docs/design/A-14-flash-and-profiling.md`.
 - **`screenshot(annotate:true)` — boxes, label chips and a captioned grid on the capture** (parity
   A-6). The same call walks the desktop (one `snapshot`), keeps the interactive elements inside
   the captured rect, draws a 2 px coloured box with a label chip around each — the labels are the

@@ -37,7 +37,7 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
 │  IRegistryService · IServiceControlService · IEventLogService                │
 │  ITaskSchedulerService · IProcessService · IWindowService · IWmiService      │
 │  IEnvService · IPowerService · INotificationService · INetworkService        │
-│  IWebService   (36 interfaces total)                                         │
+│  IWebService · IVirtualDesktopService · IFlashOverlay  (38 interfaces total) │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │ implemented by
                                     ▼
@@ -49,7 +49,8 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
 │  RegistryService · ServiceControlService · EventLogService                   │
 │  TaskSchedulerService · ProcessService · WindowService · WmiService          │
 │  EnvService · PowerService · NotificationService · NetworkService            │
-│  WebService   (36 singletons — registered in Hosting/WindowsMcpHost)         │
+│  WebService · VirtualDesktopService · FlashOverlay                           │
+│               (38 singletons — registered in Hosting/WindowsMcpHost)         │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -129,9 +130,9 @@ public sealed class InputTools
 | `UIAutomationTools` | 9 | `IUIAutomationService` |
 | `FileTools` | 9 | `IFileSystemService`, `IInputService`, `IFileStreamService` |
 | `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService` |
-| `WindowTools` | 5 | `IWindowService` |
+| `WindowTools` | 5 | `IWindowService`, `IVirtualDesktopService` |
 | `ProcessTools` | 6 | `IProcessService`, `IServiceControlService`, `ITaskSchedulerService`, `IEventLogService` |
-| `ScreenTools` | 2 | `IScreenshotService`, `IOcrService`, `IWindowService`, `IInputService`, `IUIAutomationService` (+ the `ScreenshotOptions` record) |
+| `ScreenTools` | 2 | `IScreenshotService`, `IOcrService`, `IWindowService`, `IInputService`, `IUIAutomationService`, `IFlashOverlay` (+ the `ScreenshotOptions` record) |
 | `WebTools` | 2 | `IWebService` |
 | `RegistryTools` | 2 | `IRegistryService` |
 | `NetworkTools` | 2 | `INetworkService`, `IFirewallService` |
@@ -150,7 +151,7 @@ public sealed class InputTools
 ### 3. Service Abstraction Layer (`WindowsMcp.Abstractions`)
 
 A separate assembly (`WindowsMcp.Abstractions.csproj`) containing:
-- **36 `IXxxService` interfaces** — define the contract for each domain
+- **38 `IXxxService` interfaces** — define the contract for each domain
 - **Model DTOs** in `WindowsMcp.Abstractions.Models` — records/classes shared between tools and services
 
 The abstraction layer exists so tool classes compile against interfaces, not concrete types. This enforces the dependency inversion principle and makes services independently testable.
@@ -174,14 +175,18 @@ public interface IInputService
 
 ### 4. Service Implementation Layer
 
-All 36 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as two options records — `ScreenshotOptions` (read by the screen tools) and `UiTreeOptions` (injected into `UIAutomationService`):
+All 38 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as two options records — `ScreenshotOptions` (read by the screen tools) and `UiTreeOptions` (injected into `UIAutomationService`):
 
 ```csharp
-services.AddSingleton(new ScreenshotOptions(options.ScreenshotScale));  // --screenshot-scale
-services.AddSingleton(new UiTreeOptions(options.MaxTreeElements));      // --max-tree-elements
+// --screenshot-scale, --flash, --profile-snapshot, --screenshot-backend
+services.AddSingleton(new ScreenshotOptions(options.ScreenshotScale, options.Flash,
+    options.ProfileSnapshot, options.ScreenshotBackend));
+// --max-tree-elements, --profile-snapshot
+services.AddSingleton(new UiTreeOptions(options.MaxTreeElements, options.ProfileSnapshot));
+services.AddSingleton<IFlashOverlay, FlashOverlay>();   // always registered; the tool gates on ScreenshotOptions.Flash
 services.AddSingleton<IInputService, InputService>();
 services.AddSingleton<IScreenshotService, ScreenshotService>();
-// ... (36 registrations)
+// ... (38 registrations)
 ```
 
 Services contain all business logic and directly call Windows APIs through platform packages. They are constructed once at host startup and shared across all tool invocations.
@@ -194,7 +199,8 @@ Services contain all business logic and directly call Windows APIs through platf
 |---------|-------------|-------------|
 | `FlaUI.UIA3` | UI Automation COM | Walk the accessibility tree, find/inspect/interact with elements |
 | `H.InputSimulator` | `SendInput` Win32 | Inject keyboard and mouse events at driver level |
-| `SkiaSharp` | GDI+/DirectX | Capture screenshots, downscale (Mitchell cubic), encode PNG/JPEG |
+| `SkiaSharp` | GDI+/DirectX | Hold either capture backend's frame, downscale (Mitchell cubic), annotate, encode PNG/JPEG |
+| `Windows.Graphics.Capture` (no package — the `net10.0-windows10.0.19041` WinRT projection) | WGC + D3D11 | The `wgc` screenshot backend: compositor frames for the GPU-accelerated and DRM surfaces GDI returns black for |
 | `CsWin32` | P/Invoke gen | Auto-generates interop for `SetProcessDpiAwareness`, `SetCurrentProcessExplicitAppUserModelID`, etc. |
 | `TaskScheduler` | Task Scheduler COM | Create, read, update, delete scheduled tasks |
 | `System.Management` | WMI | Query hardware, driver, and configuration data |
@@ -213,7 +219,8 @@ All services follow the DI pattern — no static state, no singletons instantiat
 // Hosting/WindowsMcpHost.cs — shared by both transports
 public static IMcpServerBuilder AddWindowsMcp(this IHostApplicationBuilder builder, ServerOptions options)
 {
-    builder.Services.AddSingleton(new ScreenshotOptions(options.ScreenshotScale));
+    builder.Services.AddSingleton(new ScreenshotOptions(options.ScreenshotScale, options.Flash,
+        options.ProfileSnapshot, options.ScreenshotBackend));
     builder.Services.AddSingleton<IInputService, InputService>();
     // ...
     return builder.Services.AddMcpServer(...).WithRequestFilters(...).WithToolsFromAssembly(...);
@@ -287,18 +294,19 @@ Windows-mcp.slnx
 │   │   │   ├── IntegrityTools.cs
 │   │   │   ├── UsnTools.cs
 │   │   │   └── WatchTools.cs
-│   │   ├── Services/                      (36 service implementations + helpers)
+│   │   ├── Services/                      (38 service implementations + helpers)
 │   │   │   ├── InputService.cs
 │   │   │   ├── UIAutomationService.cs
-│   │   │   ├── UiTree/                    (snapshot core: UiNode, UiClassifier,
-│   │   │   │                               ElementBudget, UiTraverser, SnapshotRenderer)
+│   │   │   ├── ScreenshotService.cs       (+ WgcCaptureBackend, Annotator, FlashOverlay, FlashGlow)
+│   │   │   ├── UiTree/                    (snapshot core: UiNode, UiClassifier, ElementBudget,
+│   │   │   │                               UiTraverser, SnapshotRenderer, DomCorrection)
 │   │   │   └── ...
 │   │   └── Startup/                       (startup-report renderer + approval decoding)
 │   └── WindowsMcp.Abstractions/           ← Contracts assembly
 │       ├── WindowsMcp.Abstractions.csproj
 │       ├── IInputService.cs
 │       ├── IUIAutomationService.cs
-│       ├── ... (36 interfaces)
+│       ├── ... (38 interfaces)
 │       └── Models/                        (21 DTO files)
 │           ├── InputDtos.cs
 │           └── ...
