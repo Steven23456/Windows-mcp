@@ -4,11 +4,13 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using Moq;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Services.UiTree;
+using WindowsMcp.Tests.Fixtures;
 using WindowsMcp.Tools;
 using Xunit;
 
@@ -44,7 +46,8 @@ public class ScreenToolsTests : IDisposable
     private static Mock<IScreenshotService> ShotMock(
         byte[]? bytes = null, int width = 100, int height = 100, ImageFormat? resultFormat = null,
         int? originalWidth = null, int? originalHeight = null, double coordinateScale = 1.0,
-        string? cursorDrawn = null, int annotationsDrawn = 0)
+        string? cursorDrawn = null, int annotationsDrawn = 0, StageTiming[]? stages = null,
+        string resultBackend = "gdi")
     {
         var mock = new Mock<IScreenshotService>();
         mock.Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
@@ -55,7 +58,7 @@ public class ScreenToolsTests : IDisposable
                     bytes ?? (effective == ImageFormat.Jpeg ? JpegBytes : PngBytes),
                     width, height, effective,
                     originalWidth ?? width, originalHeight ?? height, coordinateScale, cursorDrawn,
-                    annotationsDrawn);
+                    annotationsDrawn, stages, resultBackend);
             });
         return mock;
     }
@@ -122,11 +125,27 @@ public class ScreenToolsTests : IDisposable
         return mock;
     }
 
+    /// <summary>
+    /// A-14: the post-capture glow. Every screenshot hides it before the shutter and shows it
+    /// after, so every test in this class now has one - the default mock records the calls and
+    /// does nothing else.
+    /// </summary>
+    /// <summary>Like the real overlay on a desktop: visible once Show has run. The tool reports IsVisible, not the request.</summary>
+    private static Mock<IFlashOverlay> FlashMock()
+    {
+        var mock = new Mock<IFlashOverlay>();
+        mock.Setup(f => f.Show(It.IsAny<ScreenRegion>(), It.IsAny<TimeSpan>()))
+            .Callback(() => mock.SetupGet(f => f.IsVisible).Returns(true));
+        return mock;
+    }
+
     private static ScreenTools MakeTools(
         IScreenshotService? shot = null, IOcrService? ocr = null, ScreenshotOptions? options = null,
-        IWindowService? windows = null, IInputService? input = null, IUIAutomationService? uia = null) =>
+        IWindowService? windows = null, IInputService? input = null, IUIAutomationService? uia = null,
+        IFlashOverlay? flash = null, ILogger<ScreenTools>? log = null) =>
         new(shot ?? ShotMock().Object, ocr ?? new Mock<IOcrService>().Object,
-            windows ?? WinMock().Object, input ?? InputMock().Object, uia ?? UiaMock().Object, options);
+            windows ?? WinMock().Object, input ?? InputMock().Object, uia ?? UiaMock().Object,
+            flash ?? FlashMock().Object, options, log);
 
     /// <summary>The whole primary display — what a call with neither region nor display captures (roadmap C3).</summary>
     private static readonly ScreenRegion PrimaryRect = new(0, 0, 1920, 1080);
@@ -755,7 +774,7 @@ public class ScreenToolsTests : IDisposable
         // ScreenshotOptions.Default.
         var mock = ShotMock();
         var tools = new ScreenTools(mock.Object, new Mock<IOcrService>().Object,
-            WinMock().Object, InputMock().Object, UiaMock().Object);
+            WinMock().Object, InputMock().Object, UiaMock().Object, FlashMock().Object);
 
         await tools.Screenshot(null, format: "png", output: "inline", scale: 0.5);
 
@@ -2148,15 +2167,20 @@ public class ScreenToolsTests : IDisposable
     public void Screenshot_annotate_arguments_are_appended_after_include_cursor()
     {
         // Appended, not inserted: every existing caller passes the earlier arguments positionally.
+        // A-10 appended 'backend' after grid_rows, so the annotate block is no longer the tail —
+        // Screenshot_backend_is_the_last_argument_and_defaults_to_auto pins that. What this test
+        // protects is the block's own order, and that it still follows include_cursor.
         var parameters = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!.GetParameters();
+        var names = parameters.Select(p => p.Name).ToArray();
+        var first = Array.IndexOf(names, "annotate");
 
-        parameters[^4].Name.Should().Be("include_cursor");
-        parameters[^3].Name.Should().Be("annotate");
-        parameters[^3].DefaultValue.Should().Be(false, "annotate is opt-in: it costs a desktop walk");
-        parameters[^2].Name.Should().Be("grid_columns");
-        parameters[^2].DefaultValue.Should().Be(0);
-        parameters[^1].Name.Should().Be("grid_rows");
-        parameters[^1].DefaultValue.Should().Be(0);
+        names[first - 1].Should().Be("include_cursor");
+        first.Should().BeGreaterThan(0);
+        parameters[first].DefaultValue.Should().Be(false, "annotate is opt-in: it costs a desktop walk");
+        names[first + 1].Should().Be("grid_columns");
+        parameters[first + 1].DefaultValue.Should().Be(0);
+        names[first + 2].Should().Be("grid_rows");
+        parameters[first + 2].DefaultValue.Should().Be(0);
     }
 
     [Fact]
@@ -2232,5 +2256,474 @@ public class ScreenToolsTests : IDisposable
         var options = CapturedOptions(shot);
         options.Annotations.Should().ContainSingle().Which.Label.Should().Be("el_1");
         options.Grid.Should().Be(new GridSpec(4, 3));
+    }
+
+    // ---- A-14 (R3) - the post-capture flash --------------------------------------------------
+    // The glow is a courtesy signal to whoever is sitting at the target machine, so the contract is
+    // about ORDER as much as about the calls: hidden before the shutter (it must never be IN a
+    // picture, not even the one that triggered it) and shown after it, around the rect that was
+    // actually captured.
+
+    /// <summary>The duration every capture asks for: upstream's 3.5 s.</summary>
+    private static readonly TimeSpan FlashDuration = TimeSpan.FromSeconds(3.5);
+
+    [Fact]
+    public async Task Screenshot_hides_the_flash_then_captures_then_shows_it()
+    {
+        var order = new List<string>();
+        var flash = new Mock<IFlashOverlay>();
+        flash.Setup(f => f.Hide()).Callback(() => order.Add("hide"));
+        flash.Setup(f => f.Show(It.IsAny<ScreenRegion>(), It.IsAny<TimeSpan>())).Callback(() => order.Add("show"));
+        var shot = new Mock<IScreenshotService>();
+        shot.Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                order.Add("capture");
+                return new ScreenshotResult(PngBytes, 100, 100, ImageFormat.Png, 100, 100, 1.0);
+            });
+        var tools = MakeTools(shot.Object, flash: flash.Object);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        order.Should().Equal(["hide", "capture", "show"],
+            "the previous call's glow comes down BEFORE the shutter, and this call's goes up after it");
+    }
+
+    [Fact]
+    public async Task Screenshot_shows_the_flash_around_the_captured_rect_for_three_and_a_half_seconds()
+    {
+        var flash = FlashMock();
+        var tools = MakeTools(flash: flash.Object);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        flash.Verify(f => f.Show(PrimaryRect, FlashDuration), Times.Once,
+            "the glow frames what was captured, for the 3.5 s upstream uses");
+        flash.Verify(f => f.Hide(), Times.Once, "exactly one teardown per capture, not one per attempt");
+    }
+
+    [Fact]
+    public async Task Screenshot_shows_the_flash_around_the_display_that_was_captured()
+    {
+        // display:"1" is the second monitor: the glow must follow the rect the tool resolved, not
+        // the primary display it would have captured by default.
+        var flash = FlashMock();
+        var tools = MakeTools(windows: WinMock(SideBySide).Object, flash: flash.Object);
+
+        await tools.Screenshot(display: "1", format: "png", output: "inline");
+
+        flash.Verify(f => f.Show(new ScreenRegion(1920, 0, 1920, 1080), FlashDuration), Times.Once);
+    }
+
+    [Fact]
+    public async Task Screenshot_shows_the_flash_around_an_explicit_region()
+    {
+        var flash = FlashMock();
+        var tools = MakeTools(flash: flash.Object);
+
+        await tools.Screenshot("100,50,300,200", format: "png", output: "inline");
+
+        flash.Verify(f => f.Show(new ScreenRegion(100, 50, 300, 200), FlashDuration), Times.Once);
+    }
+
+    [Fact]
+    public async Task Screenshot_with_the_flash_switched_off_still_hides_but_never_shows()
+    {
+        // --flash off. Hide still runs: a glow left up by a server that was reconfigured (or by an
+        // earlier call) must still come down before this capture.
+        var flash = FlashMock();
+        var tools = MakeTools(options: new ScreenshotOptions(1.0, Flash: false), flash: flash.Object);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        flash.Verify(f => f.Show(It.IsAny<ScreenRegion>(), It.IsAny<TimeSpan>()), Times.Never);
+        flash.Verify(f => f.Hide(), Times.Once);
+    }
+
+    [Fact]
+    public async Task Screenshot_that_fails_to_capture_never_shows_the_flash()
+    {
+        // The glow says "a picture was just taken". A capture that threw took no picture.
+        var flash = FlashMock();
+        var shot = new Mock<IScreenshotService>();
+        shot.Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("the screen went away"));
+        var tools = MakeTools(shot.Object, flash: flash.Object);
+
+        Func<Task> act = () => tools.Screenshot(format: "png", output: "inline");
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        flash.Verify(f => f.Show(It.IsAny<ScreenRegion>(), It.IsAny<TimeSpan>()), Times.Never);
+        flash.Verify(f => f.Hide(), Times.Once, "the teardown ran before the capture and is not undone by its failure");
+    }
+
+    [Theory]
+    [InlineData("nope")]
+    [InlineData("")]
+    public async Task Screenshot_with_an_invalid_argument_never_touches_the_flash(string output)
+    {
+        // Same rule as the cursor read: a bad call must not cost a capture - or a glow announcing one.
+        var flash = FlashMock();
+        var tools = MakeTools(flash: flash.Object);
+
+        Func<Task> act = () => tools.Screenshot(output: output);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        flash.Verify(f => f.Hide(), Times.Never);
+        flash.Verify(f => f.Show(It.IsAny<ScreenRegion>(), It.IsAny<TimeSpan>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Ocr_never_touches_the_flash()
+    {
+        // OCR takes no picture the caller can see; announcing it with a glow on someone's desktop
+        // would be noise, and hiding a glow the OCR did not raise would cut another call's short.
+        var flash = FlashMock();
+        var ocr = new Mock<IOcrService>();
+        ocr.Setup(o => o.ExtractTextAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CancellationToken>())).ReturnsAsync("text");
+        var tools = MakeTools(ocr: ocr.Object, flash: flash.Object);
+
+        await tools.Ocr();
+
+        flash.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_says_the_flash_was_shown()
+    {
+        var tools = MakeTools();
+
+        var meta = Meta(await tools.Screenshot(format: "png", output: "inline"));
+
+        Field(meta, "flash").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_omits_flash_when_the_glow_was_not_shown()
+    {
+        // Absent, not false: the metadata only carries what happened (the A-7 rule).
+        var tools = MakeTools(options: new ScreenshotOptions(1.0, Flash: false));
+
+        var meta = Meta(await tools.Screenshot(format: "png", output: "inline"));
+
+        meta.TryGetProperty("flash", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Screenshot_to_a_file_flashes_and_reports_it_too()
+    {
+        // The picture still leaves the machine; the file mode is not a quiet mode.
+        var flash = FlashMock();
+        var tools = MakeTools(flash: flash.Object);
+
+        var result = await tools.Screenshot(format: "png", output: "file");
+        TrackPath(result);
+
+        flash.Verify(f => f.Show(PrimaryRect, FlashDuration), Times.Once);
+        Field(Meta(result), "flash").GetBoolean().Should().BeTrue();
+    }
+
+    // ---- A-14 (R4) - profiling, tool half ----------------------------------------------------
+
+    /// <summary>The metadata's stage timings, asserted present first so a missing block names itself.</summary>
+    private static JsonElement StagesOf(JsonElement meta)
+    {
+        var stages = Field(meta, "stages");
+        stages.ValueKind.Should().Be(JsonValueKind.Object, "stages is an object keyed by stage name");
+        return stages;
+    }
+
+    private static long StageMs(JsonElement stages, string name)
+    {
+        stages.TryGetProperty(name, out var value).Should().BeTrue($"the stages must include '{name}'");
+        value.ValueKind.Should().Be(JsonValueKind.Number, $"'{name}' is a duration in milliseconds");
+        return value.GetInt64();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Screenshot_passes_the_process_profiling_switch_into_the_capture_options(bool profile)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, options: new ScreenshotOptions(1.0, Profile: profile));
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        CapturedOptions(mock).Profile.Should().Be(profile,
+            "--profile-snapshot is a process option (roadmap C7), not a tool argument");
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_has_no_stages_when_profiling_is_off()
+    {
+        // Off is the default, so this is the shape every existing caller sees: unchanged.
+        var tools = MakeTools(ShotMock(stages: [new StageTiming("encode", 7)]).Object);
+
+        var meta = Meta(await tools.Screenshot(format: "png", output: "inline"));
+
+        meta.TryGetProperty("stages", out _).Should()
+            .BeFalse("no profiling was asked for, so the response carries no timings at all");
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_stages_carry_the_tools_own_steps_and_the_services()
+    {
+        var shot = ShotMock(stages: [new StageTiming("resize", 3), new StageTiming("encode", 7)]);
+        var tools = MakeTools(shot.Object, options: new ScreenshotOptions(1.0, Profile: true));
+
+        var stages = StagesOf(Meta(await tools.Screenshot(format: "png", output: "inline")));
+
+        StageMs(stages, "resolve").Should().BeGreaterThanOrEqualTo(0, "resolving the rect is a monitor enumeration");
+        StageMs(stages, "cursor").Should().BeGreaterThanOrEqualTo(0);
+        StageMs(stages, "capture").Should().BeGreaterThanOrEqualTo(0);
+        StageMs(stages, "resize").Should().Be(3, "the service's own stages come through by name");
+        StageMs(stages, "encode").Should().Be(7);
+    }
+
+    [Fact]
+    public async Task Screenshot_stages_omit_the_snapshot_step_when_nothing_was_annotated()
+    {
+        var tools = MakeTools(options: new ScreenshotOptions(1.0, Profile: true));
+
+        var stages = StagesOf(Meta(await tools.Screenshot(format: "png", output: "inline")));
+
+        stages.TryGetProperty("snapshot", out _).Should()
+            .BeFalse("no walk happened, so there is no walk to time");
+    }
+
+    [Fact]
+    public async Task Screenshot_stages_include_the_snapshot_step_when_annotating()
+    {
+        // The walk is the expensive half of an annotated capture - it is the whole reason to profile.
+        var tools = MakeTools(options: new ScreenshotOptions(1.0, Profile: true));
+
+        var stages = StagesOf(Meta(await tools.Screenshot(format: "png", output: "inline", annotate: true)));
+
+        StageMs(stages, "snapshot").Should().BeGreaterThanOrEqualTo(0);
+    }
+
+    [Fact]
+    public async Task Screenshot_stages_let_the_services_own_measurement_win_a_name_clash()
+    {
+        // The tool times the CaptureAsync CALL as "capture" and the service reports its own
+        // "capture" stage (the CopyFromScreen inside it). The service's stages are merged in after
+        // the tool's, so the finer-grained number is the one reported.
+        var shot = ShotMock(stages: [new StageTiming("capture", 4242)]);
+        var tools = MakeTools(shot.Object, options: new ScreenshotOptions(1.0, Profile: true));
+
+        var stages = StagesOf(Meta(await tools.Screenshot(format: "png", output: "inline")));
+
+        StageMs(stages, "capture").Should().Be(4242);
+    }
+
+    [Fact]
+    public async Task Screenshot_logs_the_stage_timings_when_profiling_is_on()
+    {
+        // The roadmap's reason for --profile-snapshot is a line on stderr an operator can read
+        // without parsing a tool response: the numbers in the metadata are for the model, the log
+        // line is for the human. Every assertion above would stay green if the log call were
+        // deleted, so this is the one that holds it.
+        var log = new RecordingLogger<ScreenTools>();
+        var shot = ShotMock(stages: [new StageTiming("encode", 7)]);
+        var tools = MakeTools(shot.Object, options: new ScreenshotOptions(1.0, Profile: true), log: log);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        var line = log.MessagesAt(LogLevel.Information).Should().ContainSingle(
+            "one line per profiled capture, at the level ConfigureStderrLogging actually emits").Subject;
+        line.Should().Contain("resolve").And.Contain("cursor").And.Contain("capture")
+            .And.Contain("encode 7 ms", "the service's stages are in the log line too, not only the metadata");
+    }
+
+    [Fact]
+    public async Task Screenshot_logs_nothing_when_profiling_is_off()
+    {
+        // Off is the default: a server nobody asked to profile must not write a line per capture.
+        var log = new RecordingLogger<ScreenTools>();
+        var tools = MakeTools(log: log);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        log.Records.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_omits_flash_when_the_overlay_could_not_show()
+    {
+        // No interactive window station: Show is a silent no-op and IsVisible stays false. The
+        // metadata reports the outcome, so it must not claim a glow nobody saw.
+        var flash = new Mock<IFlashOverlay>();   // IsVisible stays false after Show
+        var tools = MakeTools(ShotMock().Object, flash: flash.Object);
+
+        var meta = Meta(await tools.Screenshot(format: "png", output: "inline"));
+
+        flash.Verify(f => f.Show(It.IsAny<ScreenRegion>(), It.IsAny<TimeSpan>()), Times.Once);
+        meta.TryGetProperty("flash", out _).Should().BeFalse();
+    }
+    // ---- A-10 (R4) - the capture backend argument and the backend metadata --------------------
+    // The tool does not choose the backend, it only carries the choice down and reports what came
+    // back: ScreenshotService.ResolveBackend owns the rule (ScreenshotBackendTests) and the frames
+    // themselves are ScreenshotWgcCaptureTests. What IS a tool-layer requirement is the validation
+    // (before any work) and that the metadata never lies about what produced the picture.
+
+    /// <summary>The three values the tool accepts, in the error message and in the description.</summary>
+    private static readonly string[] Backends = ["auto", "gdi", "wgc"];
+
+    [Fact]
+    public async Task Screenshot_defaults_to_the_process_backend()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        CapturedOptions(mock).Backend.Should().Be("auto",
+            "a call that names no backend takes whatever the server was started with");
+    }
+
+    [Theory]
+    [InlineData("auto")]
+    [InlineData("gdi")]
+    [InlineData("wgc")]
+    public async Task Screenshot_passes_the_requested_backend_to_the_capture_options(string backend)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(format: "png", output: "inline", backend: backend);
+
+        CapturedOptions(mock).Backend.Should().Be(backend, "the choice reaches the service verbatim");
+    }
+
+    [Theory]
+    [InlineData("AUTO", "auto")]
+    [InlineData("Gdi", "gdi")]
+    [InlineData("WGC", "wgc")]
+    public async Task Screenshot_backend_matching_is_case_insensitive(string backend, string expected)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(format: "png", output: "inline", backend: backend);
+
+        CapturedOptions(mock).Backend.Should().BeEquivalentTo(expected,
+            "every other enum-like argument on this tool is case-insensitive (output, format, display)");
+    }
+
+    [Theory]
+    [InlineData("dxcam")]     // upstream's backend names are not ours
+    [InlineData("mss")]
+    [InlineData("pillow")]
+    [InlineData("dxgi")]
+    [InlineData("")]
+    [InlineData(" wgc")]      // un-trimmed, like every other option
+    public async Task Screenshot_unknown_backend_throws_naming_the_choices(string backend)
+    {
+        var tools = MakeTools();
+
+        Func<Task> act = () => tools.Screenshot(format: "png", output: "inline", backend: backend);
+
+        var message = (await act.Should().ThrowAsync<ArgumentException>()).Which.Message;
+        foreach (var name in Backends)
+            message.Should().Contain(name, "the model cannot guess the vocabulary from a bare rejection");
+    }
+
+    [Fact]
+    public async Task Screenshot_unknown_backend_is_rejected_before_any_work()
+    {
+        // Same rule as every other argument guard on this tool: a bad call must not cost a monitor
+        // enumeration, a cursor read, a flash teardown or a capture.
+        var mock = ShotMock();
+        var windows = WinMock();
+        var input = InputMock();
+        var flash = FlashMock();
+        var tools = MakeTools(mock.Object, windows: windows.Object, input: input.Object, flash: flash.Object);
+
+        Func<Task> act = () => tools.Screenshot(format: "png", output: "inline", backend: "dxcam");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        windows.Verify(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()), Times.Never);
+        ShouldNeverReadTheCursor(input);
+        ShouldNeverCapture(mock);
+        flash.Verify(f => f.Hide(), Times.Never);
+        flash.Verify(f => f.Show(It.IsAny<ScreenRegion>(), It.IsAny<TimeSpan>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("gdi")]
+    [InlineData("wgc")]
+    public async Task Screenshot_metadata_reports_the_backend_that_produced_the_picture(string produced)
+    {
+        var tools = MakeTools(ShotMock(resultBackend: produced).Object);
+
+        var meta = Meta(await tools.Screenshot(format: "png", output: "inline"));
+
+        Field(meta, "backend").GetString().Should().Be(produced,
+            "the metadata reports what was captured, never what was asked for");
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_backend_follows_the_result_not_the_request()
+    {
+        // The 'auto' case is the whole reason the field exists: the caller does not know which
+        // backend served them until the result says so.
+        var tools = MakeTools(ShotMock(resultBackend: "wgc").Object);
+
+        var meta = Meta(await tools.Screenshot(format: "png", output: "inline", backend: "auto"));
+
+        Field(meta, "backend").GetString().Should().Be("wgc");
+    }
+
+    [Fact]
+    public async Task Screenshot_file_output_metadata_carries_the_backend_too()
+    {
+        var tools = MakeTools(ShotMock(PngBytes, 100, 100, resultBackend: "wgc").Object);
+
+        var result = await tools.Screenshot(null, format: "png", output: "file");
+
+        var meta = Meta(result);
+        _written.Add(meta.GetProperty("path").GetString()!);
+        Field(meta, "backend").GetString().Should().Be("wgc", "both output modes describe the same capture");
+    }
+
+    [Fact]
+    public void Screenshot_backend_is_the_last_argument_and_defaults_to_auto()
+    {
+        // Appended, not inserted: every existing caller and test passes the earlier arguments
+        // positionally, and the schema default is what the model reads.
+        var parameters = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!.GetParameters();
+
+        parameters[^1].Name.Should().Be("backend");
+        parameters[^1].DefaultValue.Should().Be("auto");
+        parameters[^2].Name.Should().Be("grid_rows", "A-6's block stays where it was");
+    }
+
+    [Fact]
+    public void Ocr_has_no_backend_argument_and_takes_the_process_default()
+    {
+        // OCR reads pixels, not a picture for the model: there is no reason to expose the choice,
+        // and OcrServiceTests pins that its CaptureOptions leave Backend at "auto".
+        typeof(ScreenTools).GetMethod(nameof(ScreenTools.Ocr))!.GetParameters()
+            .Select(p => p.Name).Should().NotContain("backend");
+    }
+
+    [Fact]
+    public void Screenshot_description_documents_the_backend_argument_and_metadata()
+    {
+        var description = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should()
+            .Contain("backend", "the metadata list is the only place the model learns the field exists")
+            .And.Contain("wgc", "and the only place it learns the other backend can be asked for by name")
+            .And.Contain("black", "the model needs the one reason to reach for wgc: GDI returns black for GPU/DRM surfaces");
+
+        var attribute = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!.GetParameters()
+            .Single(p => p.Name == "backend").GetCustomAttribute<DescriptionAttribute>();
+        attribute.Should().NotBeNull("an argument with no description is invisible in the wire schema");
+        foreach (var name in Backends)
+            attribute!.Description.Should().Contain(name);
+        attribute!.Description.Should().Contain("default", "the model must know which one it gets for free");
     }
 }

@@ -63,6 +63,18 @@ internal static class SnapshotFixtures
         => new(id, window, controlType, name, centerX, centerY, bounds ?? new Bounds(100, 140, 800, 520),
             scroll ?? new ScrollInfo(37, 0, true, false));
 
+    /// <summary>A-5: one walked page, the fields overridable one at a time.</summary>
+    internal static SnapshotPage Page(
+        string window = "A5 Probe Page - Microsoft Edge",
+        string? documentId = "el_7",
+        string? title = "A5 Probe Page",
+        string? url = "http://127.0.0.1:9999/a5",
+        ScrollInfo? scroll = null,
+        string[]? text = null,
+        string? note = null)
+        => new(window, documentId, title, url, scroll ?? new ScrollInfo(0, 0, true, false),
+            text ?? [], note);
+
     internal static SnapshotResult Result(
         WindowInfo[]? windows = null,
         WindowInfo? active = null,
@@ -74,7 +86,10 @@ internal static class SnapshotFixtures
         bool truncated = false,
         int elementLimit = 500,
         int elementCount = 57,
-        long captureMs = 12)
+        long captureMs = 12,
+        StageTiming[]? stages = null,
+        SnapshotPage[]? pages = null)
         => new(windows ?? [], active, cursor ?? new CursorPosition(612, 388), cursorMonitorIndex,
-            interactive ?? [], scrollable ?? [], tree, truncated, elementLimit, elementCount, captureMs);
+            interactive ?? [], scrollable ?? [], tree, truncated, elementLimit, elementCount, captureMs,
+            stages, pages);
 }

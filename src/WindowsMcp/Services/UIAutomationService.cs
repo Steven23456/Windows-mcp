@@ -270,6 +270,7 @@ public sealed class UIAutomationService : IUIAutomationService
 
         var sw = Stopwatch.StartNew();
         var limit = request.MaxElements > 0 ? request.MaxElements : _treeOptions.MaxElements;
+        long headerMs = 0;
 
         // Header — each collaborator once; the list is reused for the roots.
         var cursor = await _input.GetCursorPositionAsync(ct);
@@ -277,6 +278,7 @@ public sealed class UIAutomationService : IUIAutomationService
         var windows = await _windows.ListAsync(true, false, ct);
         var active = WindowFilter.ActiveOf(windows);
         var cursorMonitor = CursorMath.MonitorIndexOf(cursor.X, cursor.Y, monitors);
+        headerMs = sw.ElapsedMilliseconds;
 
         var targets = request.Scope switch
         {
@@ -289,14 +291,17 @@ public sealed class UIAutomationService : IUIAutomationService
         {
             var budget = new ElementBudget(limit);
             var traverser = new UiTraverser(_automation);
-            var perWindow = new List<(string Title, IReadOnlyList<UiWalkEntry> Entries)>();
+            // Dom: None = a normal walk; Page = walked from the RootWebArea document (entry 0 is the
+            // page); NoPage = a browser window with no page document, walked whole (A-5).
+            var perWindow = new List<(string Title, IReadOnlyList<UiWalkEntry> Entries, DomState Dom)>();
 
             if (request.Scope == SnapshotScope.Foreground && active is null)
             {
                 // No inventory entry is flagged active (the desktop, a cloaked window): fall back
-                // to whatever UIA says is in front, as get_state does.
+                // to whatever UIA says is in front, as get_state does. No inventory row means no
+                // IsBrowser either, so DOM mode does not apply here.
                 var root = GetForegroundRoot();
-                perWindow.Add((TryGetName(root), traverser.Walk(root, TryGetName(root), budget)));
+                perWindow.Add((TryGetName(root), traverser.Walk(root, TryGetName(root), budget), DomState.None));
             }
 
             foreach (var w in targets)
@@ -307,7 +312,16 @@ public sealed class UIAutomationService : IUIAutomationService
                 {
                     var root = _automation.FromHandle((nint)w.Hwnd)
                         ?? throw new InvalidOperationException("no automation element for the window handle");
-                    perWindow.Add((w.Title, traverser.Walk(root, w.Title, budget)));
+                    var dom = DomState.None;
+                    if (request.UseDom && w.IsBrowser)
+                    {
+                        // A-5: walk the page, not the browser — the address bar and tab strip are
+                        // never visited because the walk starts below them.
+                        var document = FindPageDocument(root);
+                        if (document is null) dom = DomState.NoPage;
+                        else { root = document; dom = DomState.Page; }
+                    }
+                    perWindow.Add((w.Title, traverser.Walk(root, w.Title, budget), dom));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -320,12 +334,13 @@ public sealed class UIAutomationService : IUIAutomationService
             var interactive = new List<SnapshotElement>();
             var scrollable = new List<SnapshotScrollable>();
             var trees = new List<ElementTree>();
+            var pages = new List<SnapshotPage>();
             lock (_cacheLock)
             {
                 foreach (var old in _snapshotIds) _elementCache.Remove(old);
                 _snapshotIds.Clear();
 
-                foreach (var (title, entries) in perWindow)
+                foreach (var (title, entries, dom) in perWindow)
                 {
                     var ids = new string[entries.Count];
                     for (int i = 0; i < entries.Count; i++)
@@ -334,11 +349,18 @@ public sealed class UIAutomationService : IUIAutomationService
                         _elementCache[ids[i]] = entries[i].Element;
                         _snapshotIds.Add(ids[i]);
                         var (element, region) = Project(entries[i].Node, ids[i]);
+                        // A-5 correction 1: the page document keeps its id and its scroll row but is not a control.
+                        if (dom == DomState.Page && DomCorrection.SuppressesInteractive(entries[i].Node, entries[i].ParentIndex))
+                            element = null;
                         if (element is not null) interactive.Add(element);
                         if (region is not null) scrollable.Add(region);
                     }
                     if (request.IncludeTree && entries.Count > 0)
                         trees.Add(ToTree(entries, ids));
+                    if (dom == DomState.Page && entries.Count > 0)
+                        pages.Add(DomCorrection.PageFor(ids[0], entries.Select(e => (e.Node, e.ParentIndex)).ToList()));
+                    else if (dom == DomState.NoPage)
+                        pages.Add(DomCorrection.NoPage(title));
                 }
             }
 
@@ -346,8 +368,17 @@ public sealed class UIAutomationService : IUIAutomationService
                 ? new ElementTree(new ElementInfo("desktop", "", "Desktop", true, false, null, null, null, null), trees.ToArray())
                 : null;
             return (Interactive: interactive.ToArray(), Scrollable: scrollable.ToArray(), Tree: tree,
-                    Count: budget.Count, budget.Truncated);
+                    Count: budget.Count, budget.Truncated,
+                    Pages: request.UseDom ? pages.ToArray() : null);
         }, ct);
+
+        StageTiming[]? stages = null;
+        if (_treeOptions.Profile)
+        {
+            stages = [new StageTiming("header", headerMs), new StageTiming("walk", Math.Max(0, sw.ElapsedMilliseconds - headerMs))];
+            _log.LogInformation("snapshot: header {HeaderMs} ms, walk {WalkMs} ms, {Count} elements ({Interactive} interactive)",
+                stages[0].Ms, stages[1].Ms, walked.Count, walked.Interactive.Length);
+        }
 
         return new SnapshotResult(
             Windows: windows,
@@ -360,8 +391,13 @@ public sealed class UIAutomationService : IUIAutomationService
             Truncated: walked.Truncated,
             ElementLimit: limit,
             ElementCount: walked.Count,
-            CaptureMs: sw.ElapsedMilliseconds);
+            CaptureMs: sw.ElapsedMilliseconds,
+            Stages: stages,
+            Pages: walked.Pages);
     }
+
+    /// <summary>How one window was walked for a snapshot (A-5).</summary>
+    private enum DomState { None, Page, NoPage }
 
     /// <summary>scope=window against the inventory: exact title first, then substring, case-insensitive; none → name what is open.</summary>
     private static WindowInfo[] MatchWindows(WindowInfo[] windows, string title)
@@ -377,6 +413,34 @@ public sealed class UIAutomationService : IUIAutomationService
                 (open.Length > 0 ? string.Join(", ", open.Select(n => $"'{n}'")) : "(none with a title)"));
         }
         return named;
+    }
+
+    /// <summary>
+    /// A-5 phase 1: the web page under a browser window — the first descendant that is a
+    /// <see cref="ControlType.Document"/> whose AutomationId is <c>RootWebArea</c> — or null when
+    /// there is none (a page still loading, Firefox, a non-web window). Chromium builds its UIA
+    /// tree lazily on the first query, so the first find can come back empty on a page that is
+    /// there: the search is retried a bounded number of times before it concludes there is no page.
+    /// </summary>
+    internal static AutomationElement? FindPageDocument(AutomationElement root, int attempts = 3, int pauseMs = 150)
+    {
+        var cf = root.ConditionFactory;
+        var page = cf.ByControlType(ControlType.Document).And(cf.ByAutomationId("RootWebArea"));
+        for (int attempt = 0; attempt < attempts; attempt++)
+        {
+            try
+            {
+                var found = root.FindFirstDescendant(page);
+                if (found is not null) return found;
+            }
+            catch { /* the window went away or refused: the same as no page */ }
+            if (attempt + 1 == attempts) break;
+            // Chromium switches its accessibility tree on for the first client that asks and fills
+            // it in after answering; a plain Document query is the nudge, the pause the fill-in time.
+            try { root.FindFirstDescendant(cf.ByControlType(ControlType.Document)); } catch { }
+            Thread.Sleep(pauseMs);
+        }
+        return null;
     }
 
     /// <summary>

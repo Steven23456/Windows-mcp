@@ -31,6 +31,24 @@ public class RegistryServiceTests : IDisposable
         await act.Should().ThrowAsync<KeyNotFoundException>();
     }
 
+    /// <summary>
+    /// A-12: the mocked <c>VirtualDesktopServiceTests</c> mimic this exact pair of failures, so
+    /// the real behaviour is pinned here — a missing <b>key</b> is a KeyNotFoundException (above),
+    /// a missing <b>value</b> under a key that exists is an IOException out of GetValueKind, not
+    /// a dto with null Data. A mock that got this wrong would let a service that swallows the
+    /// wrong exception ship green.
+    /// </summary>
+    [Fact]
+    public async Task Get_throws_IOException_for_a_missing_value_under_an_existing_key()
+    {
+        var svc = new RegistryService();
+        await svc.SetAsync("HKCU", _ns, "Present", "hello", "String");
+
+        Func<Task> act = () => svc.GetAsync("HKCU", _ns, "NoSuchValue");
+
+        await act.Should().ThrowAsync<IOException>();
+    }
+
     [Fact]
     public async Task EnumerateValues_returns_all_values_with_kinds()
     {

@@ -66,6 +66,28 @@ public class OcrServiceTests
             Times.Once, "the cursor would occlude the very glyphs OCR is reading");
     }
 
+    /// <summary>
+    /// A-10 (R4): OCR names no backend, so it takes the process default — <c>auto</c> means the
+    /// compositor where it works and GDI where it does not, which is exactly what a text read
+    /// wants. Naming one here would freeze OCR on GDI for every server, whatever it was started
+    /// with, and would return black pixels for the GPU-accelerated windows A-10 exists for.
+    /// </summary>
+    [Fact]
+    public async Task ExtractTextAsync_leaves_the_backend_at_the_process_default()
+    {
+        var mock = ThrowingShotMock();
+        var service = new OcrService(mock.Object);
+
+        Func<Task> act = () => service.ExtractTextAsync(new ScreenRegion(10, 20, 30, 40));
+
+        await act.Should().ThrowAsync<CaptureReached>();
+        mock.Verify(s => s.CaptureAsync(
+            It.IsAny<ScreenRegion?>(),
+            It.Is<CaptureOptions>(o => o.Backend == "auto"),
+            It.IsAny<CancellationToken>()),
+            Times.Once, "the tool has no 'backend' argument for ocr, so the server's own default applies");
+    }
+
     [Fact]
     public async Task ExtractTextAsync_passes_a_null_region_through_unchanged()
     {

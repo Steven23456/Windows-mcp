@@ -13,6 +13,7 @@ using ModelContextProtocol.Protocol;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Hosting;
+using WindowsMcp.Tests.Fixtures;
 
 namespace WindowsMcp.Tests.Hosting;
 
@@ -645,6 +646,82 @@ public class HttpTransportTests
         text.Should().Contain("Interactive (").And.Contain("el_12");
     }
 
+    /// <summary>
+    /// A-5 phase 1 (R7): <c>use_dom</c> reaches the service as a request flag over the wire, and
+    /// the Pages block comes back through the JSON-RPC round trip. Before A-5 this call was a tool
+    /// error; the service is mocked here because the transport, not the browser, is what is under
+    /// test — <c>HttpTransportDomSnapshotTests</c> is the non-mocked sibling.
+    /// </summary>
+    [Fact]
+    public async Task Snapshot_use_dom_over_http_forwards_the_flag_and_returns_the_pages()
+    {
+        var page = new SnapshotPage("A5 Probe Page", "el_7", "A5 Probe Page", "http://127.0.0.1:9999/a5",
+            new ScrollInfo(12, 0, true, false), ["Probe heading"], null);
+        var uia = new Mock<IUIAutomationService>();
+        uia.Setup(s => s.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FixedSnapshot with { Pages = [page] });
+
+        await using var server = await Harness.StartAsync(
+            configureServices: services => services.AddSingleton(uia.Object));
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var snapshot = SnapshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(snapshot, new Dictionary<string, object?>
+        {
+            ["use_dom"] = true,
+            ["format"] = "json",
+        });
+
+        result.IsError.Should().NotBe(true, "use_dom is implemented for Chromium as of A-5 phase 1");
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject.Text;
+        using var doc = JsonDocument.Parse(text);
+        var reported = doc.RootElement.GetProperty("Pages")[0];
+        reported.GetProperty("DocumentId").GetString().Should().Be("el_7");
+        reported.GetProperty("Url").GetString().Should().Be("http://127.0.0.1:9999/a5");
+        reported.GetProperty("Text")[0].GetString().Should().Be("Probe heading");
+
+        uia.Verify(s => s.SnapshotAsync(
+            It.Is<SnapshotRequest>(r => r.UseDom), It.IsAny<CancellationToken>()),
+            Times.Once, "the flag the caller sent is the flag the service is given");
+    }
+
+    internal static string WindowToolName(IEnumerable<McpClientTool> tools) =>
+        tools.Single(t => t.Name.Replace("_", "").Equals("window", StringComparison.OrdinalIgnoreCase)).Name;
+
+    /// <summary>
+    /// A-12 phase 1 (R6): <c>window(action:"desktops")</c> through the real host with the real
+    /// services — the one test that fails if <c>IVirtualDesktopService</c> is never registered in
+    /// <c>AddWindowsMcp</c> (WindowTools takes it as a constructor argument, so the tool call
+    /// dies with a DI error). Shape only: a box may legitimately list no desktops.
+    /// </summary>
+    [Fact]
+    public async Task Window_desktops_over_http_returns_the_desktop_envelope()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var window = WindowToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(window, new Dictionary<string, object?>
+        {
+            ["action"] = "desktops",
+        });
+
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject.Text;
+        result.IsError.Should().NotBe(true,
+            "an unusual virtual-desktop registry layout is data, not an error - the server said: {0}", text);
+        using var doc = JsonDocument.Parse(text);
+        doc.RootElement.GetProperty("all").ValueKind.Should().Be(JsonValueKind.Array);
+        doc.RootElement.TryGetProperty("current", out var current).Should().BeTrue();
+        current.ValueKind.Should().BeOneOf(JsonValueKind.Null, JsonValueKind.Object);
+        foreach (var desktop in doc.RootElement.GetProperty("all").EnumerateArray())
+        {
+            desktop.GetProperty("Id").GetString().Should().NotBeNullOrWhiteSpace();
+            desktop.GetProperty("Name").GetString().Should().NotBeNullOrWhiteSpace();
+            desktop.TryGetProperty("Index", out _).Should().BeTrue();
+            desktop.TryGetProperty("IsCurrent", out _).Should().BeTrue();
+        }
+    }
+
     /// <summary>One window, one element, one scrollable - enough that a dropped block shows.</summary>
     private static SnapshotResult FixedSnapshot
     {
@@ -659,6 +736,80 @@ public class HttpTransportTests
             return new SnapshotResult([window], window, new CursorPosition(612, 388), 0,
                 [element], [scrollable], null, false, 500, 57, 12);
         }
+    }
+
+    // ---- A-14 ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A-14 (R5): the flash reaches the tool through DI. <c>ScreenToolsTests</c> constructs the
+    /// tool by hand and would stay green if <c>IFlashOverlay</c> were never registered — the whole
+    /// screenshot surface would then fail to resolve at run time. Every collaborator the tool needs
+    /// is mocked here, so this is the DI edge and nothing else.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_shows_the_flash_overlay_resolved_from_the_container()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var screenshotService = new Mock<IScreenshotService>();
+        screenshotService
+            .Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ScreenshotResult(png, 1920, 1080, ImageFormat.Png, 1920, 1080, 1.0));
+        var windowService = new Mock<IWindowService>();
+        windowService.Setup(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new MonitorInfo(0, "Monitor0", 0, 0, 1920, 1080, true)]);
+        var inputService = new Mock<IInputService>();
+        inputService.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CursorPosition(100, 100));
+        var uia = new Mock<IUIAutomationService>();
+        var flash = new Mock<IFlashOverlay>();
+
+        await using var server = await Harness.StartAsync(configureServices: services =>
+        {
+            services.AddSingleton(screenshotService.Object);
+            services.AddSingleton(windowService.Object);
+            services.AddSingleton(inputService.Object);
+            services.AddSingleton(uia.Object);
+            services.AddSingleton(flash.Object);
+        });
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var screenshot = ScreenshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?> { ["format"] = "png" });
+
+        result.IsError.Should().NotBe(true);
+        flash.Verify(f => f.Hide(), Times.Once, "the previous glow comes down before the shutter");
+        flash.Verify(f => f.Show(new ScreenRegion(0, 0, 1920, 1080), TimeSpan.FromSeconds(3.5)), Times.Once,
+            "the overlay the container handed the tool is the one that flashes");
+    }
+
+    /// <summary>
+    /// A-14 adds no tool arguments: the flash and the profiling are process options
+    /// (<c>--flash</c>, <c>--profile-snapshot</c>, roadmap C7), not per-call parameters. The schema
+    /// is the whole spec the model reads, so pinning the exact property set is what stops a knob
+    /// from leaking into it.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_and_snapshot_schemas_gained_no_parameters_in_A14()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        var screenshot = tools.Single(t => t.Name == ScreenshotToolName(tools));
+        screenshot.ProtocolTool.InputSchema.GetProperty("properties").EnumerateObject()
+            .Select(p => p.Name).Should().BeEquivalentTo(
+            [
+                "region", "display", "format", "output", "max_width", "max_height",
+                "scale", "quality", "include_cursor", "annotate", "grid_columns", "grid_rows",
+                // A-10's 'backend' is the one argument added since; the flash and the profiling
+                // switches are still process options and still absent.
+                "backend",
+            ], "no flash or profiling argument belongs on the tool");
+
+        var snapshot = tools.Single(t => t.Name == SnapshotToolName(tools));
+        snapshot.ProtocolTool.InputSchema.GetProperty("properties").EnumerateObject()
+            .Select(p => p.Name).Should().BeEquivalentTo(
+            ["scope", "window", "include_tree", "max_elements", "format", "use_dom"]);
     }
 
     /// <summary>
@@ -677,7 +828,71 @@ public class HttpTransportTests
         server.App.Services.GetRequiredService<IScreenshotService>()
             .Should().BeSameAs(screenshotService.Object, "configureServices runs AFTER AddWindowsMcp");
     }
+
+    // ---- A-10 ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A-10 (R5): the schema is where the model learns the argument exists and what it defaults
+    /// to. An advertised default the method does not apply is a lie the model acts on
+    /// (<c>ScreenToolsTests.Screenshot_defaults_to_the_process_backend</c> pins the other half).
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_schema_advertises_the_backend_argument_defaulting_to_auto()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var tools = await client.ListToolsAsync();
+        var screenshot = tools.Single(t => t.Name == ScreenshotToolName(tools));
+        var schema = screenshot.ProtocolTool.InputSchema.GetProperty("properties");
+
+        schema.TryGetProperty("backend", out var backend).Should()
+            .BeTrue("the parameter must reach the wire schema, not just the method signature");
+        backend.GetProperty("default").GetString().Should().Be("auto");
+        screenshot.ProtocolTool.Description.Should().Contain("backend",
+            "the metadata list in the description tells the model the field is there");
+    }
+
+    /// <summary>
+    /// A-10 (R5) through the real transport with <see cref="IScreenshotService"/> swapped at the
+    /// <c>BuildHttpApp</c> seam: the backend the service reports is what the metadata carries, over
+    /// the wire, for a client that has no other way to know which backend served it.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_reports_the_backend_that_produced_the_frame_over_http()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var screenshotService = new Mock<IScreenshotService>();
+        screenshotService
+            .Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ScreenshotResult(png, 1920, 1080, ImageFormat.Png, 1920, 1080, 1.0, null, 0, null, "wgc"));
+
+        await using var server = await Harness.StartAsync(configureServices: services =>
+            services.AddSingleton(screenshotService.Object));
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var screenshot = ScreenshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?>
+        {
+            ["format"] = "png",
+            ["backend"] = "auto",
+        });
+
+        result.IsError.Should().NotBe(true);
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject;
+        using var meta = JsonDocument.Parse(text.Text);
+
+        meta.RootElement.TryGetProperty("backend", out var backend).Should()
+            .BeTrue("A-10 metadata carries 'backend' on every screenshot");
+        backend.GetString().Should().Be("wgc", "the picture came from the compositor, whatever was asked for");
+
+        screenshotService.Verify(s => s.CaptureAsync(
+            It.IsAny<ScreenRegion?>(), It.Is<CaptureOptions>(o => o.Backend == "auto"),
+            It.IsAny<CancellationToken>()),
+            Times.Once, "the requested backend reaches the capture service through the real host");
+    }
 }
+
 
 /// <summary>
 /// The one A-7 test that captures the real screen through the real HTTP host. Split out of
@@ -746,5 +961,92 @@ public class HttpTransportScreenshotImageTests
         using var meta = JsonDocument.Parse(text.Text);
         meta.RootElement.GetProperty("format").GetString().Should().Be("jpeg");
         meta.RootElement.GetProperty("width").GetInt32().Should().Be(64);
+    }
+
+    /// <summary>
+    /// A-10 end to end: the tool argument, the real <c>ScreenshotService</c>, the real compositor
+    /// and the metadata, over the real transport. Every other backend test replaces one of those
+    /// with a mock (<c>ScreenToolsTests</c>, <c>HttpTransportTests</c>) or with the
+    /// <c>WgcFrameSource</c> seam (<c>ScreenshotFrameSourceTests</c>) — this is the only one where
+    /// a client asking for <c>backend:"wgc"</c> gets a picture the compositor actually produced.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_backend_wgc_captures_through_the_compositor_over_http()
+    {
+        await using var server = await HttpTransportTests.Harness.StartAsync();
+        await using var client = await HttpTransportTests.ConnectAsync(server.McpEndpoint);
+        var screenshot = HttpTransportTests.ScreenshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?>
+        {
+            ["region"] = "0,0,64,48",   // small: this is a wiring proof, not a capture-quality test
+            ["format"] = "png",
+            ["backend"] = "wgc",
+        });
+
+        result.IsError.Should().NotBe(true,
+            "a machine that supports WGC must serve a capture asked for by name, not refuse it");
+
+        var image = result.Content.OfType<ImageContentBlock>().Should().ContainSingle().Subject;
+        image.DecodedData.ToArray().Take(4).Should().Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, "PNG magic bytes");
+
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject;
+        using var meta = JsonDocument.Parse(text.Text);
+        meta.RootElement.GetProperty("backend").GetString().Should().Be("wgc",
+            "the frame came from the compositor and the metadata says so, through the whole stack");
+        meta.RootElement.GetProperty("width").GetInt32().Should().Be(64);
+        meta.RootElement.GetProperty("height").GetInt32().Should().Be(48);
+    }
+}
+
+
+/// <summary>
+/// A-5 phase 1 (R7): the one DOM test that drives the REAL <c>UIAutomationService</c> against a
+/// real Edge window through the real HTTP host — the non-mocked sibling of
+/// <see cref="HttpTransportTests.Snapshot_use_dom_over_http_forwards_the_flag_and_returns_the_pages"/>,
+/// which proves only that the flag and the DTO survive the wire.
+/// <para>
+/// Split out of <see cref="HttpTransportTests"/> for the same reason as
+/// <see cref="HttpTransportScreenshotImageTests"/>: that class is <c>Category=Integration</c>, and
+/// a <c>Category!=UIAutomation</c> filter does not exclude a test that carries both values.
+/// </para>
+/// </summary>
+[Trait("Category", "UIAutomation")]
+[Collection(EdgeCollection.Name)]
+public class HttpTransportDomSnapshotTests
+{
+    private readonly EdgeFixture _edge;
+
+    public HttpTransportDomSnapshotTests(EdgeFixture edge) => _edge = edge;
+
+    [Fact]
+    public async Task Snapshot_use_dom_over_http_returns_the_real_pages_section()
+    {
+        if (!_edge.Available) return;   // no Edge on this machine: nothing to assert
+
+        await using var server = await HttpTransportTests.Harness.StartAsync();
+        await using var client = await HttpTransportTests.ConnectAsync(server.McpEndpoint);
+        var snapshot = HttpTransportTests.SnapshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(snapshot, new Dictionary<string, object?>
+        {
+            ["scope"] = "window",
+            ["window"] = _edge.WindowTitle,
+            ["use_dom"] = true,
+            ["format"] = "json",
+        });
+
+        result.IsError.Should().NotBe(true);
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject.Text;
+        using var doc = JsonDocument.Parse(text);
+
+        var pages = doc.RootElement.GetProperty("Pages");
+        pages.GetArrayLength().Should().Be(1, "one browser window was in scope");
+        var page = pages[0];
+        page.GetProperty("Title").GetString().Should().Be(EdgeFixture.PageTitle);
+        page.GetProperty("Url").GetString().Should().StartWith(_edge.BaseUrl);
+        page.GetProperty("DocumentId").GetString().Should().NotBeNullOrWhiteSpace();
+        page.GetProperty("Text").EnumerateArray().Select(t => t.GetString())
+            .Should().Contain("Probe heading", "the page's visible text crosses the transport intact");
     }
 }

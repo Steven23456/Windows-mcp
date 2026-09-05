@@ -1,6 +1,9 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using WindowsMcp.Abstractions;
@@ -18,7 +21,9 @@ public sealed class ScreenTools
     private readonly IWindowService _windows;
     private readonly IInputService _input;
     private readonly IUIAutomationService _uia;
+    private readonly IFlashOverlay _flash;
     private readonly ScreenshotOptions _options;
+    private readonly ILogger _log;
 
     /// <param name="windows">
     /// Source of the monitor inventory (A-8) — the same order <c>multi_monitor</c> reports, which
@@ -33,8 +38,11 @@ public sealed class ScreenTools
     /// A-6: the element list <c>annotate</c> draws and lists, from the same snapshot the text
     /// block renders — so label N in the picture is row N in the text of the same call.
     /// </param>
-    public ScreenTools(IScreenshotService screenshot, IOcrService ocr, IWindowService windows, IInputService input, IUIAutomationService uia, ScreenshotOptions? options = null)
+    /// <param name="flash">The post-capture glow (A-14): hidden before every capture, shown after when <c>--flash</c> is on.</param>
+    public ScreenTools(IScreenshotService screenshot, IOcrService ocr, IWindowService windows, IInputService input, IUIAutomationService uia, IFlashOverlay flash, ScreenshotOptions? options = null, ILogger<ScreenTools>? log = null)
     {
+        _flash = flash;
+        _log = log ?? (ILogger)NullLogger<ScreenTools>.Instance;
         _screenshot = screenshot;
         _ocr = ocr;
         _windows = windows;
@@ -97,7 +105,7 @@ public sealed class ScreenTools
         return $"virtual-desktop x = {region.X} + imageX × {s}, y = {region.Y} + imageY × {s} — use these for click/drag/scroll";
     }
 
-    [McpServerTool, Description("Capture a screenshot and return it as MCP image content the model can see directly (parity A-7/A-8/A-9). Result content: a text block with one JSON object of metadata {width, height, originalWidth, originalHeight, format, coordinateSpace:'virtual-desktop', region (the rect actually captured, in virtual-desktop pixels), displays (every monitor: index, x, y, width, height, isPrimary), selectedDisplays? (when 'display' picked the rect), cursor {x, y, monitorIndex} (always: the mouse pointer in virtual-desktop pixels and which display it is on, -1 = none), cursorDrawn? ('icon' or 'ring', only when the pointer was painted onto the image), path? (file output), coordinateScale? (only when the image was downscaled) and note? (whenever image pixels are not virtual-desktop pixels 1:1 — a downscale, a region origin away from 0,0, or both: multiply image pixel coordinates by coordinateScale and add the region origin — the note spells it out; do this before calling click/drag/scroll)} followed, for inline output, by an image block. Default: the primary display, downscaled to fit max_width x max_height (1920x1080). With annotate:true (parity A-6) the same call also walks the desktop and returns the element list as a second text block — metadata, the element list (the rows snapshot prints, filtered to what this picture contains), then (inline output) the image — and draws a 2 px coloured box with a matching label chip around every interactive element in the picture; the labels are the snapshot's el_N ids, so label N in the image is row N of the text block from the same call, and they go straight to click/interact_element (valid until the next snapshot or annotated screenshot). Metadata then gains annotated:true, annotations (boxes that landed) and grid:{columns,rows} when a grid was asked for; grid captions are virtual-desktop coordinates, not image pixels.")]
+    [McpServerTool, Description("Capture a screenshot and return it as MCP image content the model can see directly (parity A-7/A-8/A-9). Result content: a text block with one JSON object of metadata {width, height, originalWidth, originalHeight, format, backend ('gdi' or 'wgc': which capture backend actually produced this picture), coordinateSpace:'virtual-desktop', region (the rect actually captured, in virtual-desktop pixels), displays (every monitor: index, x, y, width, height, isPrimary), selectedDisplays? (when 'display' picked the rect), cursor {x, y, monitorIndex} (always: the mouse pointer in virtual-desktop pixels and which display it is on, -1 = none), cursorDrawn? ('icon' or 'ring', only when the pointer was painted onto the image), path? (file output), coordinateScale? (only when the image was downscaled) and note? (whenever image pixels are not virtual-desktop pixels 1:1 — a downscale, a region origin away from 0,0, or both: multiply image pixel coordinates by coordinateScale and add the region origin — the note spells it out; do this before calling click/drag/scroll)} followed, for inline output, by an image block. Default: the primary display, downscaled to fit max_width x max_height (1920x1080). If a capture comes back black, retry with backend 'wgc' — GDI returns black for GPU-accelerated and DRM-protected windows. With annotate:true (parity A-6) the same call also walks the desktop and returns the element list as a second text block — metadata, the element list (the rows snapshot prints, filtered to what this picture contains), then (inline output) the image — and draws a 2 px coloured box with a matching label chip around every interactive element in the picture; the labels are the snapshot's el_N ids, so label N in the image is row N of the text block from the same call, and they go straight to click/interact_element (valid until the next snapshot or annotated screenshot). Metadata then gains annotated:true, annotations (boxes that landed) and grid:{columns,rows} when a grid was asked for; grid captions are virtual-desktop coordinates, not image pixels.")]
     public async Task<CallToolResult> Screenshot(
         [Description(RegionDescription)] string? region = null,
         [Description(DisplayDescription)] string? display = null,
@@ -110,11 +118,14 @@ public sealed class ScreenTools
         [Description("Draw the mouse cursor onto the capture (default: true): the real cursor image when it can be composited, otherwise a drawn ring — cursorDrawn in the metadata says which. The cursor position is reported either way")] bool include_cursor = true,
         [Description("Draw a labelled box around every interactive element in the picture and return the matching element list as a second text block (default: false). Costs one desktop UI walk (the same snapshot walk, so it evicts the previous snapshot's ids); the labels are the snapshot's el_N ids")] bool annotate = false,
         [Description("Overlay this many equal columns as vertical guide lines, each captioned with its virtual-desktop x coordinate; 0 = no vertical lines (default 0, max 64). Works without annotate")] int grid_columns = 0,
-        [Description("Overlay this many equal rows as horizontal guide lines, each captioned with its virtual-desktop y coordinate; 0 = no horizontal lines (default 0, max 64). Works without annotate")] int grid_rows = 0)
+        [Description("Overlay this many equal rows as horizontal guide lines, each captioned with its virtual-desktop y coordinate; 0 = no horizontal lines (default 0, max 64). Works without annotate")] int grid_rows = 0,
+        [Description("Capture backend: auto (default) | gdi | wgc. wgc uses Windows.Graphics.Capture, the compositor's own frames, which show GPU-accelerated, hardware-overlay and DRM-protected surfaces that gdi's screen copy returns black for; gdi is the classic screen copy. auto prefers wgc and falls back to gdi silently, while backend 'wgc' fails with an error if the compositor cannot serve the rect. The metadata 'backend' field always says which one produced the image")] string backend = "auto")
     {
         // Validate every argument before touching the screen: a bad call must not cost a capture.
         bool toFile = ParseOutput(output);
         var fmt = ResolveFormat(format, toFile);
+        if (backend.ToLowerInvariant() is not ("auto" or "gdi" or "wgc"))
+            throw new ArgumentException($"Unknown backend '{backend}'; expected auto|gdi|wgc");
         if (max_width < 0)
             throw new ArgumentException($"max_width must be 0 (no limit) or positive, got {max_width}");
         if (max_height < 0)
@@ -127,10 +138,23 @@ public sealed class ScreenTools
             throw new ArgumentException($"grid_columns must be 0 (no grid) to {MaxGridDivisions}, got {grid_columns}");
         if (grid_rows is < 0 or > MaxGridDivisions)
             throw new ArgumentException($"grid_rows must be 0 (no grid) to {MaxGridDivisions}, got {grid_rows}");
+        var profile = _options.Profile ? Stopwatch.StartNew() : null;
+        var stageMs = new Dictionary<string, long>();
+        long mark = 0;
+        void Stage(string name)
+        {
+            if (profile is null) return;
+            var now = profile.ElapsedMilliseconds;
+            stageMs[name] = now - mark;
+            mark = now;
+        }
+
         var (r, monitors, selected) = await ResolveRegionAsync(region, display);
+        Stage("resolve");
         // Read before the capture so the reported position is at most one capture old, and so a
         // broken cursor read (a broken desktop) never costs a capture. It is not masked.
         var cursor = await _input.GetCursorPositionAsync();
+        Stage("cursor");
 
         // A-6: the element walk happens BEFORE the capture so label N in the picture is row N of
         // the text block from this same call; only what lies inside the captured rect is kept.
@@ -144,12 +168,25 @@ public sealed class ScreenTools
             listed = snapshot with { Interactive = kept, Scrollable = keptScroll };
             if (kept.Length > 0)
                 boxes = kept.Select(e => new AnnotationBox(e.ElementId, e.Bounds)).ToArray();
+            Stage("snapshot");
         }
         GridSpec? grid = grid_columns > 0 || grid_rows > 0 ? new GridSpec(grid_columns, grid_rows) : null;
 
+        // A-14: the glow must never be in a picture — hide it before every capture, whatever the switch says.
+        _flash.Hide();
+
         // The process-level --screenshot-scale applies on top of the call's own scale.
         var result = await _screenshot.CaptureAsync(r,
-            new CaptureOptions(fmt, max_width, max_height, scale * _options.Scale, quality, include_cursor, cursor, boxes, grid));
+            new CaptureOptions(fmt, max_width, max_height, scale * _options.Scale, quality, include_cursor, cursor, boxes, grid, _options.Profile, backend));
+        Stage("capture");
+
+        // ...and shown around what was just captured, so a person at the machine sees what the agent looked at.
+        bool flashed = false;
+        if (_options.Flash)
+        {
+            _flash.Show(r, TimeSpan.FromSeconds(3.5));
+            flashed = _flash.IsVisible;   // report what happened (a host with no window station shows nothing), not what was asked
+        }
 
         // Report what was ENCODED, not what was asked for — the image block must never lie
         // about the bytes it carries.
@@ -161,6 +198,7 @@ public sealed class ScreenTools
             ["originalWidth"] = result.OriginalWidth,
             ["originalHeight"] = result.OriginalHeight,
             ["format"] = isJpeg ? "jpeg" : "png",
+            ["backend"] = result.Backend,   // what produced the picture, not what was asked for
             ["coordinateSpace"] = "virtual-desktop",
             // Always: image (0,0) is this rect's origin, which is not (0,0) on a second monitor.
             ["region"] = new { x = r.X, y = r.Y, width = r.Width, height = r.Height },
@@ -184,6 +222,16 @@ public sealed class ScreenTools
         }
         if (grid is not null)
             meta["grid"] = new { columns = grid.Columns, rows = grid.Rows };
+        if (flashed)
+            meta["flash"] = true;
+        if (profile is not null)
+        {
+            // The tool's own steps, then the service's finer-grained ones (a name clash: the service wins).
+            foreach (var st in result.Stages ?? [])
+                stageMs[st.Stage] = st.Ms;
+            meta["stages"] = stageMs;
+            _log.LogInformation("screenshot stages: {Stages}", string.Join(", ", stageMs.Select(kv => $"{kv.Key} {kv.Value} ms")));
+        }
 
         var elementList = listed is null ? null : new TextContentBlock { Text = SnapshotRenderer.Render(listed) };
 

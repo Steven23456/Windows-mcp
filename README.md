@@ -86,10 +86,14 @@ $env:WINDOWSMCP_API_KEY = "<a long random secret>"
 | `--api-key <key>` | `WINDOWSMCP_API_KEY` | — | Bearer token (≥ 16 printable ASCII chars). **Required** unless `--bind` is loopback |
 | `--screenshot-scale <0.1-1.0>` | `WINDOWSMCP_SCREENSHOT_SCALE` | `1.0` | Multiplies every `screenshot` call's own `scale`; also applies to **stdio** |
 | `--max-tree-elements <n>` | `WINDOWSMCP_MAX_TREE_ELEMENTS` | `500` | Element budget for `snapshot`/`get_state` when a call names none; also applies to **stdio** |
+| `--flash <on\|off>` | `WINDOWSMCP_FLASH` | `on` | Orange glow around the captured area for ~3.5 s after every `screenshot` — the signal to a person at the machine; also applies to **stdio** |
+| `--profile-snapshot <on\|off>` | `WINDOWSMCP_PROFILE_SNAPSHOT` | `off` | Per-stage timings on `snapshot`/`screenshot` results, also logged to stderr; also applies to **stdio** |
+| `--screenshot-backend <auto\|gdi\|wgc>` | `WINDOWSMCP_SCREENSHOT_BACKEND` | `auto` | Which backend reads the screen when a `screenshot` call says `auto`: `wgc` = Windows.Graphics.Capture, `gdi` = the classic screen copy; also applies to **stdio** |
 
-`WindowsMcp.exe --help` prints the same options (it lists `--screenshot-scale` and
-`--max-tree-elements` under a "Capture options (both transports)" heading, since neither is
-HTTP-only). No arguments = stdio, unchanged.
+`WindowsMcp.exe --help` prints the same options (it lists `--screenshot-scale`,
+`--max-tree-elements`, `--flash`, `--profile-snapshot` and `--screenshot-backend` under a
+"Capture options (both transports)" heading, since none of them is HTTP-only). No arguments =
+stdio, unchanged.
 
 **Security model.** Every tool — `powershell`, `file_write`, `registry_set`,
 `process kill`, … — is reachable on that port. So the server refuses to start on a

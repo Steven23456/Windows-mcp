@@ -3,16 +3,19 @@
 **Baseline:** 2026-09-04
 **Upstream:** [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) `main` = **v0.8.5**
 (released 2026-08-01; Python ≥ 3.14, FastMCP 3, 20 tools).
-**Ours:** `main` @ `8cb40b6` + the phase-2/3/4 branches, 65 tools, plugin `0.7.3`, `CHANGELOG.md
+**Ours:** `main` @ `8cb40b6` + the phase-2/3/4/5 branches, 65 tools, plugin `0.7.3`, `CHANGELOG.md
 [Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1,
-phase 3's A-2/A-3/A-4 and phase 4's A-6. SDK `ModelContextProtocol` 2.2.0.
+phase 3's A-2/A-3/A-4, phase 4's A-6 and phase 5's A-14, A-12 (phase 1), A-10 and A-5 (phase 1).
+SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
 This is the working list of everything upstream can do that this server cannot (plus nine
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 — **all nine are
 now fixed**; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
-phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and the rest of section A is
-the next work).
+phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and phase 5 shipped A-14,
+A-12 phase 1, A-10 and A-5 phase 1 — so every section-A row is ticked, with only A-5's Firefox
+phase left open and A-12's phase 2 deliberately not planned; sections B, C and S are the next
+work).
 Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
 implementation sketch, files to touch, tests, and a "done when" bar.
@@ -69,16 +72,16 @@ function names are the stable anchor.
 | A-2 | Desktop-wide labeled interactive-element snapshot | P1 | L | A-1 | ☑ |
 | A-3 | Scrollable regions with scroll percentages | P2 | S | A-2 | ☑ |
 | A-4 | Element budget, truncation note, UIA caching | P1 | M | A-2 | ☑ |
-| A-5 | Browser DOM mode (Chromium; Firefox IA2) | P2 | L | A-2 | ☐ |
+| A-5 | Browser DOM mode (Chromium; Firefox IA2) | P2 | L | A-2 · [A-5](design/A-5-browser-dom-mode.md) | ☑ phase 1 (Chromium); Firefox open |
 | A-6 | Annotated screenshot (boxes, labels, grid, cursor) | P2 | M | A-2, A-7 | ☑ |
 | A-7 | Return screenshot as MCP image content | P1 | S | — | ☑ |
 | A-8 | Multi-display / virtual-desktop-coordinate capture | P1 | M | — | ☑ |
 | A-9 | Auto-downscale + scale env + coordinate-scale report | P1 | S | A-7 | ☑ |
-| A-10 | Alternative capture backend (WGC / DXGI) | P3 | M–L | — | ☐ |
+| A-10 | Alternative capture backend (WGC / DXGI) | P3 | M–L | [A-10](design/A-10-capture-backend.md) | ☑ |
 | A-11 | Cursor position in responses + drawn on capture | P2 | S | — | ☑ |
-| A-12 | Virtual desktops (report; optional manage) | P3 | L | A-1 | ☐ |
+| A-12 | Virtual desktops (report; optional manage) | P3 | L | A-1 | ☑ (phase 1) |
 | A-13 | Unicode hygiene (PUA strip, surrogate repair) | P2 | S | — | ☑ |
-| A-14 | Post-capture flash overlay + snapshot profiling | P3 | M | — | ☐ |
+| A-14 | Post-capture flash overlay + snapshot profiling | P3 | M | — | ☑ |
 | B-1 | `type`: target, clear, caret, press_enter, paste path | P1 | M | D-2 | ☐ |
 | B-2 | `drag`: duration / intermediate motion / from-cursor | P2 | S | D-3 | ☐ |
 | B-3 | `scroll` at current cursor or element | P2 | S | — | ☐ |
@@ -109,10 +112,10 @@ function names are the stable anchor.
 | S-9 | Claude Desktop Extension (`.mcpb`) + registry `server.json` | P3 | M | — | ☐ |
 | S-10 | Per-tool black-box tester skill | P3 | S | — | ☐ |
 
-**Suggested order.** **All defects (D-1 … D-9) are done** — the D section is closed. Next the
-screenshot cluster (A-7, A-9, A-8, A-11) because every agent loop starts with a screenshot.
-Then A-1 → A-2 → A-4, which unlock B-6, B-8, B-10, A-3, A-6. Quick wins B-5, B-1, B-2, B-3,
-C-2, C-7, S-8, S-1 can be interleaved anywhere. A-5, A-12, S-4 last.
+**Suggested order.** **All defects (D-1 … D-9) are done** — the D section is closed — and **so is
+section A** (A-5's Firefox phase is the only open sub-item; A-12's phase 2 is not planned). A-1 and
+A-2 have unlocked B-6, B-8 and B-10, and A-5's DOM work has unlocked C-5. Quick wins B-5, B-1,
+B-2, B-3, C-2, C-7, S-8, S-1 can be interleaved anywhere; S-4 last.
 The section-A sequencing, cross-item decisions (coordinate space, defaults, tool count, element
 ids, env vars) and per-item test seeds are in [`docs/design/A-roadmap.md`](design/A-roadmap.md).
 
@@ -600,7 +603,8 @@ BoundingRectangle, IsEnabled, IsOffscreen, HasKeyboardFocus, …)`, `TreeScope =
 note; a profile shows fewer COM calls per element than before.
 
 ### A-5 — Browser DOM mode (`use_dom`)  `P2 · L`
-- [ ] Not started
+- [x] Phase 1 (Chromium) done 2026-09-05 — [design note](design/A-5-browser-dom-mode.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (0.8.0 per roadmap C11)
+- [ ] Phase 2 (Firefox via MSAA/IA2) not started — a browser window with no `RootWebArea` is walked whole and its `Pages` entry says so
 
 **Upstream.** For Chrome/Edge the traversal looks for the element whose `AutomationId ==
 "RootWebArea"` and walks only that subtree, classifying by LegacyIAccessible role; browser chrome
@@ -611,7 +615,7 @@ Firefox exposes web content only via MSAA/IAccessible2, so `tree/ia2.py` fetches
 `Scrape(use_dom)` and `WaitFor(use_dom)` consume it; `Browser` enum = chrome.exe, msedge.exe,
 firefox.exe.
 
-**Ours.** Nothing browser-specific.
+**Ours (before A-5).** Nothing browser-specific.
 
 **Sketch.** Phase 1 (Chromium): `use_dom:true` on the A-2 snapshot — locate `RootWebArea`
 under the active browser window (`FindFirstDescendant(cf.ByAutomationId("RootWebArea"))`),
@@ -705,13 +709,13 @@ Ties into A-7's metadata block.
 **Done when.** A 3840×2160 capture returns ≤ 1920 wide with the correct scale factor reported.
 
 ### A-10 — Alternative capture backend (WGC / DXGI)  `P3 · M–L`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-10-capture-backend.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (0.8.0 per roadmap C11)
 
 **Upstream.** `desktop/screenshot.py` backend registry: `dxcam` (DXGI desktop duplication) →
 `mss` → Pillow, selected by `WINDOWS_MCP_SCREENSHOT_BACKEND=auto|dxcam|mss|pillow`; the used
 backend is echoed in the response.
 
-**Ours.** GDI `Graphics.CopyFromScreen` only — returns black for DRM/exclusive-fullscreen surfaces
+**Ours (before A-10).** GDI `Graphics.CopyFromScreen` only — returns black for DRM/exclusive-fullscreen surfaces
 and is slower on high-refresh multi-monitor setups.
 
 **Sketch.** `IScreenCaptureBackend` with `Gdi` and `WindowsGraphicsCapture`
@@ -738,7 +742,7 @@ true), or a drawn ring when the real cursor cannot be composited.
 **Done when.** Screenshot metadata reports the cursor and the image shows it.
 
 ### A-12 — Virtual desktops  `P3 · L`
-- [ ] Not started
+- [x] Phase 1 done 2026-09-05 — [design note](design/A-12-virtual-desktops.md); in `CHANGELOG.md [Unreleased]`, ships with the next release. Phase 2 (the undocumented interface) is not planned.
 
 **Upstream.** Every snapshot shows **Active Desktop** and **All Desktops** (names). `vdm/core.py`
 wraps the documented `IVirtualDesktopManager` (is-window-on-current, window's desktop GUID) and
@@ -747,7 +751,7 @@ move window) with names read from
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops\Desktops\{guid}\Name`.
 Only current/all are wired into tools; the rest are library functions.
 
-**Ours.** Nothing.
+**Ours (before A-12).** Nothing. Now `window(action:"desktops")` and `DesktopId` on every listed window — see the design note (on this Windows 11 build the registry has no `VirtualDesktopIDs`; the service falls back to the `Desktops` subkeys and to the foreground window's desktop).
 
 **Sketch.** Phase 1 (safe): documented `IVirtualDesktopManager` (`CLSID_VirtualDesktopManager`)
 to tag A-1 windows with `DesktopId`, plus registry names → `virtual_desktop(action=list|current)`.
@@ -778,7 +782,7 @@ titles: strip PUA, replace lone surrogates with U+FFFD, trim control chars.
 **Done when.** A window title containing an emoji and a VS Code sidebar both serialise cleanly.
 
 ### A-14 — Post-capture flash overlay and snapshot profiling  `P3 · M`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-14-flash-and-profiling.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `desktop/flash_overlay.py`: a layered, click-through, always-on-top window draws an
 orange glow around the captured area for ~3.5 s **after** capture (torn down before the next
@@ -786,7 +790,9 @@ capture so it never appears in an image); `WINDOWS_MCP_DISABLE_FLASH` turns it o
 `WINDOWS_MCP_PROFILE_SNAPSHOT` logs per-stage timings (context, tree, region filter, capture,
 resize, build).
 
-**Ours.** Neither.
+**Ours (before A-14).** Neither. Now `--flash on|off` / `WINDOWSMCP_FLASH` (the parser has no
+valueless flags, so the sketch's `WINDOWSMCP_DISABLE_FLASH` shipped as `--flash off`) and
+`--profile-snapshot on|off` / `WINDOWSMCP_PROFILE_SNAPSHOT` — see the design note.
 
 **Sketch.** Flash: `WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOPMOST` window with
 `UpdateLayeredWindow` on a dedicated thread; env `WINDOWSMCP_DISABLE_FLASH`. Profiling:

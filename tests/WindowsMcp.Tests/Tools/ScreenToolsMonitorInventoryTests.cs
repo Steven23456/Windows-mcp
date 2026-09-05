@@ -64,7 +64,7 @@ public class ScreenToolsMonitorInventoryTests
     /// </summary>
     private static ScreenTools MakeTools(IScreenshotService shot) =>
         new(shot, new Mock<IOcrService>().Object, new WindowService(), InputMock().Object,
-            new Mock<IUIAutomationService>().Object);
+            new Mock<IUIAutomationService>().Object, new Mock<IFlashOverlay>().Object);
 
     private static JsonElement Meta(CallToolResult result)
     {

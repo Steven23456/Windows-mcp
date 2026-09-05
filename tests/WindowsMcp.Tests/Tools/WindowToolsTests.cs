@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Reflection;
 using System.Text.Json;
 using FluentAssertions;
 using Moq;
@@ -17,7 +19,7 @@ public class WindowToolsTests
         var mock = new Mock<IWindowService>();
         mock.Setup(s => s.ExecuteAsync("minimize", "Notepad", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new WindowAction("minimize", "Notepad", true));
-        var tools = new WindowTools(mock.Object);
+        var tools = NewTools(mock.Object);
 
         var result = await tools.Window("minimize", "Notepad");
 
@@ -35,7 +37,7 @@ public class WindowToolsTests
                 new MonitorInfo(0, "DISPLAY1", 0,    0, 1920, 1080, true),
                 new MonitorInfo(1, "DISPLAY2", 1920, 0, 2560, 1440, false)
             });
-        var tools = new WindowTools(mock.Object);
+        var tools = NewTools(mock.Object);
 
         var result = await tools.MultiMonitor();
 
@@ -64,6 +66,14 @@ public class WindowToolsTests
         return doc.RootElement.Clone();
     }
 
+    /// <summary>
+    /// A-12 gave the tool a second collaborator. Every pre-A-12 test passes an untouched loose
+    /// mock for it: none of those actions may reach the virtual-desktop service, and the A-12
+    /// tests assert the reverse with <c>VerifyNoOtherCalls</c> on the window service.
+    /// </summary>
+    private static WindowTools NewTools(IWindowService window, IVirtualDesktopService? desktops = null)
+        => new(window, desktops ?? new Mock<IVirtualDesktopService>().Object);
+
     [Fact]
     public async Task Window_list_returns_every_field_of_every_window_as_a_json_array()
     {
@@ -74,7 +84,7 @@ public class WindowToolsTests
                 Info("Docs - Google Chrome", hwnd: 0x99, pid: 7, process: "chrome",
                      state: WindowState.Normal, zOrder: 1, isActive: false, isBrowser: true, monitorIndex: -1),
             ]);
-        var tools = new WindowTools(mock.Object);
+        var tools = NewTools(mock.Object);
 
         var root = Parse(await tools.Window("list"));
 
@@ -118,7 +128,7 @@ public class WindowToolsTests
         mock.Setup(s => s.ListAsync(It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([Info(state: state)]);
 
-        var root = Parse(await new WindowTools(mock.Object).Window("list"));
+        var root = Parse(await NewTools(mock.Object).Window("list"));
 
         root[0].GetProperty("State").GetString().Should().Be(expected);
     }
@@ -129,7 +139,7 @@ public class WindowToolsTests
         var mock = new Mock<IWindowService>();
         mock.Setup(s => s.ListAsync(false, true, It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
-        var tools = new WindowTools(mock.Object);
+        var tools = NewTools(mock.Object);
 
         var json = await tools.Window("list", include_minimized: false, include_hidden: true);
 
@@ -146,7 +156,7 @@ public class WindowToolsTests
         var mock = new Mock<IWindowService>();
         mock.Setup(s => s.ListAsync(It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([Info()]);
-        var tools = new WindowTools(mock.Object);
+        var tools = NewTools(mock.Object);
 
         var root = Parse(await tools.Window(action, "Notepad"));
 
@@ -164,7 +174,7 @@ public class WindowToolsTests
         var mock = new Mock<IWindowService>();
         mock.Setup(s => s.GetActiveAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Info(title: "Docs - Google Chrome", hwnd: 0x99, process: "chrome", isBrowser: true));
-        var tools = new WindowTools(mock.Object);
+        var tools = NewTools(mock.Object);
 
         var root = Parse(await tools.Window(action, "ignored"));
 
@@ -184,7 +194,7 @@ public class WindowToolsTests
     {
         var mock = new Mock<IWindowService>();
         mock.Setup(s => s.GetActiveAsync(It.IsAny<CancellationToken>())).ReturnsAsync((WindowInfo?)null);
-        var tools = new WindowTools(mock.Object);
+        var tools = NewTools(mock.Object);
 
         var json = await tools.Window("active");
 
@@ -202,7 +212,7 @@ public class WindowToolsTests
     public async Task Window_still_requires_a_title_for_the_acting_actions(string action)
     {
         var mock = new Mock<IWindowService>();
-        var tools = new WindowTools(mock.Object);
+        var tools = NewTools(mock.Object);
 
         var act = () => tools.Window(action);
 
@@ -217,7 +227,7 @@ public class WindowToolsTests
     public async Task Window_treats_a_blank_title_as_missing(string title)
     {
         var mock = new Mock<IWindowService>();
-        var tools = new WindowTools(mock.Object);
+        var tools = NewTools(mock.Object);
 
         var act = () => tools.Window("minimize", title);
 
@@ -235,14 +245,14 @@ public class WindowToolsTests
     public async Task Window_rejects_an_unknown_action_and_names_every_valid_one(string action, string? title)
     {
         var mock = new Mock<IWindowService>();
-        var tools = new WindowTools(mock.Object);
+        var tools = NewTools(mock.Object);
 
         var act = () => tools.Window(action, title);
 
         var ex = (await act.Should().ThrowAsync<ArgumentException>()).Which;
         ex.Message.Should().Contain(action, "the model needs to see what it sent")
-            .And.Contain("list|active|minimize|maximize|restore|close",
-                "the two new actions belong in the error the model reads when it guesses wrong");
+            .And.Contain("list|active|desktops|minimize|maximize|restore|close",
+                "every action belongs in the error the model reads when it guesses wrong — A-12 added 'desktops'");
         mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never,
             "an unknown action is rejected by the tool, not turned into a no-op success by the service");
     }
@@ -252,12 +262,156 @@ public class WindowToolsTests
     {
         var mock = new Mock<IWindowService>();
 
-        var act = () => new WindowTools(mock.Object).Window("");
+        var act = () => NewTools(mock.Object).Window("");
 
         (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
-            .Should().Contain("list|active|minimize|maximize|restore|close",
+            .Should().Contain("list|active|desktops|minimize|maximize|restore|close",
                 "an empty action is as unknown as a misspelt one, and the model is told the whole menu");
         mock.VerifyNoOtherCalls();
+    }
+
+    // ---- A-12 phase 1: window(action:"desktops") ---------------------------------------------
+
+    private static readonly VirtualDesktopInfo[] TwoDesktops =
+    [
+        new("3b3c1d2e-4f50-6172-8394-a5b6c7d8e9fa", "Work", 0, false),
+        new("96a9d868-feea-4270-bf42-ffcfae7316f5", "Play", 1, true),
+    ];
+
+    private static Mock<IVirtualDesktopService> Desktops(params VirtualDesktopInfo[] all)
+    {
+        var mock = new Mock<IVirtualDesktopService>();
+        mock.Setup(d => d.ListAsync(It.IsAny<CancellationToken>())).ReturnsAsync(all);
+        return mock;
+    }
+
+    [Fact]
+    public async Task Window_desktops_returns_the_current_desktop_and_all_of_them()
+    {
+        var window = new Mock<IWindowService>();
+        var desktops = Desktops(TwoDesktops);
+
+        var root = Parse(await NewTools(window.Object, desktops.Object).Window("desktops"));
+
+        root.ValueKind.Should().Be(JsonValueKind.Object, "'desktops' is an envelope, not a bare array");
+        var all = root.GetProperty("all");
+        all.GetArrayLength().Should().Be(2);
+        all[0].GetProperty("Id").GetString().Should().Be("3b3c1d2e-4f50-6172-8394-a5b6c7d8e9fa");
+        all[0].GetProperty("Name").GetString().Should().Be("Work");
+        all[0].GetProperty("Index").GetInt32().Should().Be(0);
+        all[0].GetProperty("IsCurrent").GetBoolean().Should().BeFalse();
+        all[1].GetProperty("Name").GetString().Should().Be("Play");
+        all[1].GetProperty("IsCurrent").GetBoolean().Should().BeTrue();
+
+        var current = root.GetProperty("current");
+        current.ValueKind.Should().Be(JsonValueKind.Object);
+        current.GetProperty("Id").GetString().Should().Be("96a9d868-feea-4270-bf42-ffcfae7316f5");
+        current.GetProperty("Name").GetString().Should().Be("Play");
+        current.GetProperty("Index").GetInt32().Should().Be(1);
+        current.GetProperty("IsCurrent").GetBoolean().Should().BeTrue();
+
+        window.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Window_desktops_takes_current_from_the_list_it_just_returned()
+    {
+        // Resolved ambiguity: one service call, one truth. Reading `current` from a second call
+        // costs a second registry read and lets the two halves of one response disagree — so
+        // GetCurrentAsync (which is defined as "the IsCurrent entry of ListAsync") is not used
+        // here, and a mock that answers it differently must not change the response.
+        var desktops = Desktops(TwoDesktops);
+        desktops.Setup(d => d.GetCurrentAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new VirtualDesktopInfo("00000000-0000-0000-0000-000000000000", "Contradiction", 7, true));
+
+        var root = Parse(await NewTools(new Mock<IWindowService>().Object, desktops.Object).Window("desktops"));
+
+        root.GetProperty("current").GetProperty("Name").GetString().Should().Be("Play");
+        desktops.Verify(d => d.ListAsync(It.IsAny<CancellationToken>()), Times.Once,
+            "one call per tool call: the list is the whole answer");
+    }
+
+    [Fact]
+    public async Task Window_desktops_reports_current_null_when_no_desktop_is_flagged()
+    {
+        var desktops = Desktops(new VirtualDesktopInfo("3b3c1d2e-4f50-6172-8394-a5b6c7d8e9fa", "Desktop 1", 0, false));
+
+        var json = await NewTools(new Mock<IWindowService>().Object, desktops.Object).Window("desktops");
+
+        var root = Parse(json);
+        root.GetProperty("current").ValueKind.Should().Be(JsonValueKind.Null,
+            "null says 'not known', which is honest; omitting the field would make the model guess");
+        root.GetProperty("all").GetArrayLength().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Window_desktops_returns_an_empty_list_when_the_machine_reports_none()
+    {
+        // The observed 10.0.28000 shape: the VirtualDesktops key has no VirtualDesktopIDs value.
+        var desktops = Desktops();
+
+        var root = Parse(await NewTools(new Mock<IWindowService>().Object, desktops.Object).Window("desktops"));
+
+        root.GetProperty("all").GetArrayLength().Should().Be(0, "no desktops is an empty array, not an error");
+        root.GetProperty("current").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    [Theory]
+    [InlineData("desktops", null)]
+    [InlineData("DESKTOPS", null)]
+    [InlineData("Desktops", "Notepad")]
+    public async Task Window_desktops_is_case_insensitive_and_needs_no_title(string action, string? title)
+    {
+        var window = new Mock<IWindowService>();
+        var desktops = Desktops(TwoDesktops);
+
+        var root = Parse(await NewTools(window.Object, desktops.Object).Window(action, title));
+
+        root.GetProperty("all").GetArrayLength().Should().Be(2);
+        desktops.Verify(d => d.ListAsync(It.IsAny<CancellationToken>()), Times.Once);
+        window.VerifyNoOtherCalls();
+    }
+
+    // The description is the only spec the model reads: an action it does not name is an action
+    // that is never called, and a field it calls "reserved, null" is a field that is never used.
+
+    [Fact]
+    public void Window_description_advertises_the_desktops_action()
+    {
+        var description = typeof(WindowTools).GetMethod(nameof(WindowTools.Window))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should()
+            .Contain("desktops", "the new action has to be in the menu the model reads")
+            .And.NotContain("DesktopId (reserved, null)",
+                "A-12 fills DesktopId; the description must stop telling the model the field is always null");
+    }
+
+    [Fact]
+    public void Window_action_parameter_lists_the_desktops_action_too()
+    {
+        var info = typeof(WindowTools).GetMethod(nameof(WindowTools.Window))!
+            .GetParameters().Single(p => p.Name == "action");
+
+        info.GetCustomAttribute<DescriptionAttribute>()!.Description.Should().Contain("desktops");
+    }
+
+    [Theory]
+    [InlineData("list")]
+    [InlineData("active")]
+    public async Task Window_list_and_active_never_touch_the_virtual_desktop_service(string action)
+    {
+        // A-12 fills DesktopId inside WindowService, not in the tool: the tool must not start
+        // making a second call per window list.
+        var window = new Mock<IWindowService>();
+        window.Setup(s => s.ListAsync(It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Info()]);
+        window.Setup(s => s.GetActiveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Info());
+        var desktops = Desktops(TwoDesktops);
+
+        await NewTools(window.Object, desktops.Object).Window(action);
+
+        desktops.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -267,7 +421,7 @@ public class WindowToolsTests
         var mock = new Mock<IWindowService>();
         mock.Setup(s => s.ExecuteAsync("MINIMIZE", "Notepad", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new WindowAction("MINIMIZE", "Notepad", true));
-        var tools = new WindowTools(mock.Object);
+        var tools = NewTools(mock.Object);
 
         var json = await tools.Window("MINIMIZE", "Notepad");
 
@@ -288,7 +442,7 @@ public class WindowToolsTests
         var mock = new Mock<IWindowService>();
         mock.Setup(s => s.SwitchToAsync("Notepad", It.IsAny<CancellationToken>())).ReturnsAsync(found);
 
-        var text = await new WindowTools(mock.Object).SwitchToWindow("Notepad");
+        var text = await NewTools(mock.Object).SwitchToWindow("Notepad");
 
         text.Should().Be(expected);
         mock.Verify(s => s.SwitchToAsync("Notepad", It.IsAny<CancellationToken>()), Times.Once);
@@ -302,7 +456,7 @@ public class WindowToolsTests
         var mock = new Mock<IWindowService>();
         mock.Setup(s => s.SwitchToAsync("Notepad", It.IsAny<CancellationToken>())).ReturnsAsync(found);
 
-        var text = await new WindowTools(mock.Object).Focus("Notepad");
+        var text = await NewTools(mock.Object).Focus("Notepad");
 
         text.Should().Be(expected, "the alias reports 'focused', not 'switched to'");
         mock.Verify(s => s.SwitchToAsync("Notepad", It.IsAny<CancellationToken>()), Times.Once);
@@ -314,7 +468,7 @@ public class WindowToolsTests
         var mock = new Mock<IWindowService>();
         mock.Setup(s => s.LaunchAsync("notepad.exe", It.IsAny<CancellationToken>())).ReturnsAsync(4242);
 
-        var text = await new WindowTools(mock.Object).Launch("notepad.exe");
+        var text = await NewTools(mock.Object).Launch("notepad.exe");
 
         text.Should().Be("launched (pid=4242)");
         mock.Verify(s => s.LaunchAsync("notepad.exe", It.IsAny<CancellationToken>()), Times.Once);

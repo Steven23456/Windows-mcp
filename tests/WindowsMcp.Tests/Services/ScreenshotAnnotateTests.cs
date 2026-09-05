@@ -2,6 +2,7 @@ using FluentAssertions;
 using SkiaSharp;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Services;
+using WindowsMcp.Tests.Fixtures;
 using Xunit;
 using ImageFormat = WindowsMcp.Abstractions.Models.ImageFormat;
 
@@ -235,6 +236,7 @@ public class ScreenshotAnnotateTests
 /// <c>Category=UIAutomation</c>: excluded from headless runs.
 /// </summary>
 [Trait("Category", "UIAutomation")]
+[Collection(PointerAndPixelCollection.Name)]
 public class ScreenshotAnnotateDesktopTests
 {
     /// <summary>The top-left 200x100 of the primary display; the primary's origin is (0,0) by definition.</summary>

@@ -8,7 +8,8 @@ place those notes link back to for the cross-item decisions. ·
 closed). Phase 1 has since shipped — A-7, A-9, A-8, A-11 and A-13 — phase 2's A-1 with it, and
 phase 3's A-2 (with A-4 and A-3 inside it), which is the one new tool: **65 tools**; where the
 code deviates from the plan below, the item carries a **Shipped as** line and its design note has
-the reasoning. Phase 4's A-6 has since shipped too; phase 5 has not started. ·
+the reasoning. Phase 4's A-6 has since shipped too, and phase 5 with it — A-14, A-12 (phase 1), A-10
+and A-5 (phase 1) — which closes section A apart from A-5's Firefox follow-up. ·
 **Baseline facts** used below were read from the code on that commit; the `file:line` anchors
 will drift, the member names will not.
 
@@ -319,6 +320,10 @@ without a desktop:
 - **RED seed.** Stage timings present and non-negative; flash window class not present in the
   A-1 window list (it is a tool window — the filter test covers it); a capture taken during the
   flash does not contain the glow (`Integration`, pixel sample at the border).
+- **Shipped as** ([note](A-14-flash-and-profiling.md)): `--flash on|off` / `WINDOWSMCP_FLASH` and
+  `--profile-snapshot on|off` / `WINDOWSMCP_PROFILE_SNAPSHOT` (the parser has no valueless flags,
+  so no `--no-flash`); timings only when profiling is on, not always; logged at Information, not
+  Debug (the stderr logger's minimum); `flash` metadata reports the outcome.
 
 #### A-12 — Virtual desktops, phase 1 only  `P3 · L (phase 1: S) · ~1 day`
 
@@ -331,6 +336,10 @@ without a desktop:
 - **RED seed.** COM declaration smoke (`Integration`: create the manager and query the test
   host's own window); registry name parsing on fake `IRegistryService` values (missing name →
   `"Desktop N"`); `DesktopId` appears in `window list`.
+- **Shipped as** ([note](A-12-virtual-desktops.md)): phase 1 only, with fallbacks the plan did not
+  foresee — this Windows 11 build has no `VirtualDesktopIDs`/`CurrentVirtualDesktop`, so the list
+  comes from the `Desktops` subkeys and the current desktop from the foreground window's; the
+  envelope is the full `VirtualDesktopInfo`; no `IsOnCurrentDesktop` on `WindowInfo`.
 
 #### A-10 — Alternative capture backend  `P3 · M–L · ~3 days`
 
@@ -347,6 +356,14 @@ without a desktop:
 - **RED seed.** Backend selection by env and by fallback (fake backends); `auto` falls back
   when the first throws; metadata names the backend; `Integration`: both backends produce
   same-sized bitmaps of the primary.
+- **Shipped as** ([note](A-10-capture-backend.md)): no `IScreenCaptureBackend` interface — the
+  GDI path was not moved out; `WgcCaptureBackend` is one internal class and `ScreenshotService`
+  picks the frame source (`AcquireFrame`), with an internal frame-source seam for the headless
+  tests instead of fake backends. The selector is `--screenshot-backend` **and** the env var
+  (every option has both), plus a per-call `backend` argument on `screenshot` whose `auto` defers
+  to the process default. `IsBorderRequired` is absent from the 19041 projection, so the capture
+  border is not suppressed (Win11 does not draw one for monitor items here). The monitor path was
+  prototyped in the repo (a spike class, then the RED pass), not a scratch console app.
 
 #### A-5 — Browser DOM mode, Chromium only  `P2 · L · ~3 days`
 
@@ -361,6 +378,14 @@ without a desktop:
   normal walk with a note when it is absent; `DomText` order is document order. `UIAutomation`
   test needs an Edge window on a local page served by `LocalHttpServerFixture` — a new fixture
   that launches `msedge --app=<url>` and closes it.
+- **Shipped as** ([note](A-5-browser-dom-mode.md)): no Chromium role map — Edge exposes proper
+  UIA control types for page content, so the existing classifier is the role map and
+  `LegacyIAccessible` is not consulted. `DomText` shipped as `SnapshotPage.Text` inside a `Pages`
+  array on the result (one entry per browser window, with the document's id, title, URL and
+  scroll), rendered after the scrollable list. Upstream's `_dom_correction` became three rules in
+  a pure `DomCorrection` class (the page document is never interactive; a Text node repeating its
+  interactive parent's label is not content; blank text is dropped). The finder retries because
+  Chromium builds its tree lazily. `EdgeFixture` is as planned. Firefox stays the follow-up.
 
 ## 5. Effort and sequencing summary
 
