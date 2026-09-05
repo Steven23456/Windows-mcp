@@ -8,7 +8,8 @@ place those notes link back to for the cross-item decisions. ·
 closed). Phase 1 has since shipped — A-7, A-9, A-8, A-11 and A-13 — phase 2's A-1 with it, and
 phase 3's A-2 (with A-4 and A-3 inside it), which is the one new tool: **65 tools**; where the
 code deviates from the plan below, the item carries a **Shipped as** line and its design note has
-the reasoning. Phase 4's A-6 has since shipped too; phase 5 has not started. ·
+the reasoning. Phase 4's A-6 has since shipped too, and phase 5 with it — A-14, A-12 (phase 1), A-10
+and A-5 (phase 1) — which closes section A apart from A-5's Firefox follow-up. ·
 **Baseline facts** used below were read from the code on that commit; the `file:line` anchors
 will drift, the member names will not.
 
@@ -377,6 +378,14 @@ without a desktop:
   normal walk with a note when it is absent; `DomText` order is document order. `UIAutomation`
   test needs an Edge window on a local page served by `LocalHttpServerFixture` — a new fixture
   that launches `msedge --app=<url>` and closes it.
+- **Shipped as** ([note](A-5-browser-dom-mode.md)): no Chromium role map — Edge exposes proper
+  UIA control types for page content, so the existing classifier is the role map and
+  `LegacyIAccessible` is not consulted. `DomText` shipped as `SnapshotPage.Text` inside a `Pages`
+  array on the result (one entry per browser window, with the document's id, title, URL and
+  scroll), rendered after the scrollable list. Upstream's `_dom_correction` became three rules in
+  a pure `DomCorrection` class (the page document is never interactive; a Text node repeating its
+  interactive parent's label is not content; blank text is dropped). The finder retries because
+  Chromium builds its tree lazily. `EdgeFixture` is as planned. Firefox stays the follow-up.
 
 ## 5. Effort and sequencing summary
 

@@ -2,6 +2,20 @@
 
 ### Added
 
+- **Browser DOM mode on `snapshot`, Chromium only** (parity A-5 phase 1). `snapshot(use_dom:true)`
+  walks every browser window in scope (chrome/msedge/brave/opera/vivaldi) from the web page — the
+  `RootWebArea` document — instead of the window, so the address bar and tab strip never appear
+  and the interactive list is the page's links, buttons, inputs, checkboxes, selects and list
+  items with the same `el_N` ids and action hints as everywhere else. The result gains a `Pages`
+  section, one entry per browser window: the page document's id, title, URL, vertical scroll
+  percent and the visible page text in document order (the text form prints it after the
+  scrollable list; JSON carries `Pages`, absent when `use_dom` is off so nothing else changes).
+  The page document is listed as scrollable, never as a control; a text node that only repeats
+  its control's label is not page text. Chromium builds its accessibility tree lazily, so the
+  page finder retries a few times before concluding a browser window has no page; one with none
+  (still loading, or Firefox, which is a documented follow-up) is walked whole and its entry says
+  so. New pure `Services/UiTree/DomCorrection.cs`; `SnapshotRequest +UseDom`,
+  `SnapshotResult +Pages`, `SnapshotPage`. Design note: `docs/design/A-5-browser-dom-mode.md`.
 - **A second screen-capture backend: Windows.Graphics.Capture** (parity A-10). `screenshot`
   takes `backend: auto | gdi | wgc`. `wgc` reads the compositor's own frames — one
   `GraphicsCaptureItem` per monitor the rect touches, copied through a D3D11 staging texture and

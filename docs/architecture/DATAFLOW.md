@@ -127,7 +127,7 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
 1. MCP Request
    └─► snapshot(scope, window?, include_tree, max_elements, format, use_dom)
        UIAutomationTools validates in order: scope → the window/scope rule →
-       max_elements ≥ 0 → format → use_dom (refused: reserved for A-5)
+       max_elements ≥ 0 → format; use_dom is passed straight through
 
 2. UIAutomationService.SnapshotAsync(SnapshotRequest)
    ├─► Header, each collaborator read once:
@@ -137,6 +137,10 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
    ├─► Roots by scope: desktop = every non-minimised window (topmost first),
    │   foreground = the active entry (else UIA's foreground window),
    │   window = title match, exact then substring
+   ├─► use_dom: a target window with IsBrowser is re-rooted on its page —
+   │   FindPageDocument (Document + AutomationId "RootWebArea", retried
+   │   because Chromium fills its tree lazily); no page → the whole window
+   │   is walked and the Pages entry carries DomCorrection.NoPageNote
    └─► [STA thread] one ElementBudget for the whole call;
        UiTraverser.Walk(root, title, budget) per window under one CacheRequest;
        a window whose walk throws is logged and skipped
@@ -147,14 +151,23 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
    │     (Window, ControlType, Name, CenterX/CenterY from CenterOf(Bounds),
    │      Action from ActionFor, Focused, IsPassword, Value (null when
    │      password), Toggle, Expand, Shortcut, Range min/value/max)
-   └─► UiClassifier.IsScrollable → SnapshotScrollable (+ ScrollInfo)
+   ├─► UiClassifier.IsScrollable → SnapshotScrollable (+ ScrollInfo)
+   └─► DOM page: DomCorrection.SuppressesInteractive drops the page document
+       from the interactive list (it keeps its id and its scrollable row),
+       DomCorrection.PageFor projects the walk onto SnapshotPage
+       (DocumentId, Title, Url, Scroll, Text in document order)
 
 4. SnapshotResult { Windows, ActiveWindow, Cursor, CursorMonitorIndex,
                     Interactive[], Scrollable[], Tree?, Truncated,
-                    ElementLimit, ElementCount, CaptureMs }
+                    ElementLimit, ElementCount, CaptureMs,
+                    Stages? (--profile-snapshot: header, walk),
+                    Pages?  (use_dom only; null otherwise, so a plain
+                             snapshot serialises exactly as before) }
 
 5. MCP Response:
-   format="text" (default) → SnapshotRenderer.Render(result)  — compact rows
+   format="text" (default) → SnapshotRenderer.Render(result)  — compact rows,
+                             then the Pages section, the truncation note and
+                             the "Timing:" line when each applies
    format="json"           → JsonSerializer.Serialize(result)
 ```
 
@@ -319,7 +332,7 @@ PID reuse mid-walk). A snapshot row with no CIM date cannot be validated and is 
 
 ```
 ┌──────────┐   ┌───────────┐   ┌──────────────────┐   ┌─────────────────────┐
-│ AI Agent │   │ScreenTools│   │ScreenshotService │   │ SkiaSharp / GDI+    │
+│ AI Agent │   │ScreenTools│   │ScreenshotService │   │ SkiaSharp / GDI+/WGC│
 │          │   │           │   │   OcrService     │   │ Windows.Media.Ocr   │
 └────┬─────┘   └─────┬─────┘   └────────┬─────────┘   └──────────┬──────────┘
      │               │                  │                         │
@@ -335,7 +348,7 @@ PID reuse mid-walk). A snapshot row with no CIM date cannot be validated and is 
      │               │ CaptureAsync(r,  │                         │
      │               │  CaptureOptions) │                         │
      │               ├─────────────────►│                         │
-     │               │                  │ CopyFromScreen(r)       │
+     │               │                  │ AcquireFrame: gdi | wgc │
      │               │                  ├────────────────────────►│
      │               │                  │◄────────────────────────┤
      │               │                  │ cursor: icon or ring    │
@@ -344,6 +357,7 @@ PID reuse mid-walk). A snapshot row with no CIM date cannot be validated and is 
      │               │                  │ SKBitmap.Encode(jpg/png)│
      │               │                  ├────────────────────────►│
      │               │ ScreenshotResult │◄────────────────────────┤
+     │               │ flash: glow on r │                         │
      │ metadata text │◄─────────────────┤                         │
      │ + element list│                  │                         │
      │ + image block │                  │                         │
@@ -370,6 +384,25 @@ boxes requested). The tool then emits metadata (`annotated`, `annotations`, and 
 was asked for), `SnapshotRenderer.Render` of the filtered snapshot, and the image — three blocks
 inline, two with `output="file"`. A grid alone (`grid_columns`/`grid_rows` without `annotate`)
 needs no walk. Because the walk is a snapshot walk, it evicts the previous `snapshot`'s `el_N` ids.
+
+**Backend selection (A-10).** The call's `backend` argument is validated with the other arguments,
+before anything is captured. `ScreenshotService.ResolveBackend` turns `auto` into the process
+default (`--screenshot-backend` / `WINDOWSMCP_SCREENSHOT_BACKEND`, itself `auto` unless set), then
+`AcquireFrame` asks the compositor (`WgcCaptureBackend`: one `GraphicsCaptureItem` per monitor the
+rect touches → D3D11 staging texture → blit into the rect) or copies the screen with GDI. `auto`
+falls back to GDI silently when WGC is unsupported or refuses; an explicit `wgc` throws instead.
+Whatever produced the frame is what `ScreenshotResult.Backend` and the metadata `backend` field
+report — never `auto`. The cursor overlay, downscale, annotations and grid run identically on
+either frame.
+
+**Flash and profiling (A-14).** `IFlashOverlay.Hide()` runs immediately before every capture —
+unconditionally, so a glow left over from the previous call can never appear in the picture — and
+`Show(r, 3.5 s)` runs immediately after when `--flash` is on. The tool then reports `flash: true`
+from `IFlashOverlay.IsVisible`, i.e. what happened, not what was asked (a host with no window
+station shows nothing). With `--profile-snapshot` the tool's own stages (`resolve`, `cursor`,
+`snapshot` when annotating, `capture`) are merged with the service's finer-grained ones
+(`capture`, `cursor`, `resize`, `encode` — the service wins a name clash) into the metadata
+`stages` object, and the same numbers go to stderr at Information.
 
 ---
 
@@ -425,8 +458,9 @@ Host.CreateApplicationBuilder(args)
         │
         ▼
 builder.Services.AddSingleton<IInputService, InputService>()
-  ...  (36 services + the ScreenshotOptions record from --screenshot-scale
-       and the UiTreeOptions record from --max-tree-elements)
+  ...  (38 services + the ScreenshotOptions record from --screenshot-scale,
+       --flash, --profile-snapshot and --screenshot-backend, and the
+       UiTreeOptions record from --max-tree-elements and --profile-snapshot)
         │
         ▼
 builder.AddWindowsMcp(options)    ← Hosting/WindowsMcpHost: AddMcpServer(...) + filter + WithToolsFromAssembly()
@@ -638,4 +672,6 @@ Scrollable (1):
 | `PowerShellService` | Async wait on process exit | 15-min execution backstop (armed after the serialization gate); caller cancellation kills the process tree |
 | `ShellTools` heartbeat | Progress notification every 10s during a foreground `powershell` call | Lets spec-compliant clients reset their request timeout |
 | `JobService` | Background jobs poll-based; per-job 60-min backstop | Runs outside the PowerShell serialization gate |
+| `FlashOverlay` | The post-capture glow is up for 3.5 s, then taken down by its own timer — and unconditionally at the start of the next capture | `Show`/`Hide` marshal to the overlay thread and wait for it, bounded by a 2 s call timeout; both are silent no-ops with no interactive window station |
+| `UIAutomationService.FindPageDocument` | `use_dom` only: up to 3 attempts for the `RootWebArea` document, 150 ms apart, no pause after the last | Chromium builds its accessibility tree lazily on the first query, so attempt 1 can miss a page that is there |
 | MCP SDK transport (stdio or HTTP) | No artificial pauses — reads JSON-RPC frames continuously | Contrast: Python `pg.PAUSE = 1.0` |

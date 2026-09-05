@@ -3,16 +3,19 @@
 **Baseline:** 2026-09-04
 **Upstream:** [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) `main` = **v0.8.5**
 (released 2026-08-01; Python ≥ 3.14, FastMCP 3, 20 tools).
-**Ours:** `main` @ `8cb40b6` + the phase-2/3/4 branches, 65 tools, plugin `0.7.3`, `CHANGELOG.md
+**Ours:** `main` @ `8cb40b6` + the phase-2/3/4/5 branches, 65 tools, plugin `0.7.3`, `CHANGELOG.md
 [Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1,
-phase 3's A-2/A-3/A-4 and phase 4's A-6. SDK `ModelContextProtocol` 2.2.0.
+phase 3's A-2/A-3/A-4, phase 4's A-6 and phase 5's A-14, A-12 (phase 1), A-10 and A-5 (phase 1).
+SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
 This is the working list of everything upstream can do that this server cannot (plus nine
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 — **all nine are
 now fixed**; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
-phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and the rest of section A is
-the next work).
+phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and phase 5 shipped A-14,
+A-12 phase 1, A-10 and A-5 phase 1 — so every section-A row is ticked, with only A-5's Firefox
+phase left open and A-12's phase 2 deliberately not planned; sections B, C and S are the next
+work).
 Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
 implementation sketch, files to touch, tests, and a "done when" bar.
@@ -69,7 +72,7 @@ function names are the stable anchor.
 | A-2 | Desktop-wide labeled interactive-element snapshot | P1 | L | A-1 | ☑ |
 | A-3 | Scrollable regions with scroll percentages | P2 | S | A-2 | ☑ |
 | A-4 | Element budget, truncation note, UIA caching | P1 | M | A-2 | ☑ |
-| A-5 | Browser DOM mode (Chromium; Firefox IA2) | P2 | L | A-2 | ☐ |
+| A-5 | Browser DOM mode (Chromium; Firefox IA2) | P2 | L | A-2 · [A-5](design/A-5-browser-dom-mode.md) | ☑ phase 1 (Chromium); Firefox open |
 | A-6 | Annotated screenshot (boxes, labels, grid, cursor) | P2 | M | A-2, A-7 | ☑ |
 | A-7 | Return screenshot as MCP image content | P1 | S | — | ☑ |
 | A-8 | Multi-display / virtual-desktop-coordinate capture | P1 | M | — | ☑ |
@@ -109,10 +112,10 @@ function names are the stable anchor.
 | S-9 | Claude Desktop Extension (`.mcpb`) + registry `server.json` | P3 | M | — | ☐ |
 | S-10 | Per-tool black-box tester skill | P3 | S | — | ☐ |
 
-**Suggested order.** **All defects (D-1 … D-9) are done** — the D section is closed. Next the
-screenshot cluster (A-7, A-9, A-8, A-11) because every agent loop starts with a screenshot.
-Then A-1 → A-2 → A-4, which unlock B-6, B-8, B-10, A-3, A-6. Quick wins B-5, B-1, B-2, B-3,
-C-2, C-7, S-8, S-1 can be interleaved anywhere. A-5, A-12, S-4 last.
+**Suggested order.** **All defects (D-1 … D-9) are done** — the D section is closed — and **so is
+section A** (A-5's Firefox phase is the only open sub-item; A-12's phase 2 is not planned). A-1 and
+A-2 have unlocked B-6, B-8 and B-10, and A-5's DOM work has unlocked C-5. Quick wins B-5, B-1,
+B-2, B-3, C-2, C-7, S-8, S-1 can be interleaved anywhere; S-4 last.
 The section-A sequencing, cross-item decisions (coordinate space, defaults, tool count, element
 ids, env vars) and per-item test seeds are in [`docs/design/A-roadmap.md`](design/A-roadmap.md).
 
@@ -600,7 +603,8 @@ BoundingRectangle, IsEnabled, IsOffscreen, HasKeyboardFocus, …)`, `TreeScope =
 note; a profile shows fewer COM calls per element than before.
 
 ### A-5 — Browser DOM mode (`use_dom`)  `P2 · L`
-- [ ] Not started
+- [x] Phase 1 (Chromium) done 2026-09-05 — [design note](design/A-5-browser-dom-mode.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (0.8.0 per roadmap C11)
+- [ ] Phase 2 (Firefox via MSAA/IA2) not started — a browser window with no `RootWebArea` is walked whole and its `Pages` entry says so
 
 **Upstream.** For Chrome/Edge the traversal looks for the element whose `AutomationId ==
 "RootWebArea"` and walks only that subtree, classifying by LegacyIAccessible role; browser chrome
@@ -611,7 +615,7 @@ Firefox exposes web content only via MSAA/IAccessible2, so `tree/ia2.py` fetches
 `Scrape(use_dom)` and `WaitFor(use_dom)` consume it; `Browser` enum = chrome.exe, msedge.exe,
 firefox.exe.
 
-**Ours.** Nothing browser-specific.
+**Ours (before A-5).** Nothing browser-specific.
 
 **Sketch.** Phase 1 (Chromium): `use_dom:true` on the A-2 snapshot — locate `RootWebArea`
 under the active browser window (`FindFirstDescendant(cf.ByAutomationId("RootWebArea"))`),

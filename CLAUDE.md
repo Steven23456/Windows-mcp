@@ -182,8 +182,9 @@ behaviour, a one-line typo).
 - **COM vtable gaps:** when declaring COM interfaces, use `_VtblGap1_N()` to skip unused slots,
   or declare only the leading methods you call (an `InterfaceIsIUnknown` interface binds declared
   methods from vtable slot 3). Never stub later methods with guessed signatures — silent stack
-  corruption. See `ShortcutResolver.cs` (IShellLink/IPersistFile) — currently the only COM
-  interface declarations in `src/`.
+  corruption. See `ShortcutResolver.cs` (IShellLink/IPersistFile), `VirtualDesktopService.cs`
+  (IVirtualDesktopManager) and `WgcCaptureBackend.cs` (IGraphicsCaptureItemInterop,
+  IDirect3DDxgiInterfaceAccess) — the only COM interface declarations in `src/`.
 - **Native interop** for the startup report: `AuthenticodeInspector` (WinVerifyTrust, catalog-
   aware), `LspEnumerator` (`WSCEnumProtocols`), `ShortcutResolver` (IShellLink). Catalog-aware
   trust matters — most Windows components are catalog-signed, not embedded-signed.
