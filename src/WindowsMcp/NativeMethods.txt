@@ -25,3 +25,7 @@ LookupPrivilegeValue
 AdjustTokenPrivileges
 CloseHandle
 SetCurrentProcessExplicitAppUserModelID
+GetCursorInfo
+GetIconInfo
+DrawIconEx
+DeleteObject

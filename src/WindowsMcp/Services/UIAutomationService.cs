@@ -147,9 +147,10 @@ public sealed class UIAutomationService : IUIAutomationService
             IsSelected: TryGetSelected(el));
     }
 
+    // A-13: every UI-supplied string goes through UiText.Sanitize before it reaches a DTO.
     private static string TryGetName(AutomationElement el)
     {
-        try { return el.Name ?? ""; } catch { return ""; }
+        try { return UiText.Sanitize(el.Name); } catch { return ""; }
     }
 
     private static string TryGetControlType(AutomationElement el)
@@ -186,7 +187,12 @@ public sealed class UIAutomationService : IUIAutomationService
 
     private static string? TryGetValue(AutomationElement el)
     {
-        try { return el.Patterns.Value.PatternOrDefault?.Value.Value; } catch { return null; }
+        try
+        {
+            var raw = el.Patterns.Value.PatternOrDefault?.Value.Value;
+            return raw is null ? null : UiText.Sanitize(raw);
+        }
+        catch { return null; }
     }
 
     private static bool? TryGetChecked(AutomationElement el)
@@ -420,7 +426,7 @@ public sealed class UIAutomationService : IUIAutomationService
         return OnStaAsync(() =>
         {
             var el = ResolveCached(elementId);
-            return el.Patterns.Value.PatternOrDefault?.Value.Value ?? el.Name ?? "";
+            return UiText.Sanitize(el.Patterns.Value.PatternOrDefault?.Value.Value ?? el.Name);
         }, ct);
     }
 
@@ -507,6 +513,9 @@ public sealed class UIAutomationService : IUIAutomationService
                         var actual = el.Patterns.Value.PatternOrDefault?.Value.ValueOrDefault;
                         var source = "ValuePattern";
                         if (actual is null) { actual = el.Properties.Name.ValueOrDefault ?? ""; source = "Name"; }
+                        // A-13: compare and report what find_element/get_text hand the model, not the
+                        // raw string — otherwise a value read back from those tools can never match.
+                        actual = UiText.Sanitize(actual);
                         return Result(string.Equals(actual, expected, StringComparison.Ordinal), $"value is '{actual}' (from {source})");
                     }
                 default:
@@ -666,28 +675,38 @@ public sealed class UIAutomationService : IUIAutomationService
 
             // GridPattern exposes no headers; column headers come from the TablePattern (if the
             // control supports it). Without this the header row was always empty.
-            var headers = new string[cols];
+            var headers = new string?[cols];
             var table = el.Patterns.Table.PatternOrDefault;
             var headerEls = table?.ColumnHeaders.ValueOrDefault;
             if (headerEls != null)
             {
                 for (int c = 0; c < cols && c < headerEls.Length; c++)
-                    headers[c] = headerEls[c].Name ?? "";
+                    headers[c] = headerEls[c].Name;
             }
 
-            var data = new string[rows][];
+            var data = new string?[rows][];
             for (int r = 0; r < rows; r++)
             {
-                data[r] = new string[cols];
+                data[r] = new string?[cols];
                 for (int c = 0; c < cols; c++)
                 {
                     var cell = grid.GetItem(r, c);
-                    data[r][c] = cell.Name ?? "";
+                    data[r][c] = cell.Name;
                 }
             }
-            return new TableData(headers, data);
+            return BuildTable(headers, data);
         }, ct);
     }
+
+    /// <summary>
+    /// The projection from raw UIA strings to the <see cref="TableData"/> DTO: every header and
+    /// cell sanitised (A-13), a missing header "" rather than null. Separate from the pattern reads
+    /// so it is unit-testable on plain strings — a grid cannot be faked headless.
+    /// </summary>
+    internal static TableData BuildTable(string?[] rawHeaders, string?[][] rawCells)
+        => new(
+            rawHeaders.Select(UiText.Sanitize).ToArray(),
+            rawCells.Select(row => row.Select(UiText.Sanitize).ToArray()).ToArray());
 
     public Task<ElementInfo?> WaitForAsync(string text, int timeoutMs, int intervalMs,
         FindKind kind = FindKind.Any, FindScope scope = FindScope.Foreground,

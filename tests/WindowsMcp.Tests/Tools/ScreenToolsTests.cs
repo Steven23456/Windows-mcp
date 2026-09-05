@@ -1,4 +1,10 @@
+﻿using System.ComponentModel;
+using System.Globalization;
+using System.Reflection;
+using System.Text;
+using System.Text.Json;
 using FluentAssertions;
+using ModelContextProtocol.Protocol;
 using Moq;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
@@ -7,24 +13,1703 @@ using Xunit;
 
 namespace WindowsMcp.Tests.Tools;
 
+/// <summary>
+/// A-7: <c>screenshot</c> returns MCP content blocks (<see cref="CallToolResult"/>) instead of a
+/// JSON string, so the model sees the picture from one call. Everything here is mocked — the real
+/// capture path is covered by <c>ScreenshotServiceTests</c> (UIAutomation) and the transport
+/// round-trip by <c>HttpTransportScreenshotImageTests</c>.
+/// </summary>
 [Trait("Category", "Unit")]
-public class ScreenToolsTests
+public class ScreenToolsTests : IDisposable
 {
+    // 8 bytes that are not valid base64 of anything accidental, and start with the PNG magic.
+    private static readonly byte[] PngBytes = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    private static readonly byte[] JpegBytes = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46];
+
+    /// <summary>Files the "file" output mode wrote under %TEMP%\WindowsMcp, removed in Dispose.</summary>
+    private readonly List<string> _written = [];
+
+    public void Dispose()
+    {
+        foreach (var path in _written)
+        {
+            try { File.Delete(path); } catch { /* best effort */ }
+        }
+        GC.SuppressFinalize(this);
+    }
+
+    // ---- harness --------------------------------------------------------------------------
+
+    private static Mock<IScreenshotService> ShotMock(
+        byte[]? bytes = null, int width = 100, int height = 100, ImageFormat? resultFormat = null,
+        int? originalWidth = null, int? originalHeight = null, double coordinateScale = 1.0,
+        string? cursorDrawn = null)
+    {
+        var mock = new Mock<IScreenshotService>();
+        mock.Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ScreenRegion? _, CaptureOptions? opts, CancellationToken _) =>
+            {
+                var effective = resultFormat ?? opts?.Format ?? ImageFormat.Png;
+                return new ScreenshotResult(
+                    bytes ?? (effective == ImageFormat.Jpeg ? JpegBytes : PngBytes),
+                    width, height, effective,
+                    originalWidth ?? width, originalHeight ?? height, coordinateScale, cursorDrawn);
+            });
+        return mock;
+    }
+
+    // ---- A-8: the desktops a test can put the tool on ---------------------------------------
+
+    /// <summary>One primary 1920x1080 at the origin — the desktop every test gets unless it says otherwise.</summary>
+    internal static MonitorInfo[] SingleMonitor => [new(0, "Monitor0", 0, 0, 1920, 1080, true)];
+
+    /// <summary>
+    /// Two 1920x1080 side by side, primary at the origin: virtual screen (0,0,3840,1080),
+    /// display 1 = (1920,0,1920,1080).
+    /// </summary>
+    internal static MonitorInfo[] SideBySide =>
+    [
+        new(0, "Monitor0", 0, 0, 1920, 1080, true),
+        new(1, "Monitor1", 1920, 0, 1920, 1080, false),
+    ];
+
+    /// <summary>
+    /// The secondary sits left of and above the primary: virtual screen (-1920,-40,3840,1120).
+    /// EnumDisplayMonitors does not order by position, so index 1 is the one with the negative origin.
+    /// </summary>
+    internal static MonitorInfo[] LeftOfPrimary =>
+    [
+        new(0, "Monitor0", 0, 0, 1920, 1080, true),
+        new(1, "Monitor1", -1920, -40, 1920, 1080, false),
+    ];
+
+    private static Mock<IWindowService> WinMock(MonitorInfo[]? monitors = null)
+    {
+        var mock = new Mock<IWindowService>();
+        mock.Setup(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(monitors ?? SingleMonitor);
+        return mock;
+    }
+
+    /// <summary>
+    /// A-11: every screenshot reads the cursor, so the tool now needs an <see cref="IInputService"/>.
+    /// The default point (100,100) is inside the primary display of every desktop above, which
+    /// makes the expected <c>cursor.monitorIndex</c> 0 unless a test moves it.
+    /// </summary>
+    private static Mock<IInputService> InputMock(int x = 100, int y = 100)
+    {
+        var mock = new Mock<IInputService>();
+        mock.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CursorPosition(x, y));
+        return mock;
+    }
+
+    private static ScreenTools MakeTools(
+        IScreenshotService? shot = null, IOcrService? ocr = null, ScreenshotOptions? options = null,
+        IWindowService? windows = null, IInputService? input = null) =>
+        new(shot ?? ShotMock().Object, ocr ?? new Mock<IOcrService>().Object,
+            windows ?? WinMock().Object, input ?? InputMock().Object, options);
+
+    /// <summary>The whole primary display — what a call with neither region nor display captures (roadmap C3).</summary>
+    private static readonly ScreenRegion PrimaryRect = new(0, 0, 1920, 1080);
+
+    /// <summary>The single <see cref="CaptureOptions"/> the tool handed to the service.</summary>
+    private static CaptureOptions CapturedOptions(Mock<IScreenshotService> mock)
+    {
+        var calls = mock.Invocations
+            .Where(i => i.Method.Name == nameof(IScreenshotService.CaptureAsync))
+            .ToList();
+        calls.Should().ContainSingle("the tool captures exactly once per call");
+        return calls[0].Arguments[1].Should().BeOfType<CaptureOptions>().Subject;
+    }
+
+    private static TextContentBlock TextBlock(CallToolResult result) =>
+        result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject;
+
+    private static ImageContentBlock ImageBlock(CallToolResult result) =>
+        result.Content.OfType<ImageContentBlock>().Should().ContainSingle().Subject;
+
+    /// <summary>
+    /// SDK 2.2.0: <c>ImageContentBlock.Data</c> is the <b>base64 UTF-8 bytes</b> that go on the
+    /// wire (<c>DecodedData</c> is the raw image). This is the base64 text a client sees.
+    /// </summary>
+    private static string Base64Of(ImageContentBlock block) => Encoding.UTF8.GetString(block.Data.Span);
+
+    /// <summary>
+    /// A metadata field that the contract says is always present — asserted as present first so a
+    /// missing field fails with the field's name rather than a bare KeyNotFoundException.
+    /// </summary>
+    private static JsonElement Field(JsonElement meta, string name)
+    {
+        meta.TryGetProperty(name, out var value).Should().BeTrue($"the metadata must carry '{name}'");
+        return value;
+    }
+
+    /// <summary>Asserts a metadata rect equals <paramref name="expected"/> (x/y/width/height).</summary>
+    private static void ShouldBeRect(JsonElement rect, ScreenRegion expected)
+    {
+        rect.GetProperty("x").GetInt32().Should().Be(expected.X);
+        rect.GetProperty("y").GetInt32().Should().Be(expected.Y);
+        rect.GetProperty("width").GetInt32().Should().Be(expected.Width);
+        rect.GetProperty("height").GetInt32().Should().Be(expected.Height);
+    }
+
+    /// <summary>The metadata object carried by the single text block.</summary>
+    private static JsonElement Meta(CallToolResult result)
+    {
+        using var doc = JsonDocument.Parse(TextBlock(result).Text);
+        doc.RootElement.ValueKind.Should().Be(JsonValueKind.Object, "the text block is one JSON object of metadata");
+        return doc.RootElement.Clone();
+    }
+
+    /// <summary>Records the path a "file" capture wrote so Dispose can clean it up.</summary>
+    private string TrackPath(CallToolResult result)
+    {
+        var path = Meta(result).GetProperty("path").GetString()!;
+        _written.Add(path);
+        return path;
+    }
+
+    // ---- R1 / R2 — inline is the default, text then image ----------------------------------
+
+    [Fact]
+    public async Task Screenshot_default_output_is_inline_text_then_image()
+    {
+        var mock = ShotMock(JpegBytes, 640, 480);
+        var tools = MakeTools(mock.Object);
+
+        var result = await tools.Screenshot();
+
+        result.IsError.Should().NotBe(true, "a successful capture is not an error result");
+        result.Content.Should().HaveCount(2, "inline returns exactly one metadata block and one image block");
+        result.Content[0].Should().BeOfType<TextContentBlock>("the metadata block comes first");
+        result.Content[1].Should().BeOfType<ImageContentBlock>("the image block comes second");
+    }
+
+    [Fact]
+    public async Task Screenshot_inline_image_block_carries_the_captured_bytes()
+    {
+        var mock = ShotMock(JpegBytes, 640, 480);
+        var tools = MakeTools(mock.Object);
+
+        var result = await tools.Screenshot(null, format: "jpeg");
+
+        var image = ImageBlock(result);
+        Base64Of(image).Should().Be(Convert.ToBase64String(JpegBytes), "Data is the base64 of exactly the captured bytes");
+        image.DecodedData.ToArray().Should().Equal(JpegBytes);
+        image.MimeType.Should().Be("image/jpeg");
+    }
+
+    // ---- R10 — the old base64 test, rewritten against the new contract ----------------------
+
     [Fact]
     public async Task Screenshot_returns_base64_png()
     {
-        var pngBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
-        var shotMock = new Mock<IScreenshotService>();
-        shotMock
-            .Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<ImageFormat>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ScreenshotResult(pngBytes, 100, 100, ImageFormat.Png));
+        var mock = ShotMock(PngBytes, 100, 100);
+        var tools = MakeTools(mock.Object);
 
-        var tools = new ScreenTools(shotMock.Object, new Mock<IOcrService>().Object);
-        // output:"base64" required — the tool now defaults to output:"file" (returns a saved path,
-        // no inline data), so this base64-intent test must opt into base64 mode explicitly.
-        var result = await tools.Screenshot(null, "png", "base64");
+        // output:"base64" is kept as an alias of "inline" for one release (A-7).
+        var result = await tools.Screenshot(null, format: "png", output: "base64");
 
-        result.Should().Contain(Convert.ToBase64String(pngBytes));
-        result.Should().Contain("100");
+        Base64Of(ImageBlock(result)).Should().Be(Convert.ToBase64String(PngBytes));
+        ImageBlock(result).MimeType.Should().Be("image/png");
+        Meta(result).GetProperty("width").GetInt32().Should().Be(100);
+        Meta(result).GetProperty("height").GetInt32().Should().Be(100);
+    }
+
+    // ---- R3 — base64 is an alias of inline -------------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_base64_output_is_identical_to_inline()
+    {
+        var tools = MakeTools(ShotMock(PngBytes, 320, 240).Object);
+
+        var inline = await tools.Screenshot("10,20,320,240", format: "png", output: "inline");
+        var alias = await tools.Screenshot("10,20,320,240", format: "png", output: "base64");
+
+        TextBlock(alias).Text.Should().Be(TextBlock(inline).Text, "'base64' is an alias, not a different shape");
+        Base64Of(ImageBlock(alias)).Should().Be(Base64Of(ImageBlock(inline)));
+        ImageBlock(alias).MimeType.Should().Be(ImageBlock(inline).MimeType);
+        alias.Content.Should().HaveCount(inline.Content.Count);
+    }
+
+    // ---- R4 — file output ------------------------------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_file_output_returns_only_a_text_block()
+    {
+        var tools = MakeTools(ShotMock(PngBytes, 800, 600).Object);
+
+        var result = await tools.Screenshot(null, format: "png", output: "file");
+
+        result.Content.Should().ContainSingle("file mode returns the path only — no image block");
+        result.Content[0].Should().BeOfType<TextContentBlock>();
+        result.Content.OfType<ImageContentBlock>().Should().BeEmpty();
+
+        var meta = Meta(result);
+        _written.Add(meta.GetProperty("path").GetString()!);
+        meta.GetProperty("width").GetInt32().Should().Be(800);
+        meta.GetProperty("height").GetInt32().Should().Be(600);
+        meta.GetProperty("format").GetString().Should().Be("png");
+        meta.GetProperty("coordinateSpace").GetString().Should().Be("virtual-desktop");
+    }
+
+    [Fact]
+    public async Task Screenshot_file_output_writes_the_bytes_under_temp_windowsmcp()
+    {
+        var tools = MakeTools(ShotMock(PngBytes, 800, 600).Object);
+
+        var result = await tools.Screenshot(null, format: "png", output: "file");
+
+        var path = TrackPath(result);
+        var expectedDir = Path.Combine(Path.GetTempPath(), "WindowsMcp");
+        Path.GetDirectoryName(path).Should().Be(expectedDir.TrimEnd(Path.DirectorySeparatorChar));
+        File.Exists(path).Should().BeTrue("the reported path must actually exist");
+        (await File.ReadAllBytesAsync(path)).Should().Equal(PngBytes, "the file holds the captured bytes");
+    }
+
+    [Theory]
+    [InlineData("png", ".png")]
+    [InlineData("jpeg", ".jpg")]
+    public async Task Screenshot_file_output_extension_matches_the_format(string format, string extension)
+    {
+        var tools = MakeTools(ShotMock().Object);
+
+        var result = await tools.Screenshot(null, format: format, output: "file");
+
+        TrackPath(result).Should().EndWith(extension);
+    }
+
+    // ---- R5 — output validation ------------------------------------------------------------
+
+    [Theory]
+    [InlineData("path")]
+    [InlineData("")]
+    [InlineData("inline ")]
+    [InlineData("image")]
+    public async Task Screenshot_unknown_output_throws_naming_the_choices(string output)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        Func<Task> act = () => tools.Screenshot(null, format: "png", output: output);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("inline").And.Contain("file").And.Contain("base64");
+        mock.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the mode is validated before anything is captured");
+    }
+
+    [Theory]
+    [InlineData("INLINE")]
+    [InlineData("Inline")]
+    [InlineData("BASE64")]
+    public async Task Screenshot_output_matching_is_case_insensitive(string output)
+    {
+        var tools = MakeTools(ShotMock().Object);
+
+        var result = await tools.Screenshot(null, format: "png", output: output);
+
+        result.Content.Should().HaveCount(2);
+        Base64Of(ImageBlock(result)).Should().Be(Convert.ToBase64String(PngBytes));
+    }
+
+    [Fact]
+    public async Task Screenshot_file_output_matching_is_case_insensitive()
+    {
+        var tools = MakeTools(ShotMock().Object);
+
+        var result = await tools.Screenshot(null, format: "png", output: "FiLe");
+
+        result.Content.Should().ContainSingle();
+        TrackPath(result).Should().EndWith(".png");
+    }
+
+    // ---- R6 — format resolution -------------------------------------------------------------
+
+    [Theory]
+    [InlineData("inline")]
+    [InlineData("base64")]
+    public async Task Screenshot_format_auto_resolves_to_jpeg_for_inline_output(string output)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        var result = await tools.Screenshot(null, format: "auto", output: output);
+
+        mock.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.Is<CaptureOptions>(o => o.Format == ImageFormat.Jpeg), It.IsAny<CancellationToken>()), Times.Once);
+        ImageBlock(result).MimeType.Should().Be("image/jpeg");
+    }
+
+    [Fact]
+    public async Task Screenshot_format_auto_resolves_to_png_for_file_output()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        var result = await tools.Screenshot(null, format: "auto", output: "file");
+
+        mock.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.Is<CaptureOptions>(o => o.Format == ImageFormat.Png), It.IsAny<CancellationToken>()), Times.Once);
+        TrackPath(result).Should().EndWith(".png");
+    }
+
+    [Fact]
+    public async Task Screenshot_format_defaults_to_auto()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot();
+
+        mock.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.Is<CaptureOptions>(o => o.Format == ImageFormat.Jpeg), It.IsAny<CancellationToken>()),
+            Times.Once, "the default output is inline, so the default format resolves to jpeg");
+    }
+
+    [Theory]
+    [InlineData("png", "inline", ImageFormat.Png)]
+    [InlineData("jpeg", "inline", ImageFormat.Jpeg)]
+    [InlineData("png", "file", ImageFormat.Png)]
+    [InlineData("jpeg", "file", ImageFormat.Jpeg)]
+    [InlineData("png", "base64", ImageFormat.Png)]
+    [InlineData("jpeg", "base64", ImageFormat.Jpeg)]
+    public async Task Screenshot_explicit_format_is_passed_to_capture(string format, string output, ImageFormat expected)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        var result = await tools.Screenshot(null, format: format, output: output);
+        if (output == "file") TrackPath(result);
+
+        mock.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.Is<CaptureOptions>(o => o.Format == expected), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("PNG", ImageFormat.Png)]
+    [InlineData("JPEG", ImageFormat.Jpeg)]
+    [InlineData("Jpeg", ImageFormat.Jpeg)]
+    [InlineData("AUTO", ImageFormat.Jpeg)]
+    public async Task Screenshot_format_matching_is_case_insensitive(string format, ImageFormat expected)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(null, format: format, output: "inline");
+
+        mock.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.Is<CaptureOptions>(o => o.Format == expected), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("gif")]
+    [InlineData("jpg")]      // the extension is 'jpg'; the format name is 'jpeg'
+    [InlineData("")]
+    [InlineData("png ")]
+    public async Task Screenshot_unknown_format_throws_naming_the_choices(string format)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        Func<Task> act = () => tools.Screenshot(null, format: format, output: "inline");
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("png").And.Contain("jpeg").And.Contain("auto");
+        mock.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the format is validated before anything is captured");
+    }
+
+    // ---- R7 — inline metadata ---------------------------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_inline_metadata_reports_size_format_and_coordinate_space()
+    {
+        var tools = MakeTools(ShotMock(JpegBytes, 1920, 1080).Object);
+
+        var meta = Meta(await tools.Screenshot(null, format: "jpeg"));
+
+        meta.GetProperty("width").GetInt32().Should().Be(1920);
+        meta.GetProperty("height").GetInt32().Should().Be(1080);
+        meta.GetProperty("format").GetString().Should().Be("jpeg");
+        meta.GetProperty("coordinateSpace").GetString().Should().Be("virtual-desktop");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Screenshot_no_region_captures_the_primary_display_and_reports_it(string? region)
+    {
+        // A-8 replaces A-7's "region is absent when none was given": the rect is now resolved
+        // before the capture (primary by default, roadmap C3) and always reported, so the model
+        // can always map an image pixel back to a virtual-desktop coordinate.
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        var meta = Meta(await tools.Screenshot(region, format: "png", output: "inline"));
+
+        ShouldBeRect(Field(meta, "region"), PrimaryRect);
+        mock.Verify(s => s.CaptureAsync(PrimaryRect, It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Once, "the resolved rect is passed to CaptureAsync — the service never gets a null region again");
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_carries_the_region_when_one_was_given()
+    {
+        var tools = MakeTools(ShotMock(PngBytes, 300, 200).Object);
+
+        var meta = Meta(await tools.Screenshot("10,20,300,200", format: "png", output: "inline"));
+
+        var region = meta.GetProperty("region");
+        region.GetProperty("x").GetInt32().Should().Be(10);
+        region.GetProperty("y").GetInt32().Should().Be(20);
+        region.GetProperty("width").GetInt32().Should().Be(300);
+        region.GetProperty("height").GetInt32().Should().Be(200);
+    }
+
+    [Fact]
+    public async Task Screenshot_file_metadata_carries_the_region_too()
+    {
+        // Ambiguity resolved: the metadata object has one shape; 'file' adds 'path', a region
+        // adds 'region'. Flagged in the A-7 RED report.
+        var tools = MakeTools(ShotMock(PngBytes, 300, 200).Object);
+
+        var result = await tools.Screenshot("10,20,300,200", format: "png", output: "file");
+        TrackPath(result);
+
+        Meta(result).GetProperty("region").GetProperty("x").GetInt32().Should().Be(10);
+    }
+
+    [Fact]
+    public async Task Screenshot_inline_metadata_does_not_carry_a_path()
+    {
+        // The tool description advertises "path? (file output)". Nothing else asserted the
+        // absence, so an unconditional meta["path"] would have slipped past the whole suite.
+        var tools = MakeTools(ShotMock(JpegBytes, 640, 480).Object);
+
+        var meta = Meta(await tools.Screenshot(null, format: "jpeg", output: "inline"));
+
+        meta.TryGetProperty("path", out _).Should().BeFalse("inline output returns bytes, not a file");
+    }
+
+    // ---- R8 — region parsing is unchanged ----------------------------------------------------
+
+    [Theory]
+    [InlineData("10,20,300,200", 10, 20, 300, 200)]
+    [InlineData(" 10 , 20 , 300 , 200 ", 10, 20, 300, 200)]     // TrimEntries
+    public async Task Screenshot_passes_the_parsed_region_to_capture(string region, int x, int y, int w, int h)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(region, format: "png", output: "inline");
+
+        mock.Verify(s => s.CaptureAsync(
+            new ScreenRegion(x, y, w, h), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Screenshot_negative_region_coordinates_are_legal_on_a_desktop_that_has_them()
+    {
+        // Virtual desktop: a monitor left of and above the primary makes negative coordinates
+        // legal. A-8 validates the region against the virtual screen, so this row now needs a
+        // desktop that actually contains it (it did not before).
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(LeftOfPrimary).Object);
+
+        await tools.Screenshot("-1920,-40,640,480", format: "png", output: "inline");
+
+        mock.Verify(s => s.CaptureAsync(
+            new ScreenRegion(-1920, -40, 640, 480), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Theory]
+    [InlineData("1,2,3")]
+    [InlineData("1,2,3,4,5")]
+    [InlineData("1")]
+    public async Task Screenshot_invalid_region_throws_and_never_captures(string region)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        Func<Task> act = () => tools.Screenshot(region, format: "png", output: "inline");
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("region").And.Contain("x,y,w,h");
+        mock.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    // ---- edge: the reported format follows what the service actually encoded ------------------
+
+    [Fact]
+    public async Task Screenshot_mime_and_metadata_follow_the_encoded_result_not_the_request()
+    {
+        // The service is the authority on what it encoded (today's code reads result.Format for
+        // both the extension and the reported format). If a backend ever falls back, the image
+        // block must not claim a mime type the bytes do not have.
+        var mock = ShotMock(PngBytes, 100, 100, resultFormat: ImageFormat.Png);
+        var tools = MakeTools(mock.Object);
+
+        var result = await tools.Screenshot(null, format: "jpeg", output: "inline");
+
+        ImageBlock(result).MimeType.Should().Be("image/png");
+        Meta(result).GetProperty("format").GetString().Should().Be("png");
+    }
+
+    // ---- R9 — ocr is unchanged ---------------------------------------------------------------
+
+    [Fact]
+    public async Task Ocr_passes_the_region_and_returns_the_service_text()
+    {
+        var ocr = new Mock<IOcrService>();
+        ocr.Setup(s => s.ExtractTextAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("hello world");
+        var tools = MakeTools(ocr: ocr.Object);
+
+        var text = await tools.Ocr("5,6,7,8");
+
+        text.Should().Be("hello world");
+        ocr.Verify(s => s.ExtractTextAsync(new ScreenRegion(5, 6, 7, 8), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ocr_invalid_region_throws()
+    {
+        var ocr = new Mock<IOcrService>();
+        var tools = MakeTools(ocr: ocr.Object);
+
+        Func<Task> act = () => tools.Ocr("1,2,3");
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("x,y,w,h");
+        ocr.Verify(s => s.ExtractTextAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+    // ======== A-9 — downscale, scale env, coordinate-scale report ===========================
+
+    // ---- R7a — the new arguments reach the service as CaptureOptions -----------------------
+
+    [Fact]
+    public async Task Screenshot_defaults_pass_the_1920x1080_cap_scale_1_and_quality_90()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot();
+
+        var opts = CapturedOptions(mock);
+        opts.MaxWidth.Should().Be(1920, "the default cap is 1920x1080 (A-9)");
+        opts.MaxHeight.Should().Be(1080);
+        opts.Scale.Should().Be(1.0);
+        opts.Quality.Should().Be(90);
+    }
+
+    [Fact]
+    public async Task Screenshot_passes_max_width_max_height_and_quality_to_capture()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(null, format: "jpeg", output: "inline", max_width: 800, max_height: 600, scale: 1.0, quality: 55);
+
+        mock.Verify(s => s.CaptureAsync(
+            It.IsAny<ScreenRegion?>(),
+            It.Is<CaptureOptions>(o => o.MaxWidth == 800 && o.MaxHeight == 600 && o.Quality == 55
+                                       && o.Format == ImageFormat.Jpeg && o.Scale == 1.0),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Screenshot_zero_max_dimensions_mean_no_limit_and_are_passed_through()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(null, format: "png", output: "inline", max_width: 0, max_height: 0);
+
+        var opts = CapturedOptions(mock);
+        opts.MaxWidth.Should().Be(0, "0 means 'no limit' and must not be silently replaced by the default");
+        opts.MaxHeight.Should().Be(0);
+    }
+
+    // ---- R7b — validation, before any capture ----------------------------------------------
+
+    [Theory]
+    [InlineData(-1, 1080)]
+    [InlineData(1920, -1)]
+    [InlineData(-1920, -1080)]
+    public async Task Screenshot_negative_max_dimension_throws_and_never_captures(int maxWidth, int maxHeight)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        Func<Task> act = () => tools.Screenshot(null, format: "png", output: "inline", max_width: maxWidth, max_height: maxHeight);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain(maxWidth < 0 ? "max_width" : "max_height",
+                "the message must name the offending argument");
+        mock.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the caps are validated before anything is captured");
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(-0.5)]
+    [InlineData(1.5)]
+    [InlineData(2.0)]
+    // The guard is written as a positive test (scale > 0 && scale <= 1) precisely so these two,
+    // which fail every comparison, are rejected instead of reaching ScaleMath as a silent NaN
+    // that would turn the output size into 1x1.
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public async Task Screenshot_scale_outside_the_range_throws_and_never_captures(double scale)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        Func<Task> act = () => tools.Screenshot(null, format: "png", output: "inline", scale: scale);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("scale").And.Contain("1", "the message names the (0, 1] range");
+        mock.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(101)]
+    public async Task Screenshot_quality_outside_1_to_100_throws_and_never_captures(int quality)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        Func<Task> act = () => tools.Screenshot(null, format: "jpeg", output: "inline", quality: quality);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("quality").And.Contain("100", "the message names the 1-100 range");
+        mock.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(100)]
+    public async Task Screenshot_quality_bounds_are_inclusive(int quality)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(null, format: "jpeg", output: "inline", quality: quality);
+
+        CapturedOptions(mock).Quality.Should().Be(quality);
+    }
+
+    // ---- R7c — the process-level scale multiplies the call's own -----------------------------
+
+    [Fact]
+    public async Task Screenshot_effective_scale_multiplies_the_process_scale_by_the_argument()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, options: new ScreenshotOptions(0.5));
+
+        await tools.Screenshot(null, format: "png", output: "inline", scale: 0.5);
+
+        CapturedOptions(mock).Scale.Should().BeApproximately(0.25, 1e-12,
+            "WINDOWSMCP_SCREENSHOT_SCALE applies on top of the call's own scale");
+    }
+
+    [Fact]
+    public async Task Screenshot_process_scale_applies_when_no_scale_argument_is_given()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, options: new ScreenshotOptions(0.4));
+
+        await tools.Screenshot();
+
+        CapturedOptions(mock).Scale.Should().BeApproximately(0.4, 1e-12);
+    }
+
+    [Fact]
+    public async Task Screenshot_without_process_options_uses_scale_one()
+    {
+        // ScreenTools(shot, ocr, windows, input) — the options-less form (A-8 added the monitor
+        // inventory, A-11 the cursor source) — must behave as ScreenshotOptions.Default.
+        var mock = ShotMock();
+        var tools = new ScreenTools(mock.Object, new Mock<IOcrService>().Object,
+            WinMock().Object, InputMock().Object);
+
+        await tools.Screenshot(null, format: "png", output: "inline", scale: 0.5);
+
+        CapturedOptions(mock).Scale.Should().Be(0.5);
+    }
+
+    // ---- R7d — metadata ----------------------------------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_metadata_always_reports_the_original_size()
+    {
+        var tools = MakeTools(ShotMock(JpegBytes, 1920, 1080, originalWidth: 3840, originalHeight: 2160,
+            coordinateScale: 2.0).Object);
+
+        var meta = Meta(await tools.Screenshot(null, format: "jpeg"));
+
+        meta.GetProperty("originalWidth").GetInt32().Should().Be(3840);
+        meta.GetProperty("originalHeight").GetInt32().Should().Be(2160);
+        meta.GetProperty("width").GetInt32().Should().Be(1920, "width/height stay the OUTPUT dimensions");
+        meta.GetProperty("height").GetInt32().Should().Be(1080);
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_reports_the_original_size_even_when_nothing_was_scaled()
+    {
+        var tools = MakeTools(ShotMock(PngBytes, 640, 480).Object);
+
+        var meta = Meta(await tools.Screenshot(null, format: "png"));
+
+        meta.GetProperty("originalWidth").GetInt32().Should().Be(640, "originalWidth/Height are unconditional");
+        meta.GetProperty("originalHeight").GetInt32().Should().Be(480);
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_carries_coordinateScale_and_the_multiply_note_when_downscaled()
+    {
+        var tools = MakeTools(ShotMock(JpegBytes, 1920, 1080, originalWidth: 3840, originalHeight: 2160,
+            coordinateScale: 2.0).Object);
+
+        var meta = Meta(await tools.Screenshot(null, format: "jpeg"));
+
+        meta.GetProperty("coordinateScale").ValueKind.Should().Be(JsonValueKind.Number,
+            "the scale is a number the model can compute with, not a string");
+        meta.GetProperty("coordinateScale").GetDouble().Should().Be(2.0);
+        meta.GetProperty("note").GetString().Should()
+            .Be("multiply image pixel coordinates by 2 before passing them to click/drag/scroll");
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_omits_coordinateScale_and_note_when_nothing_was_scaled()
+    {
+        var tools = MakeTools(ShotMock(JpegBytes, 640, 480, coordinateScale: 1.0).Object);
+
+        var meta = Meta(await tools.Screenshot(null, format: "jpeg"));
+
+        meta.TryGetProperty("coordinateScale", out _).Should().BeFalse("absent fields are absent, not null");
+        meta.TryGetProperty("note", out _).Should().BeFalse("no scaling means nothing to warn about");
+    }
+
+    [Fact]
+    public async Task Screenshot_note_formats_a_fractional_scale_with_invariant_culture()
+    {
+        var tools = MakeTools(ShotMock(JpegBytes, 800, 450, originalWidth: 2000, originalHeight: 1125,
+            coordinateScale: 2.5).Object);
+
+        var original = CultureInfo.CurrentCulture;
+        JsonElement meta;
+        try
+        {
+            // A comma-decimal culture must not produce "2,5" in the sentence the model reads.
+            CultureInfo.CurrentCulture = new CultureInfo("fr-FR");
+            meta = Meta(await tools.Screenshot(null, format: "jpeg"));
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
+
+        meta.GetProperty("note").GetString().Should()
+            .Be("multiply image pixel coordinates by 2.5 before passing them to click/drag/scroll");
+        meta.GetProperty("coordinateScale").GetDouble().Should().Be(2.5);
+    }
+
+    [Fact]
+    public async Task Screenshot_file_output_metadata_carries_the_coordinate_scale_too()
+    {
+        // One metadata shape for both output modes (the A-7 ambiguity, resolved the same way).
+        var tools = MakeTools(ShotMock(PngBytes, 960, 540, originalWidth: 1920, originalHeight: 1080,
+            coordinateScale: 2.0).Object);
+
+        var result = await tools.Screenshot(null, format: "png", output: "file");
+        TrackPath(result);
+
+        var meta = Meta(result);
+        meta.GetProperty("originalWidth").GetInt32().Should().Be(1920);
+        meta.GetProperty("coordinateScale").GetDouble().Should().Be(2.0);
+        meta.GetProperty("note").GetString().Should().Contain("multiply image pixel coordinates by 2");
+    }
+
+    // ======== A-8 — multi-display capture and virtual-desktop coordinates ====================
+
+    /// <summary>The <c>selectedDisplays</c> indices, or null when the field is absent.</summary>
+    private static int[]? SelectedDisplays(JsonElement meta)
+    {
+        if (!meta.TryGetProperty("selectedDisplays", out var value)) return null;
+        value.ValueKind.Should().Be(JsonValueKind.Array, "selectedDisplays is a list of indices");
+        return value.EnumerateArray().Select(e => e.GetInt32()).ToArray();
+    }
+
+    private static void ShouldNeverCapture(Mock<IScreenshotService> mock) =>
+        mock.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the rect is resolved and validated before anything is captured");
+
+    // ---- R3a — the default is the primary display -------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_default_captures_the_primary_even_when_it_is_not_the_first_monitor()
+    {
+        // EnumDisplayMonitors order is not position order and does not put the primary first,
+        // so "the default is the primary display" (roadmap C3) cannot be "monitors[0]".
+        MonitorInfo[] monitors =
+        [
+            new(0, "Monitor0", -1920, 0, 1920, 1080, false),
+            new(1, "Monitor1", 0, 0, 2560, 1440, true),
+        ];
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(monitors).Object);
+
+        var meta = Meta(await tools.Screenshot(format: "png", output: "inline"));
+
+        mock.Verify(s => s.CaptureAsync(new ScreenRegion(0, 0, 2560, 1440), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        ShouldBeRect(Field(meta, "region"), new ScreenRegion(0, 0, 2560, 1440));
+    }
+
+    [Fact]
+    public async Task Screenshot_enumerates_the_monitors_exactly_once_per_call()
+    {
+        // Once: EnumDisplayMonitors + GetMonitorInfo per call is the fixed cost of every
+        // screenshot in the agent loop, and two inventories could disagree mid-call.
+        var windows = WinMock(SideBySide);
+        var tools = MakeTools(ShotMock().Object, windows: windows.Object);
+
+        await tools.Screenshot(display: "all", format: "png", output: "inline");
+
+        windows.Verify(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ---- R3b — display picks the union of the selected monitors -----------------------------
+
+    [Fact]
+    public async Task Screenshot_display_one_captures_the_second_monitor()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(SideBySide).Object);
+
+        var meta = Meta(await tools.Screenshot(display: "1", format: "png", output: "inline"));
+
+        mock.Verify(s => s.CaptureAsync(new ScreenRegion(1920, 0, 1920, 1080), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Once, "display:1 is the second monitor's own rect in virtual-desktop coordinates");
+        ShouldBeRect(Field(meta, "region"), new ScreenRegion(1920, 0, 1920, 1080));
+        SelectedDisplays(meta).Should().Equal(new[] { 1 });
+    }
+
+    [Theory]
+    [InlineData("all")]
+    [InlineData("ALL")]
+    [InlineData("0,1")]
+    [InlineData(" 0 , 1 ")]
+    public async Task Screenshot_display_all_captures_the_union_of_every_monitor(string display)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(SideBySide).Object);
+
+        var meta = Meta(await tools.Screenshot(display: display, format: "png", output: "inline"));
+
+        mock.Verify(s => s.CaptureAsync(new ScreenRegion(0, 0, 3840, 1080), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        SelectedDisplays(meta).Should().Equal(new[] { 0, 1 });
+    }
+
+    [Fact]
+    public async Task Screenshot_display_all_on_a_negative_origin_desktop_keeps_the_negative_origin()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(LeftOfPrimary).Object);
+
+        var meta = Meta(await tools.Screenshot(display: "all", format: "png", output: "inline"));
+
+        mock.Verify(s => s.CaptureAsync(new ScreenRegion(-1920, -40, 3840, 1120), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Once, "CopyFromScreen takes virtual-desktop coordinates — the union must not be clamped to 0,0");
+        ShouldBeRect(Field(meta, "region"), new ScreenRegion(-1920, -40, 3840, 1120));
+    }
+
+    [Theory]
+    [InlineData("2")]
+    [InlineData("7")]
+    [InlineData("-1")]
+    [InlineData("0,2")]
+    public async Task Screenshot_display_index_outside_the_inventory_throws_and_never_captures(string display)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(SideBySide).Object);
+
+        Func<Task> act = () => tools.Screenshot(display: display, format: "png", output: "inline");
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("0,1", "the message lists the indices this desktop actually has");
+        ShouldNeverCapture(mock);
+    }
+
+    [Theory]
+    [InlineData("x")]
+    [InlineData("primary")]
+    [InlineData("1.5")]
+    [InlineData(",")]
+    public async Task Screenshot_unparseable_display_throws_and_never_captures(string display)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(SideBySide).Object);
+
+        Func<Task> act = () => tools.Screenshot(display: display, format: "png", output: "inline");
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .ToLowerInvariant().Should().Contain("display");
+        ShouldNeverCapture(mock);
+    }
+
+    // ---- R3c — region wins over display -----------------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_region_wins_over_display()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(SideBySide).Object);
+
+        var meta = Meta(await tools.Screenshot("10,20,300,200", display: "1", format: "png", output: "inline"));
+
+        mock.Verify(s => s.CaptureAsync(new ScreenRegion(10, 20, 300, 200), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Once, "region wins over display (roadmap C3)");
+        SelectedDisplays(meta).Should().BeNull("display did not pick the rect, so reporting it as selected would be a lie");
+    }
+
+    [Fact]
+    public async Task Screenshot_an_invalid_display_is_still_rejected_when_a_region_is_given()
+    {
+        // region wins for the CAPTURE, but a display argument the caller got wrong is still a
+        // caller error: silently ignoring it teaches the model a wrong index works.
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(SideBySide).Object);
+
+        Func<Task> act = () => tools.Screenshot("10,20,300,200", display: "9", format: "png", output: "inline");
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("0,1");
+        ShouldNeverCapture(mock);
+    }
+
+    // ---- R3d — the region is validated against the virtual screen ---------------------------
+
+    [Theory]
+    [InlineData("-1,0,100,100")]      // one pixel off the left edge
+    [InlineData("0,-1,100,100")]      // one pixel off the top
+    [InlineData("3740,0,101,100")]    // one pixel past the right edge
+    [InlineData("0,980,100,101")]     // one pixel past the bottom
+    [InlineData("5000,0,10,10")]      // entirely off the desktop
+    public async Task Screenshot_region_outside_the_virtual_screen_throws_with_the_bounds(string region)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(SideBySide).Object);
+
+        Func<Task> act = () => tools.Screenshot(region, format: "png", output: "inline");
+
+        (await act.Should().ThrowAsync<ArgumentException>("out-of-bounds regions raise, they are not clipped"))
+            .Which.Message.Should().Contain("x 0..3839").And.Contain("y 0..1079");
+        ShouldNeverCapture(mock);
+    }
+
+    [Fact]
+    public async Task Screenshot_region_straddling_two_monitors_is_captured()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(SideBySide).Object);
+
+        await tools.Screenshot("1800,100,240,200", format: "png", output: "inline");
+
+        mock.Verify(s => s.CaptureAsync(new ScreenRegion(1800, 100, 240, 200), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Once, "the virtual screen is one space; a rect crossing the seam is legal");
+    }
+
+    // ---- R4a — displays is always reported ---------------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_metadata_lists_every_display_with_its_bounds()
+    {
+        var tools = MakeTools(ShotMock().Object, windows: WinMock(SideBySide).Object);
+
+        var meta = Meta(await tools.Screenshot(format: "png", output: "inline"));
+
+        var displays = Field(meta, "displays");
+        displays.ValueKind.Should().Be(JsonValueKind.Array);
+        displays.GetArrayLength().Should().Be(2, "every monitor is listed, not just the selected ones");
+
+        var first = displays[0];
+        first.GetProperty("index").GetInt32().Should().Be(0);
+        first.GetProperty("x").GetInt32().Should().Be(0);
+        first.GetProperty("y").GetInt32().Should().Be(0);
+        first.GetProperty("width").GetInt32().Should().Be(1920);
+        first.GetProperty("height").GetInt32().Should().Be(1080);
+        first.GetProperty("isPrimary").GetBoolean().Should().BeTrue();
+
+        var second = displays[1];
+        second.GetProperty("index").GetInt32().Should().Be(1);
+        second.GetProperty("x").GetInt32().Should().Be(1920);
+        second.GetProperty("isPrimary").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Screenshot_file_metadata_lists_the_displays_and_the_region_too()
+    {
+        // One metadata shape for both output modes (the A-7/A-9 rule).
+        var tools = MakeTools(ShotMock().Object, windows: WinMock(SideBySide).Object);
+
+        var result = await tools.Screenshot(display: "1", format: "png", output: "file");
+        TrackPath(result);
+
+        var meta = Meta(result);
+        Field(meta, "displays").GetArrayLength().Should().Be(2);
+        ShouldBeRect(Field(meta, "region"), new ScreenRegion(1920, 0, 1920, 1080));
+        SelectedDisplays(meta).Should().Equal(new[] { 1 });
+    }
+
+    [Theory]
+    [InlineData(null, null)]                    // neither given: the default primary
+    [InlineData("10,20,300,200", null)]         // region only
+    public async Task Screenshot_metadata_omits_selectedDisplays_unless_display_picked_the_rect(
+        string? region, string? display)
+    {
+        var tools = MakeTools(ShotMock().Object, windows: WinMock(SideBySide).Object);
+
+        var meta = Meta(await tools.Screenshot(region, display: display, format: "png", output: "inline"));
+
+        meta.TryGetProperty("selectedDisplays", out _).Should()
+            .BeFalse("absent fields are absent, not null — selectedDisplays means 'display chose this rect'");
+    }
+
+    // ---- R4b — CoordinateNote, the pure core of the note sentence ---------------------------
+
+    [Fact]
+    public void CoordinateNote_is_null_when_image_pixels_are_already_virtual_desktop_pixels()
+    {
+        ScreenTools.CoordinateNote(new ScreenRegion(0, 0, 1920, 1080), 1.0).Should()
+            .BeNull("origin 0,0 and no downscale means there is nothing for the model to do");
+    }
+
+    [Theory]
+    [InlineData(2.0, "2")]
+    [InlineData(2.5, "2.5")]
+    [InlineData(4.0, "4")]
+    public void CoordinateNote_for_a_scaled_primary_capture_is_A9s_sentence_verbatim(double scale, string formatted)
+    {
+        // A-9's exact wording: changing it silently changes what every model reads on every call.
+        ScreenTools.CoordinateNote(new ScreenRegion(0, 0, 3840, 2160), scale).Should()
+            .Be($"multiply image pixel coordinates by {formatted} before passing them to click/drag/scroll");
+    }
+
+    [Theory]
+    [InlineData(1920, 0, 1.0, "1")]
+    [InlineData(1920, 0, 2.0, "2")]
+    [InlineData(-1920, -40, 2.5, "2.5")]
+    [InlineData(0, -1080, 1.0, "1")]
+    [InlineData(10, 20, 1.0, "1")]
+    public void CoordinateNote_off_origin_gives_the_full_transform(int x, int y, double scale, string formatted)
+    {
+        ScreenTools.CoordinateNote(new ScreenRegion(x, y, 640, 480), scale).Should()
+            .Be($"virtual-desktop x = {x} + imageX × {formatted}, y = {y} + imageY × {formatted} " +
+                "— use these for click/drag/scroll",
+                "an off-origin capture needs the offset as well as the scale, or every click lands on the wrong monitor");
+    }
+
+    [Fact]
+    public void CoordinateNote_formats_the_scale_with_invariant_culture()
+    {
+        var original = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("fr-FR");
+            ScreenTools.CoordinateNote(new ScreenRegion(1920, 0, 640, 480), 2.5).Should()
+                .Contain("2.5").And.NotContain("2,5", "a comma-decimal culture must not leak into the model's instructions");
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
+    }
+
+    // ---- R4c — the note in the metadata ------------------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_of_a_second_monitor_reports_the_offset_note_without_a_coordinate_scale()
+    {
+        var tools = MakeTools(ShotMock(PngBytes, 1920, 1080, coordinateScale: 1.0).Object,
+            windows: WinMock(SideBySide).Object);
+
+        var meta = Meta(await tools.Screenshot(display: "1", format: "png", output: "inline"));
+
+        Field(meta, "note").GetString().Should()
+            .Be("virtual-desktop x = 1920 + imageX × 1, y = 0 + imageY × 1 — use these for click/drag/scroll");
+        meta.TryGetProperty("coordinateScale", out _).Should()
+            .BeFalse("nothing was downscaled — the coordinateScale rule is unchanged from A-9");
+    }
+
+    [Fact]
+    public async Task Screenshot_of_a_scaled_second_monitor_reports_both_the_offset_and_the_scale()
+    {
+        var tools = MakeTools(
+            ShotMock(PngBytes, 960, 540, originalWidth: 1920, originalHeight: 1080, coordinateScale: 2.0).Object,
+            windows: WinMock(SideBySide).Object);
+
+        var meta = Meta(await tools.Screenshot(display: "1", format: "png", output: "inline"));
+
+        Field(meta, "note").GetString().Should()
+            .Be("virtual-desktop x = 1920 + imageX × 2, y = 0 + imageY × 2 — use these for click/drag/scroll");
+        meta.GetProperty("coordinateScale").GetDouble().Should().Be(2.0);
+    }
+
+    [Fact]
+    public async Task Screenshot_of_the_primary_at_scale_one_still_has_no_note()
+    {
+        var tools = MakeTools(ShotMock(PngBytes, 1920, 1080, coordinateScale: 1.0).Object);
+
+        var meta = Meta(await tools.Screenshot(format: "png", output: "inline"));
+
+        meta.TryGetProperty("note", out _).Should().BeFalse("the primary at 1:1 needs no coordinate instructions");
+    }
+
+    // ---- R5 — ocr resolves the rect exactly the same way -------------------------------------
+
+    private static Mock<IOcrService> OcrMock(string text = "ocr text")
+    {
+        var mock = new Mock<IOcrService>();
+        mock.Setup(s => s.ExtractTextAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(text);
+        return mock;
+    }
+
+    [Fact]
+    public async Task Ocr_without_arguments_reads_the_primary_display()
+    {
+        var ocr = OcrMock();
+        var tools = MakeTools(ocr: ocr.Object, windows: WinMock(SideBySide).Object);
+
+        await tools.Ocr();
+
+        ocr.Verify(s => s.ExtractTextAsync(PrimaryRect, It.IsAny<CancellationToken>()),
+            Times.Once, "the resolved rect is passed on — OCR never gets a null region again");
+    }
+
+    [Theory]
+    [InlineData("1", 1920, 0, 1920, 1080)]
+    [InlineData("all", 0, 0, 3840, 1080)]
+    [InlineData("0,1", 0, 0, 3840, 1080)]
+    public async Task Ocr_display_selects_the_same_rect_screenshot_would(string display, int x, int y, int w, int h)
+    {
+        var ocr = OcrMock();
+        var tools = MakeTools(ocr: ocr.Object, windows: WinMock(SideBySide).Object);
+
+        await tools.Ocr(display: display);
+
+        ocr.Verify(s => s.ExtractTextAsync(new ScreenRegion(x, y, w, h), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ocr_region_wins_over_display()
+    {
+        var ocr = OcrMock();
+        var tools = MakeTools(ocr: ocr.Object, windows: WinMock(SideBySide).Object);
+
+        await tools.Ocr("10,20,300,200", display: "1");
+
+        ocr.Verify(s => s.ExtractTextAsync(new ScreenRegion(10, 20, 300, 200), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ocr_enumerates_the_monitors_exactly_once_per_call()
+    {
+        var windows = WinMock(SideBySide);
+        var tools = MakeTools(ocr: OcrMock().Object, windows: windows.Object);
+
+        await tools.Ocr(display: "1");
+
+        windows.Verify(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Ocr_region_outside_the_virtual_screen_throws_and_never_reads()
+    {
+        var ocr = OcrMock();
+        var tools = MakeTools(ocr: ocr.Object, windows: WinMock(SideBySide).Object);
+
+        Func<Task> act = () => tools.Ocr("5000,0,10,10");
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("x 0..3839").And.Contain("y 0..1079");
+        ocr.Verify(s => s.ExtractTextAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Ocr_bad_display_throws_and_never_reads()
+    {
+        var ocr = OcrMock();
+        var tools = MakeTools(ocr: ocr.Object, windows: WinMock(SideBySide).Object);
+
+        Func<Task> act = () => tools.Ocr(display: "7");
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("0,1");
+        ocr.Verify(s => s.ExtractTextAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("1,2,3")]
+    [InlineData("nonsense")]
+    [InlineData("0,0,0,100")]
+    [InlineData("5000,0,10,10")]
+    public async Task Ocr_and_screenshot_report_the_same_error_for_the_same_bad_region(string region)
+    {
+        // The A-8 point of moving ParseRegion into RegionMath: one parser, so the two tools
+        // cannot drift into two different error texts for the same input.
+        var tools = MakeTools(ocr: OcrMock().Object, windows: WinMock(SideBySide).Object);
+
+        Func<Task> shot = () => tools.Screenshot(region, format: "png", output: "inline");
+        Func<Task> ocr = () => tools.Ocr(region);
+
+        var shotMessage = (await shot.Should().ThrowAsync<ArgumentException>()).Which.Message;
+        var ocrMessage = (await ocr.Should().ThrowAsync<ArgumentException>()).Which.Message;
+        ocrMessage.Should().Be(shotMessage);
+    }
+    // ======== A-8 GREEN — gaps the RED pass left open ========================================
+
+    /// <summary>
+    /// Three monitors where the middle one sticks out above the others, so a union that wrongly
+    /// includes it is a different rectangle: 0+2 spans y -200..1239, 0+1+2 spans y -800..1239.
+    /// </summary>
+    internal static MonitorInfo[] ThreeAcross =>
+    [
+        new(0, "Monitor0", 0, 0, 1920, 1080, true),
+        new(1, "Monitor1", 1920, -800, 1280, 1024, false),
+        new(2, "Monitor2", 3200, -200, 2560, 1440, false),
+    ];
+
+    // ---- R3b (GREEN) — a subset selection is the union of exactly those monitors -------------
+
+    [Fact]
+    public async Task Screenshot_display_subset_unions_only_the_selected_monitors()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(ThreeAcross).Object);
+
+        var meta = Meta(await tools.Screenshot(display: "0,2", format: "png", output: "inline"));
+
+        mock.Verify(s => s.CaptureAsync(new ScreenRegion(0, -200, 5760, 1440), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Once, "monitor 1 is not selected: including it would start the union at y -800");
+        SelectedDisplays(meta).Should().Equal(new[] { 0, 2 });
+    }
+
+    [Theory]
+    [InlineData("2,0", new[] { 2, 0 })]        // the order given survives into the response
+    [InlineData("2,2,0", new[] { 2, 0 })]      // and duplicates are dropped, first occurrence winning
+    public async Task Screenshot_selectedDisplays_echoes_the_selection_order_without_duplicates(
+        string display, int[] expected)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock(ThreeAcross).Object);
+
+        var meta = Meta(await tools.Screenshot(display: display, format: "png", output: "inline"));
+
+        SelectedDisplays(meta).Should().Equal(expected,
+            "selectedDisplays is what the caller asked for, not a re-sorted list");
+        mock.Verify(s => s.CaptureAsync(new ScreenRegion(0, -200, 5760, 1440), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Once, "the union is a bounding box, so the order does not change the rect");
+    }
+
+    // ---- R3e (GREEN) — one inventory per call, on every resolution path ----------------------
+
+    [Theory]
+    [InlineData(null, null)]                      // default -> Primary
+    [InlineData("10,20,300,200", null)]           // region -> VirtualScreen + Validate
+    [InlineData(null, "1")]                       // display -> Union
+    [InlineData("10,20,300,200", "1")]            // both -> region wins, display still parsed
+    public async Task Screenshot_enumerates_the_monitors_once_on_every_resolution_path(string? region, string? display)
+    {
+        // The region path needs the inventory twice over (validate against the virtual screen,
+        // then report every display); enumerating twice would double the per-screenshot Win32
+        // cost and could resolve the rect against an inventory the response does not describe.
+        var windows = WinMock(SideBySide);
+        var tools = MakeTools(ShotMock().Object, windows: windows.Object);
+
+        await tools.Screenshot(region, display: display, format: "png", output: "inline");
+
+        windows.Verify(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ---- R3f (GREEN) — the inventory collaborator returns nothing, or throws ------------------
+
+    [Theory]
+    [InlineData(null, null)]                      // Primary of nothing
+    [InlineData("10,20,300,200", null)]           // VirtualScreen of nothing
+    [InlineData(null, "all")]                     // 'all' of nothing is an empty selection -> Union of nothing
+    [InlineData(null, "0")]                       // there is no monitor 0
+    public async Task Screenshot_empty_monitor_inventory_throws_and_never_captures(string? region, string? display)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: WinMock([]).Object);
+
+        Func<Task> act = () => tools.Screenshot(region, display: display, format: "png", output: "inline");
+
+        (await act.Should().ThrowAsync<ArgumentException>(
+            "an empty inventory must be a caller-facing error, not an IndexOutOfRange or a 0x0 capture"))
+            .Which.Message.ToLowerInvariant().Should().Contain("monitor");
+        ShouldNeverCapture(mock);
+    }
+
+    [Fact]
+    public async Task Ocr_empty_monitor_inventory_throws_and_never_reads()
+    {
+        var ocr = OcrMock();
+        var tools = MakeTools(ocr: ocr.Object, windows: WinMock([]).Object);
+
+        Func<Task> act = () => tools.Ocr();
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .ToLowerInvariant().Should().Contain("monitor");
+        ocr.Verify(s => s.ExtractTextAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Screenshot_monitor_enumeration_failure_is_not_swallowed()
+    {
+        // If the inventory cannot be read the rect cannot be resolved: falling back to "the
+        // primary at 0,0" would capture the wrong pixels and report coordinates that are wrong.
+        var windows = new Mock<IWindowService>();
+        windows.Setup(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("EnumDisplayMonitors failed"));
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object, windows: windows.Object);
+
+        Func<Task> act = () => tools.Screenshot(format: "png", output: "inline");
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message
+            .Should().Contain("EnumDisplayMonitors failed");
+        ShouldNeverCapture(mock);
+    }
+
+    // ---- R2 (GREEN) — the descriptions are the only spec the model reads ---------------------
+
+    private static string ParameterDescription(string method, string parameter)
+    {
+        var info = typeof(ScreenTools).GetMethod(method)!.GetParameters().Single(p => p.Name == parameter);
+        var description = info.GetCustomAttribute<DescriptionAttribute>();
+        description.Should().NotBeNull($"'{parameter}' of {method} must carry a [Description] the model can read");
+        return description!.Description;
+    }
+
+    [Theory]
+    [InlineData("region")]
+    [InlineData("display")]
+    public void Screenshot_and_ocr_advertise_the_same_text_for_the_shared_arguments(string parameter)
+    {
+        // A-8 made both tools resolve the rect through one resolver; two descriptions that drift
+        // would tell the model the tools accept different things when they do not.
+        ParameterDescription(nameof(ScreenTools.Ocr), parameter).Should()
+            .Be(ParameterDescription(nameof(ScreenTools.Screenshot), parameter));
+    }
+
+    [Fact]
+    public void Display_description_states_the_syntax_the_default_and_that_region_wins()
+    {
+        var text = ParameterDescription(nameof(ScreenTools.Screenshot), "display");
+
+        text.Should().Contain("'all'", "the model cannot guess the keyword")
+            .And.Contain("multi_monitor", "the indices are the ones that tool reports")
+            .And.Contain("union", "several displays are captured as one rect")
+            .And.Contain("primary", "the default is the primary display (roadmap C3)")
+            .And.Contain("region", "'region' wins over 'display' — and a bad display still errors");
+    }
+
+    [Fact]
+    public void Region_description_states_the_coordinate_space_and_that_it_is_rejected_not_clipped()
+    {
+        var text = ParameterDescription(nameof(ScreenTools.Screenshot), "region");
+
+        text.Should().Contain("x,y,w,h")
+            .And.Contain("virtual-desktop", "the same space click/drag/scroll use (roadmap C1)")
+            .And.Contain("negative", "a monitor left of or above the primary has negative coordinates")
+            .And.Contain("rejected", "out-of-bounds regions raise, they are not clipped");
+    }
+
+    // ---- A-11 (R5) — the cursor in the metadata and the include_cursor argument ---------------
+
+    private static void ShouldNeverReadTheCursor(Mock<IInputService> mock) =>
+        mock.Verify(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()),
+            Times.Never, "a call that never happens must not cost a cursor read either");
+
+    /// <summary>The <c>cursor</c> object the metadata always carries.</summary>
+    private static (int X, int Y, int MonitorIndex) Cursor(JsonElement meta)
+    {
+        var cursor = Field(meta, "cursor");
+        cursor.ValueKind.Should().Be(JsonValueKind.Object, "cursor is an object {x, y, monitorIndex}");
+        return (Field(cursor, "x").GetInt32(), Field(cursor, "y").GetInt32(),
+                Field(cursor, "monitorIndex").GetInt32());
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_always_carries_the_cursor()
+    {
+        var tools = MakeTools(input: InputMock(640, 480).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline");
+
+        Cursor(Meta(result)).Should().Be((640, 480, 0),
+            "the position comes from IInputService and the index from the same inventory the rect did");
+    }
+
+    [Fact]
+    public async Task Screenshot_cursor_monitor_index_comes_from_the_capture_inventory()
+    {
+        // The whole point of reporting an index: (2000,10) is on the SECOND monitor of this desktop.
+        var tools = MakeTools(windows: WinMock(SideBySide).Object, input: InputMock(2000, 10).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline");
+
+        Cursor(Meta(result)).Should().Be((2000, 10, 1));
+    }
+
+    [Fact]
+    public async Task Screenshot_cursor_off_every_monitor_reports_index_minus_one()
+    {
+        var tools = MakeTools(input: InputMock(10_000, 10_000).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline");
+
+        Cursor(Meta(result)).Should().Be((10_000, 10_000, -1),
+            "the position is still reported; -1 says it is on no monitor");
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_carries_the_cursor_even_when_it_is_not_drawn()
+    {
+        // "Always" means always: include_cursor only decides what is PAINTED, never what is reported.
+        var tools = MakeTools(input: InputMock(300, 200).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline", include_cursor: false);
+
+        Cursor(Meta(result)).Should().Be((300, 200, 0));
+    }
+
+    [Fact]
+    public async Task Screenshot_forwards_the_cursor_it_read_so_the_service_draws_at_the_reported_point()
+    {
+        var input = new Mock<IInputService>();
+        input.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CursorPosition(321, 45));
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object, input: input.Object);
+
+        await tools.Screenshot();
+
+        CapturedOptions(shot).Cursor.Should().Be(new CursorPosition(321, 45),
+            "the metadata's cursor and the painted mark must be the same read, not two reads that can disagree");
+    }
+
+    [Fact]
+    public async Task Screenshot_reads_the_cursor_exactly_once_per_call()
+    {
+        var input = InputMock();
+        var tools = MakeTools(input: input.Object);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        input.Verify(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()), Times.Once,
+            "one read per screenshot — a second read could report a cursor that moved after the capture");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Screenshot_passes_include_cursor_to_the_capture_options(bool includeCursor)
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(format: "png", output: "inline", include_cursor: includeCursor);
+
+        CapturedOptions(mock).IncludeCursor.Should().Be(includeCursor);
+    }
+
+    [Fact]
+    public async Task Screenshot_include_cursor_defaults_to_true()
+    {
+        var mock = ShotMock();
+        var tools = MakeTools(mock.Object);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        CapturedOptions(mock).IncludeCursor.Should().BeTrue(
+            "the default agent-loop call shows the model where the pointer is");
+    }
+
+    [Theory]
+    [InlineData("icon")]
+    [InlineData("ring")]
+    public async Task Screenshot_metadata_reports_how_the_cursor_was_drawn(string drawn)
+    {
+        var mock = ShotMock(cursorDrawn: drawn);
+        var tools = MakeTools(mock.Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline");
+
+        Field(Meta(result), "cursorDrawn").GetString().Should().Be(drawn,
+            "the metadata reports what the service actually painted");
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_omits_cursorDrawn_when_nothing_was_drawn()
+    {
+        var mock = ShotMock(cursorDrawn: null);
+        var tools = MakeTools(mock.Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline");
+
+        Meta(result).TryGetProperty("cursorDrawn", out var value).Should().BeFalse(
+            "absent, never null — a field that does not apply is omitted (A-7). Got {0}", value);
+    }
+
+    [Fact]
+    public async Task Screenshot_file_output_carries_the_cursor_and_cursorDrawn_too()
+    {
+        var mock = ShotMock(cursorDrawn: "icon");
+        var tools = MakeTools(mock.Object, input: InputMock(2000, 10).Object,
+            windows: WinMock(SideBySide).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "file");
+        TrackPath(result);
+
+        var meta = Meta(result);
+        Cursor(meta).Should().Be((2000, 10, 1), "the file mode's metadata has the same shape as inline's");
+        Field(meta, "cursorDrawn").GetString().Should().Be("icon");
+    }
+
+    [Fact]
+    public async Task Screenshot_reads_the_cursor_before_it_captures()
+    {
+        // Order matters: the read is an argument-free operation that can fail (a broken desktop),
+        // and failing it after a capture would burn the capture for nothing.
+        var order = new List<string>();
+        var input = new Mock<IInputService>();
+        input.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => { order.Add("cursor"); return new CursorPosition(1, 2); });
+        var shot = new Mock<IScreenshotService>();
+        shot.Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                order.Add("capture");
+                return new ScreenshotResult(PngBytes, 100, 100, ImageFormat.Png, 100, 100, 1.0);
+            });
+        var tools = MakeTools(shot.Object, input: input.Object);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        order.Should().Equal("cursor", "capture");
+    }
+
+    [Theory]
+    [InlineData("nope")]
+    [InlineData("")]
+    public async Task Screenshot_invalid_output_throws_without_reading_the_cursor(string output)
+    {
+        var mock = ShotMock();
+        var input = InputMock();
+        var tools = MakeTools(mock.Object, input: input.Object);
+
+        Func<Task> act = () => tools.Screenshot(output: output);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        ShouldNeverReadTheCursor(input);
+        ShouldNeverCapture(mock);
+    }
+
+    [Fact]
+    public async Task Screenshot_cursor_read_failure_propagates_and_never_captures()
+    {
+        // A cursor that cannot be read is a broken desktop, not a detail to paper over: the caller
+        // sees the failure rather than a picture whose metadata invents a position.
+        var mock = ShotMock();
+        var input = new Mock<IInputService>();
+        input.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("GetCursorPos failed (Win32 error 5)."));
+        var tools = MakeTools(mock.Object, input: input.Object);
+
+        Func<Task> act = () => tools.Screenshot(format: "png", output: "inline");
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message
+            .Should().Contain("GetCursorPos failed");
+        ShouldNeverCapture(mock);
+    }
+
+    [Fact]
+    public async Task Ocr_never_reads_the_cursor()
+    {
+        // OCR returns text; a cursor position in it would be noise, and the capture it makes must
+        // stay cursor-free (OcrServiceTests pins the IncludeCursor:false half).
+        var input = InputMock();
+        var tools = MakeTools(ocr: OcrMock().Object, input: input.Object);
+
+        await tools.Ocr();
+
+        ShouldNeverReadTheCursor(input);
+    }
+
+    [Fact]
+    public void Screenshot_include_cursor_is_the_last_parameter_and_defaults_to_true()
+    {
+        // Appended, not inserted: every existing caller and test passes the earlier arguments
+        // positionally, and the schema default is what the model reads.
+        var parameters = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!.GetParameters();
+
+        parameters[^1].Name.Should().Be("include_cursor");
+        parameters[^1].DefaultValue.Should().Be(true);
+    }
+
+    [Fact]
+    public void Screenshot_description_documents_the_cursor_metadata_and_the_new_argument()
+    {
+        var description = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should()
+            .Contain("cursor", "the metadata list is the only place the model learns the field exists")
+            .And.Contain("monitorIndex", "the cursor object's shape is part of the contract")
+            .And.Contain("cursorDrawn", "and that it is present only when something was drawn");
+
+        ParameterDescription(nameof(ScreenTools.Screenshot), "include_cursor").Should()
+            .Contain("cursor").And.Contain("default", "the model must know it is on by default");
+    }
+
+    // ---- A-11 (GREEN) — the gaps the implementation opened ----------------------------------
+
+    [Fact]
+    public async Task Screenshot_cursor_is_reported_in_virtual_desktop_pixels_not_region_relative()
+    {
+        // Roadmap C1: everything the response carries is virtual-desktop, and 'cursor' is what the
+        // model feeds straight back to click/drag. Rebasing it onto the captured rect's origin
+        // (which is what the DRAWN mark is rebased onto) would send every click 1920 px left.
+        var tools = MakeTools(windows: WinMock(SideBySide).Object, input: InputMock(2000, 10).Object);
+
+        var result = await tools.Screenshot("1920,0,100,100", format: "png", output: "inline");
+
+        var meta = Meta(result);
+        Cursor(meta).Should().Be((2000, 10, 1));
+        // The region IS the rebased rect the image starts at — the contrast is the point.
+        ShouldBeRect(Field(meta, "region"), new ScreenRegion(1920, 0, 100, 100));
+    }
+
+    [Fact]
+    public async Task Screenshot_invalid_region_throws_without_reading_the_cursor()
+    {
+        // The read sits after the rect is resolved AND validated: a region off the virtual screen
+        // must cost neither a capture nor a Win32 cursor call.
+        var mock = ShotMock();
+        var input = InputMock();
+        var tools = MakeTools(mock.Object, input: input.Object);
+
+        Func<Task> act = () => tools.Screenshot("5000,0,100,100", format: "png", output: "inline");
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        ShouldNeverReadTheCursor(input);
+        ShouldNeverCapture(mock);
     }
 }

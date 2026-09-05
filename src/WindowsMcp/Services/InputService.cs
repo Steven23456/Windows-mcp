@@ -143,4 +143,13 @@ public sealed class InputService : IInputService
             default: throw new ArgumentException($"Invalid direction: '{direction}'", nameof(direction));
         }
     }
+
+    /// <summary>Where the cursor is, in the same virtual-desktop pixels <see cref="MoveCursor"/> accepts (A-11).</summary>
+    public Task<CursorPosition> GetCursorPositionAsync(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!PInvoke.GetCursorPos(out var p))
+            throw new InvalidOperationException($"GetCursorPos failed (Win32 error {Marshal.GetLastPInvokeError()}).");
+        return Task.FromResult(new CursorPosition(p.X, p.Y));
+    }
 }

@@ -11,4 +11,7 @@ public interface IInputService
     Task PressKeyAsync(string key, CancellationToken ct = default);
     Task PressShortcutAsync(string shortcut, CancellationToken ct = default);
     Task ScrollAsync(int x, int y, string direction, int amount = 3, CancellationToken ct = default);
+
+    /// <summary>The live cursor position in virtual-desktop pixels (A-11).</summary>
+    Task<CursorPosition> GetCursorPositionAsync(CancellationToken ct = default);
 }

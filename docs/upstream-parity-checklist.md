@@ -3,13 +3,15 @@
 **Baseline:** 2026-09-04
 **Upstream:** [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) `main` = **v0.8.5**
 (released 2026-08-01; Python ≥ 3.14, FastMCP 3, 20 tools).
-**Ours:** `main` @ `b59c554`, 64 tools, plugin `0.7.2`, `CHANGELOG.md [Unreleased]` carries the
-HTTP transport + background-jobs work. SDK `ModelContextProtocol` 2.2.0.
+**Ours:** `main` @ `cb3b488` + the phase-1 branch, 64 tools, plugin `0.7.3`, `CHANGELOG.md
+[Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13). SDK
+`ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
 This is the working list of everything upstream can do that this server cannot (plus nine
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 — **all nine are
-now fixed**; section A is the next work). Each item
+now fixed**; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done and the rest of
+section A is the next work). Each item
 carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
 implementation sketch, files to touch, tests, and a "done when" bar.
@@ -29,7 +31,8 @@ implementation sketch, files to touch, tests, and a "done when" bar.
 
 **Repo conventions that apply to every item** (see `CLAUDE.md`):
 `TreatWarningsAsErrors=true`; DTOs are `record`s in `WindowsMcp.Abstractions/Models`; services are
-`sealed` behind an `IXxxService`; tools stay thin (`async Task<string>`, JSON out); new services
+`sealed` behind an `IXxxService`; tools stay thin (`async Task<string>` with JSON out, or
+`Task<CallToolResult>` when the result carries an image — `screenshot`); new services
 are registered as singletons in `Hosting/WindowsMcpHost.AddWindowsMcp` (tools auto-discover);
 destructive actions require `confirm: true`; tests that need the interactive desktop carry
 `[Trait("Category","UIAutomation")]`; the redeploy path is `scripts/build-release.ps1` → `bundle/WindowsMcp.exe` (gitignored; binaries are never committed).
@@ -67,13 +70,13 @@ function names are the stable anchor.
 | A-4 | Element budget, truncation note, UIA caching | P1 | M | A-2 | ☐ |
 | A-5 | Browser DOM mode (Chromium; Firefox IA2) | P2 | L | A-2 | ☐ |
 | A-6 | Annotated screenshot (boxes, labels, grid, cursor) | P2 | M | A-2, A-7 | ☐ |
-| A-7 | Return screenshot as MCP image content | P1 | S | — | ☐ |
-| A-8 | Multi-display / virtual-desktop-coordinate capture | P1 | M | — | ☐ |
-| A-9 | Auto-downscale + scale env + coordinate-scale report | P1 | S | A-7 | ☐ |
+| A-7 | Return screenshot as MCP image content | P1 | S | — | ☑ |
+| A-8 | Multi-display / virtual-desktop-coordinate capture | P1 | M | — | ☑ |
+| A-9 | Auto-downscale + scale env + coordinate-scale report | P1 | S | A-7 | ☑ |
 | A-10 | Alternative capture backend (WGC / DXGI) | P3 | M–L | — | ☐ |
-| A-11 | Cursor position in responses + drawn on capture | P2 | S | — | ☐ |
+| A-11 | Cursor position in responses + drawn on capture | P2 | S | — | ☑ |
 | A-12 | Virtual desktops (report; optional manage) | P3 | L | A-1 | ☐ |
-| A-13 | Unicode hygiene (PUA strip, surrogate repair) | P2 | S | — | ☐ |
+| A-13 | Unicode hygiene (PUA strip, surrogate repair) | P2 | S | — | ☑ |
 | A-14 | Post-capture flash overlay + snapshot profiling | P3 | M | — | ☐ |
 | B-1 | `type`: target, clear, caret, press_enter, paste path | P1 | M | D-2 | ☐ |
 | B-2 | `drag`: duration / intermediate motion / from-cursor | P2 | S | D-3 | ☐ |
@@ -109,6 +112,8 @@ function names are the stable anchor.
 screenshot cluster (A-7, A-9, A-8, A-11) because every agent loop starts with a screenshot.
 Then A-1 → A-2 → A-4, which unlock B-6, B-8, B-10, A-3, A-6. Quick wins B-5, B-1, B-2, B-3,
 C-2, C-7, S-8, S-1 can be interleaved anywhere. A-5, A-12, S-4 last.
+The section-A sequencing, cross-item decisions (coordinate space, defaults, tool count, element
+ids, env vars) and per-item test seeds are in [`docs/design/A-roadmap.md`](design/A-roadmap.md).
 
 ---
 
@@ -631,12 +636,12 @@ coordinate captions. Params on the snapshot/screenshot tool: `annotate`, `grid_c
 **Done when.** The annotated image's label N sits on element N from the same call.
 
 ### A-7 — Return the screenshot as MCP image content  `P1 · S`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/A-7-screenshot-image-content.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (0.8.0 per roadmap C11)
 
 **Upstream.** `build_snapshot_response()` returns `[text, Image(data=png, format="png")]` — an
 MCP `ImageContent` block, so the model sees the picture directly.
 
-**Ours.** `Tools/ScreenTools.cs` `Screenshot` returns a JSON string: `output="file"` → path;
+**Ours (before A-7).** `Tools/ScreenTools.cs` `Screenshot` returned a JSON string: `output="file"` → path;
 `output="base64"` → `{data_base64: …}` inside a **string**. Neither is an image content block, so
 no client renders it and the model cannot look at it without a second tool.
 
@@ -652,7 +657,7 @@ types), `HttpTransportTests` smoke (image survives the HTTP transport).
 **Done when.** Claude Code / Claude Desktop display the screenshot inline from a single call.
 
 ### A-8 — Multi-display capture and virtual-desktop coordinates  `P1 · M`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/A-8-multi-display-capture.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (0.8.0 per roadmap C11)
 
 **Upstream.** `display=[0]`/`[0,1]` (zero-based indices from `DisplayInventory`) captures the
 union rect of the chosen monitors (`get_display_union_rect`, ~1177);
@@ -661,9 +666,9 @@ takes precedence; out-of-bounds regions raise instead of clipping. Default = ful
 The response echoes `Visible Displays`, `Selected Displays`, `Screenshot Region`,
 `Coordinate Space: Virtual desktop coordinates`.
 
-**Ours.** `Services/ScreenshotService.cs` defaults to `SM_CXSCREEN × SM_CYSCREEN` (primary only);
-`region` is `x,y,w,h` with no validation and an undocumented coordinate space; `ocr` shares
-`ParseRegion`.
+**Ours (before A-8).** `Services/ScreenshotService.cs` defaulted to `SM_CXSCREEN × SM_CYSCREEN`
+(primary only); `region` was `x,y,w,h` with no validation and an undocumented coordinate space;
+`ocr` shared `ScreenTools.ParseRegion`.
 
 **Sketch.** `display` param (`int[]` or `"all"`), reuse `IWindowService.EnumerateMonitorsAsync`
 (order = index) to compute the union rect; `region` validated against the virtual screen
@@ -675,7 +680,7 @@ selected displays, region, and states the coordinate space; same for `ocr`. Deci
 monitors captures correctly; an out-of-bounds region errors.
 
 ### A-9 — Auto-downscale, scale env, coordinate-scale report  `P1 · S`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/A-9-screenshot-downscale.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (0.8.0 per roadmap C11)
 
 **Upstream.** Images larger than 1920×1080 are downscaled (LANCZOS) and
 `WINDOWS_MCP_SCREENSHOT_SCALE` (0.1–1.0) applies on top; the text block reports
@@ -683,7 +688,7 @@ monitors captures correctly; an out-of-bounds region errors.
 coordinate by 2.0 before passing to Click…` (`_snapshot_helpers.py`, `desktop/service.py`
 `max_image_size` branch).
 
-**Ours.** Full resolution always; a 4K capture is ~10 MB PNG.
+**Ours (before A-9).** Full resolution always; a 4K capture was a ~10 MB PNG.
 
 **Sketch.** `max_width`/`max_height` (default 1920/1080), `scale` param and
 `WINDOWSMCP_SCREENSHOT_SCALE` env, `SKBitmap.Resize(..., SKFilterQuality.High)`; JPEG `quality`
@@ -711,12 +716,13 @@ backend produced the frame.
 the alternative backend.
 
 ### A-11 — Cursor position in responses and drawn on captures  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/A-11-cursor.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (0.8.0 per roadmap C11)
 
 **Upstream.** `Cursor Position: (x, y)` heads every snapshot/screenshot (`get_cursor_location`);
 the cursor is highlighted in annotated images.
 
-**Ours.** No `GetCursorPos` anywhere in `Services/`.
+**Ours (before A-11).** Nothing reported the pointer: `InputService` called `GetCursorPos` only
+to read back its own `SetCursorPos` (D-3), and no response or capture carried the cursor.
 
 **Sketch.** `PInvoke.GetCursorPos` → `Cursor {X,Y, MonitorIndex}` in the A-2/A-7 metadata;
 `GetCursorInfo` + `DrawIconEx` onto the captured bitmap when `include_cursor:true` (default
@@ -746,15 +752,18 @@ build-number detection with graceful "unsupported on this build" failure; `remov
 name.
 
 ### A-13 — Unicode hygiene  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-04 — [design note](design/A-13-unicode-hygiene.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (0.8.0 per roadmap C11)
 
 **Upstream.** `desktop/utils.py` `remove_private_use_chars()` strips U+E000–U+F8FF (VS Code's
 codicons in element names) and `repair_surrogates()` fixes lone UTF-16 surrogates (emoji in window
 titles) before any string reaches the JSON encoder — one bad title used to take the whole snapshot
 down.
 
-**Ours.** Names flow straight from UIA into `JsonSerializer`. Verify what `System.Text.Json`
-does with a lone surrogate (throws vs. U+FFFD) and whether PUA glyphs appear in VS Code snapshots.
+**Ours (before A-13).** Names flowed straight from UIA into `JsonSerializer`. Measured on
+.NET 10: a lone surrogate does **not** throw, it is silently written as U+FFFD — a lossy rewrite
+the model cannot see — and PUA glyphs passed through as token noise. Now every name, value,
+`get_text` result, table header/cell and `assert_element` observation goes through
+`UiText.Sanitize` (see the design note).
 
 **Sketch.** A `UiText.Sanitize(string)` helper applied in `ToInfo`/`TryGetName` and to window
 titles: strip PUA, replace lone surrogates with U+FFFD, trim control chars.

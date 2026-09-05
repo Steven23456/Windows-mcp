@@ -1,5 +1,70 @@
 ## [Unreleased]
 
+### Changed
+
+- **`screenshot` returns the image as MCP image content** (parity A-7). The tool result is now a
+  text block with one JSON metadata object (`{width, height, format, coordinateSpace:
+  "virtual-desktop", region, path?}` — A-8/A-9/A-11 below add `displays`, `originalWidth`/
+  `originalHeight`, `cursor` and the scale fields) followed by an `ImageContentBlock`, so Claude
+  Code and Claude Desktop render the capture inline and the model can look at it in the same call.
+  **Migration:** `output` defaults to `inline` (was `file`; ask for `file` explicitly to get a
+  path, `base64` is an alias of `inline` for one release), `format` defaults to `auto` (jpeg for
+  inline, png for file; was always png), and the old `data_base64` JSON key is gone. Arguments
+  are validated before any capture; unknown `output`/`format` name the accepted values. The
+  reported format and mime type describe what was encoded, never the request. Design note:
+  `docs/design/A-7-screenshot-image-content.md`.
+
+- **`screenshot` downscales to 1920×1080 by default and reports the coordinate scale** (parity
+  A-9). A 4K capture was a ~10 MB PNG; it is now fitted inside `max_width` × `max_height`
+  (default 1920×1080, 0 = no limit) with a Mitchell cubic resample, then shrunk further by the
+  call's `scale` (0–1] and the server's new `--screenshot-scale` / `WINDOWSMCP_SCREENSHOT_SCALE`
+  (0.1–1.0, honoured by both transports). Metadata always carries
+  `originalWidth`/`originalHeight`; when anything was scaled it adds `coordinateScale` and a
+  `note` telling the model to multiply image pixel coordinates by that factor before `click`/
+  `drag`/`scroll`, and omits both otherwise. New `quality` argument (1–100, default 90) for JPEG.
+  `ocr` is unaffected — it always captures at full resolution. `IScreenshotService.CaptureAsync`
+  now takes a `CaptureOptions` record and `ScreenshotResult` gained the original size and scale.
+  Design note: `docs/design/A-9-screenshot-downscale.md`.
+
+- **`screenshot` and `ocr` capture any monitor, and regions are validated, not clipped** (parity
+  A-8). New `display` argument: `all`, or comma-separated zero-based indices in `multi_monitor`
+  order (`1`, `0,2`); several are captured as their union, a monitor left of or above the
+  primary keeps its negative origin. The default stays the primary display (cheaper than
+  upstream's all-displays default; one flag flips it later). `region` (`x,y,w,h`, virtual-desktop
+  pixels) wins over `display` and is now checked against the virtual screen — outside it is an
+  error naming the bounds, where it used to be silently clipped or fail deep in GDI; an invalid
+  `display` errors even when `region` wins. Metadata now **always** carries `region` (the rect
+  actually captured — image (0,0) is its origin) and `displays` (every monitor's bounds), adds
+  `selectedDisplays` when `display` picked the rect, and the `note` gains the offset form
+  (`virtual-desktop x = 1920 + imageX × 2, …`) for any capture that does not start at (0,0).
+  One shared parser (`RegionMath`) for both tools; a region with a non-integer part or a
+  non-positive size is a named `ArgumentException` rather than a `FormatException`.
+  `multi_monitor` indices are now the position in the returned list, so a monitor whose info
+  query fails cannot leave a gap between what `display` selects and what the metadata reports.
+  Design note: `docs/design/A-8-multi-display-capture.md`.
+
+- **`screenshot` reports the mouse pointer and paints it onto the capture** (parity A-11). Metadata
+  always carries `cursor {x, y, monitorIndex}` (virtual-desktop pixels; `-1` = on no monitor),
+  drawn or not. New `include_cursor` argument (default true): the real cursor image is composited
+  through `DrawIconEx` at its hotspot, and when the cursor is hidden or the composite fails a
+  two-tone ring (white outside, black inside) is drawn instead; `cursorDrawn` says `icon` or `ring`
+  and is absent when the pointer was outside the captured rect. The overlay goes onto the
+  full-resolution bitmap before the A-9 downscale, so it shrinks with the picture. The tool reads
+  the position once and hands it to the capture, so the numbers and the mark cannot disagree.
+  `ocr` never draws it. New `IInputService.GetCursorPositionAsync` / `CursorPosition`; `CaptureOptions`
+  gained `IncludeCursor` and `Cursor`, `ScreenshotResult` gained `CursorDrawn`. Design note:
+  `docs/design/A-11-cursor.md`.
+- **UI text is sanitised before it reaches the model** (parity A-13). Element names and values,
+  `get_text`, `get_table` headers and cells, and the `assert_element state=value` observation now
+  go through one `UiText.Sanitize`: Private Use Area glyphs (VS Code's codicons, icon fonts — BMP
+  and both supplementary planes) are stripped, lone UTF-16 surrogates become U+FFFD explicitly
+  (measured on .NET 10: `System.Text.Json` was already rewriting them to U+FFFD *silently*, so the
+  model got a value that differed from the UI with nothing saying so), C0/C1 controls other than
+  tab/LF/CR are dropped, and the result is trimmed. Valid emoji, ZWJ sequences, combining marks
+  and RTL text are untouched. `assert_element state=value` compares the sanitised value, so a
+  value read back from `find_element`/`get_text` matches. `get_table` columns without a header
+  element are now `""` instead of null. Design note: `docs/design/A-13-unicode-hygiene.md`.
+
 ### Fixed
 
 - **`find_element` and `wait_for` survive a stale element, and can be pinned to one window**
@@ -107,6 +172,12 @@
 
 ### Added
 
+- **`--screenshot-scale <0.1-1.0>` / `WINDOWSMCP_SCREENSHOT_SCALE`** (parity A-9): a process-wide
+  multiplier on every screenshot's own `scale`, for both transports — the cheap way to shrink
+  what the model sees on a large desktop. Registered as a `ScreenshotOptions` singleton in
+  `AddWindowsMcp`, which now takes the parsed `ServerOptions`. `BuildHttpApp` gained an optional
+  `configureServices` seam (applied after `AddWindowsMcp`) so the transport tests can swap the
+  capture service for a fake and prove the screenshot surface headless.
 - **`test-agent` subagent (dev infrastructure).** `.claude/agents/test-agent.md` — an Opus-model
   Claude Code subagent that owns `tests/WindowsMcp.Tests` and enforces test-first work. Given the
   requirements for a change (the ask, a `docs/design` note, a parity-checklist item's "Tests." /

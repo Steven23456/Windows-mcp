@@ -76,7 +76,8 @@ public class ServerOptionsTests
     public void Usage_documents_every_option()
     {
         foreach (var opt in new[] { "--transport", "--port", "--bind", "--cert-thumbprint", "--api-key", "--help",
-                                    "WINDOWSMCP_API_KEY", "WINDOWSMCP_TRANSPORT", "/mcp" })
+                                    "--screenshot-scale",
+                                    "WINDOWSMCP_API_KEY", "WINDOWSMCP_TRANSPORT", "WINDOWSMCP_SCREENSHOT_SCALE", "/mcp" })
             ServerOptions.Usage.Should().Contain(opt);
     }
 
@@ -243,6 +244,116 @@ public class ServerOptionsTests
     public void Repeated_option_is_an_error()
     {
         var act = () => Parse("--transport", "http", "--port", "1", "--port", "2");
+
+        act.Should().Throw<OptionsException>().WithMessage("*more than once*");
+    }
+    // ---- A-9 (R5) — --screenshot-scale / WINDOWSMCP_SCREENSHOT_SCALE ------------------------
+
+    [Fact]
+    public void Screenshot_scale_defaults_to_one_under_both_transports()
+    {
+        Parse().ScreenshotScale.Should().Be(1.0);
+        Parse("--transport", "http").ScreenshotScale.Should().Be(1.0);
+    }
+
+    [Fact]
+    public void Screenshot_scale_applies_to_stdio_too_it_is_not_an_http_only_option()
+    {
+        // Unlike --port/--bind/--api-key, this one configures a tool, not a listener: rejecting
+        // it (or dropping it) in stdio mode would make the env var useless where it matters most.
+        var fromFlag = Parse("--screenshot-scale", "0.25");
+
+        fromFlag.Transport.Should().Be(TransportKind.Stdio);
+        fromFlag.ScreenshotScale.Should().Be(0.25);
+
+        ServerOptions.Parse([], Env(("WINDOWSMCP_SCREENSHOT_SCALE", "0.5")))
+            .ScreenshotScale.Should().Be(0.5);
+    }
+
+    [Fact]
+    public void Screenshot_scale_comes_from_the_environment_under_http_as_well()
+    {
+        var o = ServerOptions.Parse(["--transport", "http"], Env(("WINDOWSMCP_SCREENSHOT_SCALE", "0.5")));
+
+        o.Transport.Should().Be(TransportKind.Http);
+        o.ScreenshotScale.Should().Be(0.5);
+    }
+
+    [Fact]
+    public void Screenshot_scale_on_the_command_line_beats_the_environment()
+    {
+        var env = Env(("WINDOWSMCP_SCREENSHOT_SCALE", "0.5"));
+
+        ServerOptions.Parse(["--screenshot-scale", "0.25"], env).ScreenshotScale.Should().Be(0.25);
+        ServerOptions.Parse(["--screenshot-scale=0.25"], env).ScreenshotScale.Should().Be(0.25);
+    }
+
+    [Fact]
+    public void Blank_screenshot_scale_in_the_environment_counts_as_unset()
+    {
+        ServerOptions.Parse([], Env(("WINDOWSMCP_SCREENSHOT_SCALE", "   "))).ScreenshotScale.Should().Be(1.0);
+        ServerOptions.Parse([], Env(("WINDOWSMCP_SCREENSHOT_SCALE", ""))).ScreenshotScale.Should().Be(1.0);
+    }
+
+    [Theory]
+    [InlineData("1", 1.0)]
+    [InlineData("1.0", 1.0)]
+    [InlineData("0.1", 0.1)]
+    [InlineData("0.50", 0.5)]
+    [InlineData("0.333", 0.333)]
+    public void Valid_screenshot_scales_are_accepted(string raw, double expected)
+    {
+        Parse("--screenshot-scale", raw).ScreenshotScale.Should().BeApproximately(expected, 1e-12);
+        ServerOptions.Parse([], Env(("WINDOWSMCP_SCREENSHOT_SCALE", raw)))
+            .ScreenshotScale.Should().BeApproximately(expected, 1e-12);
+    }
+
+    [Theory]
+    [InlineData("0")]        // below the 0.1 floor
+    [InlineData("0.09")]
+    [InlineData("1.5")]      // above 1.0: upscaling is not a thing this option does
+    [InlineData("-1")]
+    [InlineData("abc")]
+    [InlineData("0,5")]      // invariant culture: a comma decimal is not a number here
+    [InlineData(",5")]
+    [InlineData("1e-1")]     // no exponent forms; the value is user-facing, not machine-generated
+    [InlineData("NaN")]
+    [InlineData("Infinity")]
+    public void Invalid_screenshot_scales_are_rejected_from_the_command_line(string raw)
+    {
+        var act = () => Parse("--screenshot-scale", raw);
+
+        var message = act.Should().Throw<OptionsException>().Which.Message;
+        message.Should().Contain("screenshot-scale", "the message names the option");
+        message.Should().Contain("0.1").And.Contain("1.0", "the message names the accepted range");
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("1.5")]
+    [InlineData("abc")]
+    [InlineData("0,5")]
+    public void Invalid_screenshot_scales_are_rejected_from_the_environment_too(string raw)
+    {
+        var act = () => ServerOptions.Parse([], Env(("WINDOWSMCP_SCREENSHOT_SCALE", raw)));
+
+        act.Should().Throw<OptionsException>().Which.Message.Should().Contain("0.1");
+    }
+
+    [Fact]
+    public void Screenshot_scale_flag_without_a_value_is_an_error()
+    {
+        var missing = () => Parse("--screenshot-scale");
+        var empty = () => Parse("--screenshot-scale=");
+
+        missing.Should().Throw<OptionsException>().WithMessage("*requires a value*");
+        empty.Should().Throw<OptionsException>().WithMessage("*requires a value*");
+    }
+
+    [Fact]
+    public void Repeated_screenshot_scale_is_an_error()
+    {
+        var act = () => Parse("--screenshot-scale", "0.5", "--screenshot-scale", "0.6");
 
         act.Should().Throw<OptionsException>().WithMessage("*more than once*");
     }

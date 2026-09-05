@@ -12,7 +12,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 - **Interact with UI Elements**: Click, type, scroll, drag, and manipulate interface elements programmatically
 - **Control Windows**: Focus, resize, minimize, and manage application windows
 - **Execute System Commands**: Run PowerShell commands for advanced system operations
-- **Capture Screens**: Take screenshots and perform OCR on screen regions
+- **Capture Screens**: Take screenshots the model sees inline (any monitor or region, auto-downscaled, cursor drawn) and perform OCR on screen regions
 - **Manage System Resources**: Control processes, registry, services, scheduled tasks, and event logs
 
 ## Key Features
@@ -149,8 +149,8 @@ Windows-MCP exposes **64 MCP tools** across 19 tool classes:
 ### Screen Tools (`ScreenTools` — 2 tools)
 | Tool | Purpose |
 |------|---------|
-| `Screenshot` | Capture a screenshot (full screen or region) |
-| `Ocr` | Extract text from a screen region via OCR |
+| `Screenshot` | Capture the primary display, other monitors (`display`) or a region; returns MCP image content plus metadata (captured rect, monitor inventory, cursor, coordinate scale) |
+| `Ocr` | Extract text from a screen region via OCR (same `region`/`display` selection, always full resolution) |
 
 ### Process Tools (`ProcessTools` — 6 tools)
 | Tool | Purpose |

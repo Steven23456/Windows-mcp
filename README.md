@@ -84,8 +84,10 @@ $env:WINDOWSMCP_API_KEY = "<a long random secret>"
 | `--bind <ip>` | `WINDOWSMCP_BIND` | `0.0.0.0` | Listen address; `127.0.0.1` = this machine only |
 | `--cert-thumbprint <hex>` | `WINDOWSMCP_CERT_THUMBPRINT` | — | Certificate in `LocalMachine\My` or `CurrentUser\My`; makes the port **HTTPS only** |
 | `--api-key <key>` | `WINDOWSMCP_API_KEY` | — | Bearer token (≥ 16 printable ASCII chars). **Required** unless `--bind` is loopback |
+| `--screenshot-scale <0.1-1.0>` | `WINDOWSMCP_SCREENSHOT_SCALE` | `1.0` | Multiplies every `screenshot` call's own `scale`; the one option that also applies to **stdio** |
 
-`WindowsMcp.exe --help` prints the same table. No arguments = stdio, unchanged.
+`WindowsMcp.exe --help` prints the same options (it lists `--screenshot-scale` under its own
+heading, since it is not HTTP-only). No arguments = stdio, unchanged.
 
 **Security model.** Every tool — `powershell`, `file_write`, `registry_set`,
 `process kill`, … — is reachable on that port. So the server refuses to start on a

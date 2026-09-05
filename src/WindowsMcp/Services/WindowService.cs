@@ -81,19 +81,18 @@ public sealed class WindowService : IWindowService
     {
         ct.ThrowIfCancellationRequested();
 
-        var monitors = new List<(HMONITOR Handle, int Order)>();
-        int index = 0;
+        var monitors = new List<HMONITOR>();
 
         PInvoke.EnumDisplayMonitors(default, null,
             (hMonitor, hdcMonitor, lprcMonitor, lParam) =>
             {
-                monitors.Add((hMonitor, index++));
+                monitors.Add(hMonitor);
                 return true;
             },
             default);
 
         var results = new List<MonitorInfo>();
-        foreach (var (handle, order) in monitors)
+        foreach (var handle in monitors)
         {
             var info = new MONITORINFO
             {
@@ -105,9 +104,13 @@ public sealed class WindowService : IWindowService
                 var rc = info.rcMonitor;
                 bool isPrimary = (info.dwFlags & MONITORINFOF_PRIMARY) != 0;
 
+                // Index = position in the returned array, not the enumeration counter: a failed
+                // GetMonitorInfo must not leave a gap, because screenshot/ocr 'display' selects
+                // by position and reports Index — the two numberings have to be one numbering.
+                int position = results.Count;
                 results.Add(new MonitorInfo(
-                    order,
-                    $"Monitor{order}",
+                    position,
+                    $"Monitor{position}",
                     rc.left,
                     rc.top,
                     rc.right - rc.left,
