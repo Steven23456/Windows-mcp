@@ -3,16 +3,16 @@
 **Baseline:** 2026-09-04
 **Upstream:** [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) `main` = **v0.8.5**
 (released 2026-08-01; Python ≥ 3.14, FastMCP 3, 20 tools).
-**Ours:** `main` @ `8cb40b6` + the phase-2 branch, 64 tools, plugin `0.7.3`, `CHANGELOG.md
-[Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13) and phase 2's A-1.
-SDK `ModelContextProtocol` 2.2.0.
+**Ours:** `main` @ `8cb40b6` + the phase-2/3 branches, 65 tools, plugin `0.7.3`, `CHANGELOG.md
+[Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1 and
+phase 3's A-2/A-3/A-4. SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
 This is the working list of everything upstream can do that this server cannot (plus nine
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 — **all nine are
-now fixed**; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 has opened
-with A-1, and the rest of section A is the next work). Each item
-carries enough context to write a design note and an implementation plan without re-reading
+now fixed**; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
+phase 3 shipped A-2 with A-3 and A-4 inside it, and the rest of section A is the next work).
+Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
 implementation sketch, files to touch, tests, and a "done when" bar.
 
@@ -65,9 +65,9 @@ function names are the stable anchor.
 | D-8 | `powershell` ships the CLIXML progress stream to the model on every call | P2 | S | — | ☑ |
 | D-9 | `job output` still returns raw CLIXML on stderr | P3 | S | D-8 | ☑ |
 | A-1 | Whole-desktop window inventory | P1 | M | — | ☑ |
-| A-2 | Desktop-wide labeled interactive-element snapshot | P1 | L | A-1 | ☐ |
-| A-3 | Scrollable regions with scroll percentages | P2 | S | A-2 | ☐ |
-| A-4 | Element budget, truncation note, UIA caching | P1 | M | A-2 | ☐ |
+| A-2 | Desktop-wide labeled interactive-element snapshot | P1 | L | A-1 | ☑ |
+| A-3 | Scrollable regions with scroll percentages | P2 | S | A-2 | ☑ |
+| A-4 | Element budget, truncation note, UIA caching | P1 | M | A-2 | ☑ |
 | A-5 | Browser DOM mode (Chromium; Firefox IA2) | P2 | L | A-2 | ☐ |
 | A-6 | Annotated screenshot (boxes, labels, grid, cursor) | P2 | M | A-2, A-7 | ☐ |
 | A-7 | Return screenshot as MCP image content | P1 | S | — | ☑ |
@@ -96,7 +96,7 @@ function names are the stable anchor.
 | C-4 | Notification `app_id` (AUMID) | P3 | S | — | ☐ |
 | C-5 | `scrape`: DOM source, query, MCP sampling summary | P2 | M | A-5 (DOM part) | ☐ |
 | C-6 | `powershell`: per-call timeout; env rebuild from registry | P2 | S–M | — | ☐ |
-| C-7 | Tool annotations on all 64 tools | P2 | S | — | ☐ |
+| C-7 | Tool annotations on all 65 tools | P2 | S | — | ☐ |
 | S-1 | Tool allow/deny lists (`--tools`, `--exclude-tools`) | P2 | S | — | ☐ |
 | S-2 | IP allowlist (CIDR v4/v6) | P2 | S | S-8 | ☐ |
 | S-3 | CORS origins | P3 | S | — | ☐ |
@@ -489,7 +489,7 @@ interactively), `tests/.../Tools/WindowToolsTests.cs`.
 above in z-order, and `action="active"` returns the foreground one.
 
 ### A-2 — Desktop-wide labeled interactive-element snapshot  `P1 · L`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-2-desktop-snapshot.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream behaviour.** `Snapshot` (`tools/snapshot.py`, helpers in `tools/_snapshot_helpers.py`)
 walks **every** window (active first, then the others) and returns three text blocks rendered by
@@ -515,11 +515,10 @@ come from `_ACTION_MAP` (edit→fill, checkbox→toggle, combobox→select, slid
 document→scroll, else click). Rendering: `_render_tree()`, `_node_meta_str()`,
 `_render_semantic_node()`.
 
-**Ours today.** `get_state` (`Services/UIAutomationService.cs:74`) builds a JSON `ElementTree`
-of the **foreground window only, three levels deep**, with no interactive/informative
-classification, no action hints, no metadata beyond value/checked/selected, and no window list.
-`ElementInfo` has `Bounds` but no centre. Element IDs (`el_N`) accumulate in `_elementCache`
-forever.
+**Ours (before A-2).** `get_state` built a JSON `ElementTree` of the foreground window only,
+three levels deep, with no classification, no action hints, no centres and no window list, and
+`el_N` ids accumulated forever. Now `snapshot` (see the design note); `get_state` is kept,
+budgeted.
 
 **Implementation sketch.**
 - New `IUIAutomationService.SnapshotAsync(SnapshotOptions)` → `SnapshotResult`:
@@ -555,13 +554,15 @@ action hints and metadata, in the compact text form, bounded by the element cap,
 coordinates work unchanged with `click`/`type`/`scroll`.
 
 ### A-3 — Scrollable regions with scroll percentages  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-2-desktop-snapshot.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `scrollable_elements_to_string()` lists each ScrollPattern element with
 `[v:37%]`/`[h:0%]` from `vertical_scroll_percent`/`horizontal_scroll_percent` and the
 `vertical_scrollable`/`horizontal_scrollable` flags (`tree/views.py` `_scroll_meta_str`).
 
-**Ours.** `find_element(kind=scrollable)` returns `ElementInfo` with no scroll data.
+**Ours (before A-3).** `find_element(kind=scrollable)` returned `ElementInfo` with no scroll data.
+Now the snapshot's scrollable list carries `ScrollInfo`; `find_element` still does not populate
+the new `ElementInfo.Scroll` (follow-up in the design note).
 
 **Sketch.** `ScrollableElement` record with `VerticalPercent`, `HorizontalPercent`,
 `VerticallyScrollable`, `HorizontallyScrollable` from `Patterns.Scroll`; include in A-2 output and
@@ -570,7 +571,7 @@ in `find_element(kind=scrollable)`; `scroll(element_id)` (B-3) uses its centre.
 **Done when.** Scrollable list shows percentages and "Reached top/bottom" can be inferred.
 
 ### A-4 — Element budget, truncation note, UIA caching  `P1 · M`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-2-desktop-snapshot.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `tree/budget.py` `TreeElementBudget` — default 500 elements, env
 `WINDOWS_MCP_MAX_TREE_ELEMENTS`; traversal stops early, `TreeState.truncated=true`, and every
@@ -578,10 +579,15 @@ rendered block appends `_truncation_note()` telling the agent to narrow the view
 limit. `tree/cache_utils.py` builds a `CacheRequest` so property reads are one cross-process call
 per subtree instead of one per property.
 
-**Ours.** `BuildTree` recursion is depth-limited (3) but not count-limited — a large grid at depth
-≤ 3 still explodes; no cache request (each `TryGetX` is a COM round-trip). `FindElementAsync` is
-worse: it walks the **whole desktop** with no cap at all — D-5 scopes it and guards the reads; the
-cache request and budget here are what make its `scope=desktop` search affordable.
+**Ours (before A-4).** `BuildTree` recursion was depth-limited (3) but not count-limited — a large
+grid at depth ≤ 3 still exploded; no cache request (each `TryGetX` was a COM round-trip).
+Now `ElementBudget` (`Services/UiTree/`) bounds both `snapshot` and `get_state`: the default comes
+from `--max-tree-elements` / `WINDOWSMCP_MAX_TREE_ELEMENTS` (500) through the injected
+`UiTreeOptions`, a per-call `max_elements` overrides it, and a stopped walk reports `Truncated`
+with `ElementLimit` plus the one-sentence note in the text render. `UiTraverser` walks each window
+under a single FlaUI `CacheRequest` (`TreeScope.Subtree`, pattern properties cached too).
+`FindElementAsync` is unchanged — it keeps its own UIA-side conditions and 20-match cap, and its
+cache request is a follow-up (see the design note).
 
 **Sketch.** `max_elements` param (default 500) + `WINDOWSMCP_MAX_TREE_ELEMENTS` env; counter
 threaded through traversal; `Truncated`, `ElementLimit` in the result + a note in text output;
@@ -1085,7 +1091,7 @@ which makes `git`, `node`, etc. "not found" inside tool calls.
 `PATH` lacks `%SystemRoot%\System32` or is empty, rebuild from the registry as above and inject
 into `ProcessStartInfo.Environment` (foreground and jobs share `PowerShellInvocation`).
 
-### C-7 — Tool annotations on all 64 tools  `P2 · S`
+### C-7 — Tool annotations on all 65 tools  `P2 · S`
 - [ ] Not started
 
 **Upstream.** Every tool declares `ToolAnnotations(title, readOnlyHint, destructiveHint,
@@ -1112,7 +1118,7 @@ every listed tool has explicit annotations.
 `__main__.py` `_apply_tool_filter()`; unknown names error at startup. Lets an operator run a
 screenshot-only or no-PowerShell server.
 
-**Ours.** All 64 tools always.
+**Ours.** All 65 tools always.
 
 **Sketch.** `ServerOptions` gains `Tools`/`ExcludeTools` (flags + `WINDOWSMCP_TOOLS`/
 `WINDOWSMCP_EXCLUDE_TOOLS`, valid for both transports); in `WindowsMcpHost.AddWindowsMcp` filter
@@ -1239,7 +1245,7 @@ cleanup, VM/Sandbox recommendation for destructive tools.
 
 **Ours.** `skills/windows/SKILL.md` is a usage playbook, not a tester.
 
-**Sketch.** `skills/windows-tool-tester/SKILL.md` adapted to our 64 tools and `confirm:true`
+**Sketch.** `skills/windows-tool-tester/SKILL.md` adapted to our 65 tools and `confirm:true`
 gates; wire into the plugin manifest.
 
 ---
@@ -1260,9 +1266,9 @@ gates; wire into the plugin manifest.
 
 ## Appendix A — Tool name map (upstream → ours)
 
-| Upstream (20) | Ours (64) | Gap items |
+| Upstream (20) | Ours (65) | Gap items |
 |---|---|---|
-| `Snapshot` | `get_state`, `find_element`, `get_element`, `get_text`, `window` (list/active) | A-1..A-6, A-11..A-13 |
+| `Snapshot` | `snapshot`, `get_state`, `find_element`, `get_element`, `get_text`, `window` (list/active) | A-1..A-6, A-11..A-13 |
 | `Screenshot` | `screenshot`, `ocr` | A-7..A-11 |
 | `DisplayInventory` | `multi_monitor` | B-12 |
 | `Click` | `click`, `interact_element` | D-2, B-4 |

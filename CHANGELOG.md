@@ -2,6 +2,27 @@
 
 ### Added
 
+- **`snapshot` — one call for the whole desktop** (parity A-2, with A-3 and A-4 inside; 64 → 65
+  tools). Every open window (z-order, topmost first), the foreground one, the cursor, and every
+  interactive element with its centre coordinates and an action hint
+  (`click|fill|toggle|select|slide|scroll`) plus focus/password/value/toggle/expand/shortcut/range
+  metadata, and the scrollable regions with their scroll percentages and `reached top/bottom`.
+  Default output is a compact text block (several times cheaper than the JSON tree);
+  `format:"json"` returns the same as DTOs, with the element tree when `include_tree` is set.
+  `scope`: `desktop` (default, every non-minimised window) | `foreground` | `window` (with a
+  title, exact then substring; an unknown title lists what is open). Element ids (`el_N`) work
+  with `click` (centre), `interact_element` and `get_element` and are valid until the next
+  snapshot, which evicts them — a `find_element` id issued in between survives. The walk runs
+  under one UIA `CacheRequest` per window (one cross-process fetch per subtree instead of one per
+  property) and is capped by an element budget: `max_elements` per call, else the new
+  `--max-tree-elements <n>` / `WINDOWSMCP_MAX_TREE_ELEMENTS` (default 500, both transports); a
+  truncated result says so and how to narrow the view. `use_dom` is accepted and refused until
+  A-5. New `Services/UiTree/`: `UiNode`, `UiClassifier` (now the single home of D-6's
+  interactive set, plus upstream's LegacyIAccessible role fallback), `ElementBudget`,
+  `SnapshotRenderer`, `UiTraverser`; `IUIAutomationService.SnapshotAsync` and the
+  `SnapshotRequest`/`SnapshotResult`/`SnapshotElement`/`SnapshotScrollable`/`ScrollInfo`/
+  `UiTreeOptions` records; `UIAutomationService` now takes `IWindowService`. Design note:
+  `docs/design/A-2-desktop-snapshot.md`.
 - **`window(action:"list"|"active")` — the whole-desktop window inventory** (parity A-1). `list`
   returns every user-visible top-level window in z-order (`ZOrder` 0 = frontmost): `Title`
   (sanitised, A-13), `Hwnd`, `Pid`/`ProcessName`, `State` (`Normal|Minimized|Maximized`, by
@@ -22,6 +43,12 @@
 
 ### Changed
 
+- **`get_state` is bounded by the element budget** (parity A-4). Same foreground root and
+  three-level shape; when `--max-tree-elements` stops the walk the root carries `Truncated: true`
+  and `ElementLimit` (absent otherwise, so the JSON is unchanged until a walk is cut short).
+  `ElementInfo` gained a trailing `Scroll` (populated by `snapshot`; `find_element` not yet). The
+  tool's `[Description]` now states the depth and the budget and points at `snapshot` for a
+  whole-desktop read with centre coordinates and action hints (roadmap C4).
 - **`screenshot` returns the image as MCP image content** (parity A-7). The tool result is now a
   text block with one JSON metadata object (`{width, height, format, coordinateSpace:
   "virtual-desktop", region, path?}` — A-8/A-9/A-11 below add `displays`, `originalWidth`/

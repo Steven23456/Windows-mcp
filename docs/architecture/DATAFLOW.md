@@ -50,7 +50,7 @@ public async Task<string> ToolName(/* parameters */)
 
 ## GetState Data Flow (UI Automation)
 
-`GetState` is the primary context-gathering tool — returns the full UI element tree of the foreground application.
+`GetState` returns the UI element tree of the foreground application, three levels deep. (`Snapshot`, below, is the whole-desktop context-gathering call.)
 
 ### Sequence
 
@@ -64,24 +64,23 @@ public async Task<string> ToolName(/* parameters */)
      ├──────────────►│                      │                       │
      │               │ GetStateAsync()      │                       │
      │               ├─────────────────────►│                       │
-     │               │                      │ AutomationElement     │
-     │               │                      │ .RootElement          │
-     │               │                      ├──────────────────────►│
-     │               │                      │◄──────────────────────┤
-     │               │                      │                       │
      │               │                      │ GetForegroundWindow() │
+     │               │                      │ → FromHandle          │
      │               │                      ├──────────────────────►│
      │               │                      │◄──────────────────────┤
+     │               │                      │  (else FocusedElement │
+     │               │                      │   → GetDesktop)       │
      │               │                      │                       │
-     │               │                      │ TreeWalker.Walk()     │
+     │               │                      │ FindAllChildren()     │
      │               │                      ├──────────────────────►│
-     │               │                      │  [recursive DFS]      │
+     │               │                      │  [recursive DFS,      │
+     │               │                      │   depth 3, budgeted]  │
      │               │                      │◄──────────────────────┤
      │               │                      │                       │
-     │               │    UiState           │                       │
+     │               │    ElementTree       │                       │
      │               │◄─────────────────────┤                       │
      │               │ JsonSerializer       │                       │
-     │ JSON string   │ .Serialize(state)    │                       │
+     │ JSON string   │ .Serialize(tree)     │                       │
      │◄──────────────┤                      │                       │
 ```
 
@@ -91,25 +90,72 @@ public async Task<string> ToolName(/* parameters */)
 1. MCP Request
    └─► no parameters (returns foreground window state)
 
-2. UIAutomationService.GetStateAsync()
-   ├─► Get desktop root via AutomationElement.RootElement
-   ├─► Identify foreground window via P/Invoke GetForegroundWindow()
-   └─► Walk UIA3 tree recursively
+2. UIAutomationService.GetStateAsync()   [on the STA worker thread]
+   ├─► Foreground root: GetForegroundWindow() → FromHandle, falling back to
+   │   the focused element, then the desktop
+   ├─► BuildTree(root, depth: 3, budget) — recursive, depth-limited
+   └─► ElementBudget.TryTake() per node (UiTreeOptions.MaxElements,
+       from --max-tree-elements, default 500); a refused child ends its
+       parent's child list and stops the walk
 
-3. Per-element classification (FlaUI ControlType checks):
-   ├─► Interactive: Button, Edit, CheckBox, RadioButton, ComboBox,
-   │               ListItem, MenuItem, Hyperlink, TabItem, TreeItem, ...
-   ├─► Text: Text, Document controls (read-only content)
-   └─► Scrollable: elements supporting IScrollPattern
+3. Per element → ElementInfo:
+   { ElementId "el_N" (cached for get_element/interact_element), Name,
+     ControlType, IsEnabled, IsOffscreen, Bounds, Value, IsChecked,
+     IsSelected, Scroll (null here — snapshot populates it) }
 
-4. UiState aggregate:
-   UiState {
-     Interactive: [{ Id, Name, ControlType, BoundingBox, Value, ... }]
-     Text:        [{ Id, Name, Content }]
-     Scrollable:  [{ Id, Name, BoundingBox, H: bool, V: bool }]
+4. ElementTree aggregate:
+   ElementTree {
+     Root: ElementInfo, Children: ElementTree[],
+     Truncated / ElementLimit  ← set on the ROOT only when the budget
+                                  stopped the walk; omitted from the JSON
+                                  otherwise
    }
 
-5. MCP Response: JSON string of UiState
+5. MCP Response: JSON string of ElementTree
+```
+
+---
+
+## Snapshot Data Flow (whole desktop)
+
+`snapshot` is the entry point for an interaction loop: one call returns the window list, the
+cursor, every interactive element with its centre coordinates, and the scrollable regions.
+
+### Data Transformations
+
+```
+1. MCP Request
+   └─► snapshot(scope, window?, include_tree, max_elements, format, use_dom)
+       UIAutomationTools validates in order: scope → the window/scope rule →
+       max_elements ≥ 0 → format → use_dom (refused: reserved for A-5)
+
+2. UIAutomationService.SnapshotAsync(SnapshotRequest)
+   ├─► Header, each collaborator read once:
+   │     IInputService.GetCursorPositionAsync()      → Cursor
+   │     IWindowService.EnumerateMonitorsAsync()     → CursorMath.MonitorIndexOf
+   │     IWindowService.ListAsync(...)               → Windows, WindowFilter.ActiveOf
+   ├─► Roots by scope: desktop = every non-minimised window (topmost first),
+   │   foreground = the active entry (else UIA's foreground window),
+   │   window = title match, exact then substring
+   └─► [STA thread] one ElementBudget for the whole call;
+       UiTraverser.Walk(root, title, budget) per window under one CacheRequest;
+       a window whose walk throws is logged and skipped
+
+3. Per walked node → el_N id (ids the previous snapshot issued are evicted
+   first) → UiTree.Project:
+   ├─► UiClassifier.Classify → Interactive?  → SnapshotElement
+   │     (Window, ControlType, Name, CenterX/CenterY from CenterOf(Bounds),
+   │      Action from ActionFor, Focused, IsPassword, Value (null when
+   │      password), Toggle, Expand, Shortcut, Range min/value/max)
+   └─► UiClassifier.IsScrollable → SnapshotScrollable (+ ScrollInfo)
+
+4. SnapshotResult { Windows, ActiveWindow, Cursor, CursorMonitorIndex,
+                    Interactive[], Scrollable[], Tree?, Truncated,
+                    ElementLimit, ElementCount, CaptureMs }
+
+5. MCP Response:
+   format="text" (default) → SnapshotRenderer.Render(result)  — compact rows
+   format="json"           → JsonSerializer.Serialize(result)
 ```
 
 ---
@@ -362,7 +408,8 @@ Host.CreateApplicationBuilder(args)
         │
         ▼
 builder.Services.AddSingleton<IInputService, InputService>()
-  ...  (36 services + the ScreenshotOptions record from --screenshot-scale)
+  ...  (36 services + the ScreenshotOptions record from --screenshot-scale
+       and the UiTreeOptions record from --max-tree-elements)
         │
         ▼
 builder.AddWindowsMcp(options)    ← Hosting/WindowsMcpHost: AddMcpServer(...) + filter + WithToolsFromAssembly()
@@ -396,38 +443,44 @@ builder.Build().RunAsync()
 ## Element State Determination (FlaUI)
 
 ```
-Is element interactive?
+UiTraverser.ReadNode — is the element something the model can see?
         │
         ▼
   ┌─────────────────────────┐
-  │ ControlType in           │──NO──► Skip
-  │ INTERACTIVE_CONTROL_TYPES│
+  │ IsOffscreen == false     │──NO──► Skip (and its subtree)
+  │ (an Edit with real       │
+  │  bounds is kept — D-7)   │
+  └──────────┬──────────────┘
+             │YES
+             ▼
+  ┌─────────────────────────┐   NO ─► Skip the node, still walk
+  │ Bounds clipped to the   │        its children (zero-area
+  │ window rect, area > 0   │        containers hold real ones)
   └──────────┬──────────────┘
              │YES
              ▼
   ┌─────────────────────────┐
-  │ IsEnabled == true        │──NO──► Skip
+  │ ElementBudget.TryTake() │──NO──► Truncated = true, walk stops
   └──────────┬──────────────┘
              │YES
              ▼
-  ┌─────────────────────────┐
-  │ IsOffscreen == false     │──NO──► Skip
-  └──────────┬──────────────┘
-             │YES
-             ▼
-  ┌─────────────────────────┐
-  │ BoundingRectangle.Area  │──NO──► Skip
-  │       > 0               │
-  └──────────┬──────────────┘
-             │YES
-             ▼
-      [Include in Interactive]
+   [UiNode] ──► UiClassifier.Classify
+        │
+        ├─► ControlType in InteractiveControlTypes ──► Interactive
+        ├─► LegacyIAccessible role in InteractiveLegacyRoles ──► Interactive
+        │   ("text" only when the node carries a value)
+        ├─► ControlType in InformativeControlTypes ──► Informative
+        └─► otherwise ──► Structural
+   (a node with a movable ScrollPattern is additionally listed as Scrollable)
 
 
-Interactive control types (FlaUI ControlType names):
-  Button, Edit, CheckBox, RadioButton, ComboBox, List, ListItem,
-  MenuItem, Hyperlink, SplitButton, TabItem, TreeItem, DataItem,
-  Slider, Spinner, ScrollBar, Document
+Interactive control types (UiClassifier.InteractiveControlTypes, 17):
+  Button, ListItem, MenuItem, Edit, CheckBox, RadioButton, ComboBox,
+  Hyperlink, SplitButton, TabItem, TreeItem, DataItem, HeaderItem,
+  Spinner, Slider, ScrollBar, Document
+
+Informative control types (never clicked, worth reporting):
+  Text, Image, StatusBar, ProgressBar, ToolTip, Header
 ```
 
 ---
@@ -530,15 +583,30 @@ the path.
 // PowerShell response
 {"Stdout":"ProcessName  CPU\n---\npwsh   1.23\n","Stderr":"","ExitCode":0}
 
-// GetState response (abbreviated)
+// GetState response (abbreviated) — an ElementTree; Truncated/ElementLimit
+// appear on the root only when the element budget stopped the walk
 {
-  "Interactive": [
-    { "Id": "1", "Name": "OK", "ControlType": "Button",
-      "BoundingBox": {"Left":100,"Top":200,"Right":180,"Bottom":230} }
-  ],
-  "Text": [{ "Id": "2", "Name": "Save changes?", "Content": "Save changes?" }],
-  "Scrollable": []
+  "Root": { "ElementId": "el_0", "Name": "Untitled - Notepad",
+            "ControlType": "Window", "IsEnabled": true, "IsOffscreen": false,
+            "Bounds": {"X":100,"Y":200,"Width":800,"Height":600},
+            "Value": null, "IsChecked": null, "IsSelected": null, "Scroll": null },
+  "Children": [
+    { "Root": { "ElementId": "el_1", "Name": "OK", "ControlType": "Button", "...": null },
+      "Children": [] }
+  ]
 }
+
+// Snapshot response, format:"text" (default) — one element per row
+Cursor: (1204, 733) on display 0
+Active window: "Untitled - Notepad" (pid 8124, Normal)
+Windows (z-order, topmost first):
+  0. "Untitled - Notepad" [Normal] 1120x740 @ (280,150) pid=8124
+Interactive (2 of 37, ids valid until the next snapshot):
+window "Untitled - Notepad"
+  el_3 (612,388) button "Save"  [action: click]  [shortcut: Ctrl+S]
+  el_7 (840,470) document "Text editor"  [action: fill]  [focused]
+Scrollable (1):
+  el_7 (840,470) document "Text editor"  [v: 0%]  [h: 0%]  [reached top]
 ```
 
 ---

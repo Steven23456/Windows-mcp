@@ -98,6 +98,9 @@ public class HttpTransportTests
     internal static string ScreenshotToolName(IEnumerable<McpClientTool> tools) =>
         tools.Single(t => t.Name.Replace("_", "").Equals("screenshot", StringComparison.OrdinalIgnoreCase)).Name;
 
+    internal static string SnapshotToolName(IEnumerable<McpClientTool> tools) =>
+        tools.Single(t => t.Name.Replace("_", "").Equals("snapshot", StringComparison.OrdinalIgnoreCase)).Name;
+
     /// <summary>
     /// A throwaway localhost server certificate. SChannel cannot serve TLS with the purely
     /// in-memory key CreateSelfSigned produces, so it is round-tripped through PKCS#12.
@@ -483,6 +486,108 @@ public class HttpTransportTests
         includeCursor.GetProperty("default").GetBoolean().Should().BeTrue();
         screenshot.ProtocolTool.Description.Should().Contain("cursor",
             "the metadata list in the description tells the model the cursor field is there");
+    }
+
+    // ---- A-2 -------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A-2 (R6): <c>snapshot</c> is the 65th tool and the only new one in section A. Discovery is
+    /// where a source-generated tool goes missing, and the schema is the whole spec the model
+    /// reads before its first call - a parameter that is not advertised does not exist.
+    /// </summary>
+    [Fact]
+    public async Task Snapshot_tool_is_discovered_with_the_A2_parameter_set()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var tools = await client.ListToolsAsync();
+        var snapshot = tools.Single(t => t.Name == SnapshotToolName(tools));
+
+        var schema = snapshot.ProtocolTool.InputSchema.GetProperty("properties");
+        foreach (var parameter in new[] { "scope", "window", "include_tree", "max_elements", "format", "use_dom" })
+            schema.TryGetProperty(parameter, out _).Should().BeTrue($"'{parameter}' is part of the A-2 signature");
+
+        schema.GetProperty("scope").GetProperty("default").GetString().Should().Be("desktop");
+        schema.GetProperty("format").GetProperty("default").GetString().Should().Be("text",
+            "roadmap C6: text is the default, json is the opt-in");
+        schema.GetProperty("max_elements").GetProperty("default").GetInt32().Should().Be(0,
+            "0 means the server budget from --max-tree-elements");
+        schema.GetProperty("include_tree").GetProperty("default").GetBoolean().Should().BeFalse();
+        schema.GetProperty("use_dom").GetProperty("default").GetBoolean().Should().BeFalse();
+    }
+
+    /// <summary>
+    /// A-2 (R6) with <see cref="IUIAutomationService"/> swapped at the <c>BuildHttpApp</c> seam:
+    /// the JSON form must survive DI, the tool invoker and the JSON-RPC round trip with the
+    /// element ids intact - they are what <c>click</c> and <c>interact_element</c> are given next.
+    /// </summary>
+    [Fact]
+    public async Task Snapshot_json_over_http_carries_the_interactive_elements()
+    {
+        var uia = new Mock<IUIAutomationService>();
+        uia.Setup(s => s.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FixedSnapshot);
+
+        await using var server = await Harness.StartAsync(
+            configureServices: services => services.AddSingleton(uia.Object));
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var snapshot = SnapshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(snapshot, new Dictionary<string, object?>
+        {
+            ["format"] = "json",
+        });
+
+        result.IsError.Should().NotBe(true);
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject.Text;
+        using var doc = JsonDocument.Parse(text);
+
+        var element = doc.RootElement.GetProperty("Interactive")[0];
+        element.GetProperty("ElementId").GetString().Should().Be("el_12");
+        element.GetProperty("Action").GetString().Should().Be("click");
+        element.GetProperty("CenterX").GetInt32().Should().Be(612);
+        doc.RootElement.GetProperty("Windows").GetArrayLength().Should().Be(1);
+
+        uia.Verify(s => s.SnapshotAsync(
+            It.Is<SnapshotRequest>(r => r.Scope == SnapshotScope.Desktop), It.IsAny<CancellationToken>()),
+            Times.Once, "one service call per tool call, with the default scope");
+    }
+
+    [Fact]
+    public async Task Snapshot_text_over_http_is_the_rendered_layout()
+    {
+        var uia = new Mock<IUIAutomationService>();
+        uia.Setup(s => s.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FixedSnapshot);
+
+        await using var server = await Harness.StartAsync(
+            configureServices: services => services.AddSingleton(uia.Object));
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var snapshot = SnapshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(snapshot, new Dictionary<string, object?>());
+
+        result.IsError.Should().NotBe(true);
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject.Text;
+        text.Should().StartWith("Cursor:", "text is the default format and the header comes first");
+        text.Should().Contain("Interactive (").And.Contain("el_12");
+    }
+
+    /// <summary>One window, one element, one scrollable - enough that a dropped block shows.</summary>
+    private static SnapshotResult FixedSnapshot
+    {
+        get
+        {
+            var window = new WindowInfo("Untitled - Notepad", 1, 4242, "notepad", WindowState.Normal,
+                new Bounds(100, 100, 800, 600), 0, true, false, 0);
+            var element = new SnapshotElement("el_12", "Untitled - Notepad", "Button", "Save", 612, 388,
+                new Bounds(600, 380, 24, 16), "click", false, false, null, null, null, "Ctrl+S", null, null, null);
+            var scrollable = new SnapshotScrollable("el_20", "Untitled - Notepad", "Document", "Text Editor",
+                500, 400, new Bounds(100, 140, 800, 520), new ScrollInfo(37, 0, true, false));
+            return new SnapshotResult([window], window, new CursorPosition(612, 388), 0,
+                [element], [scrollable], null, false, 500, 57, 12);
+        }
     }
 
     /// <summary>

@@ -124,14 +124,15 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 ---
 
-### `UIAutomationTools` — 8 tools
+### `UIAutomationTools` — 9 tools
 `src/WindowsMcp/Tools/UIAutomationTools.cs`
 
 **Injected:** `IUIAutomationService`
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `GetState` | `()` | Full UI element tree of the foreground app |
+| `Snapshot` | `(string scope="desktop", string? window=null, bool include_tree=false, int max_elements=0, string format="text", bool use_dom=false)` | One call for the whole desktop: window list (z-order, topmost first), active window, cursor, every interactive element with its centre coordinates and an action hint (click/fill/toggle/select/slide/scroll), and the scrollable regions with their percentages. `scope`: desktop (default) / foreground / window (needs `window`, exact-then-substring). `format="text"` (default) is the compact render, `"json"` the serialised `SnapshotResult` (`include_tree` adds the element tree). `max_elements` caps the walk (0 = `--max-tree-elements`, default 500); a truncated result says so. Element ids (`el_N`) work with `click`/`interact_element`/`get_element` and are valid until the next snapshot. `use_dom` is refused until A-5 |
+| `GetState` | `()` | UI element tree of the foreground app, three levels deep and bounded by the element budget; the root carries `Truncated`/`ElementLimit` when the walk was cut short |
 | `FindElement` | `(string text, string kind="any", string scope="foreground", string? window=null, bool include_offscreen=false)` | Find elements whose name contains `text`; kind: any/interactive/text/scrollable; scope: foreground (default) / window (needs `window`) / desktop; off-screen elements dropped unless `include_offscreen`; ≤20 matches, capped after filtering |
 | `GetElement` | `(string element_id)` | Properties of a specific element by ID |
 | `GetText` | `(string element_id)` | Extract text content (faster than OCR) |
@@ -373,7 +374,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IAudioService` | `GetAsync` → `AudioState`, `SetVolumeAsync`, `SetMutedAsync` |
 | `IPowerShellService` | `RunAsync(command)` → `PSResult` |
 | `IJobService` | `StartAsync(command)`, `GetStatus(id)`, `GetOutput(id, tailChars)`, `Cancel(id)`, `List()` |
-| `IUIAutomationService` | `GetStateAsync`, `FindElementAsync(text, kind, scope, windowTitle, includeOffscreen)`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync` → `AssertResult`, `InteractAsync` → `InteractResult`, `GetTableAsync`, `WaitForAsync(text, timeoutMs, intervalMs, kind, scope, windowTitle, includeOffscreen)`, `FocusAsync` |
+| `IUIAutomationService` | `GetStateAsync`, `FindElementAsync(text, kind, scope, windowTitle, includeOffscreen)`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync` → `AssertResult`, `InteractAsync` → `InteractResult`, `GetTableAsync`, `WaitForAsync(text, timeoutMs, intervalMs, kind, scope, windowTitle, includeOffscreen)`, `FocusAsync`, `SnapshotAsync(SnapshotRequest)` → `SnapshotResult` |
 | `IFileSystemService` | `ReadTextAsync`, `ReadBytesAsync`, `WriteTextAsync`, `CopyAsync`, `MoveAsync`, `DeleteAsync`, `ListAsync`, `SearchAsync`, `GetInfoAsync`, `HashFileAsync`, `ZipAsync`, `UnzipAsync` |
 | `IFileStreamService` | `GetStreamsAsync(path)` → `FileStreamsDto` (alternate data streams + reparse target) |
 | `IRegistryService` | `GetAsync`, `SetAsync`, `EnumerateValuesAsync`, `EnumerateSubKeysAsync` |
@@ -413,7 +414,7 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 21 f
 |------|-----------|
 | `InputDtos.cs` | `ClickResult`, `DragResult`, `TypeResult`, `CursorPosition`, `MouseButton` (enum) |
 | `ScreenDtos.cs` | `ScreenRegion`, `CaptureOptions`, `ScreenshotResult`, `ScreenshotOptions`, `ImageFormat` (enum) |
-| `UIAutomationDtos.cs` | `ElementInfo`, `Bounds`, `ElementTree`, `FindElementResult`, `FindKind` (enum), `FindScope` (enum), `TableData`, `InteractResult`, `AssertResult` |
+| `UIAutomationDtos.cs` | `ElementInfo` (trailing `Scroll`), `Bounds`, `ScrollInfo`, `ElementTree` (trailing `Truncated`/`ElementLimit`, omitted from JSON when default), `FindElementResult`, `FindKind` (enum), `FindScope` (enum), `TableData`, `InteractResult`, `AssertResult`, `SnapshotScope` (enum), `SnapshotRequest`, `UiTreeOptions`, `SnapshotElement`, `SnapshotScrollable`, `SnapshotResult` |
 | `WindowDtos.cs` | `WindowAction`, `MonitorInfo`, `WindowInfo`, `WindowProbe`, `WindowState` (enum, serialised by name) |
 | `ProcessDtos.cs` | `ProcessDto`, `ProcessDetailDto`, `ModuleInfo`, `ProcessLineageDto`, `ProcessGroupDto` |
 | `PowerShellDtos.cs` | `PSResult` (success, stdout, stderr, exit code, parsed errors) |
@@ -451,7 +452,8 @@ public record AudioState(int Level, bool Muted);
 ### `UIAutomationService`
 
 Uses **FlaUI.UIA3** to walk the Windows Accessibility (UIA3) tree:
-- `GetStateAsync()` — builds a three-level `ElementTree` rooted at the foreground window (falls back to the focused element, then the desktop); every element gets a cached `el_N` id
+- `GetStateAsync()` — builds a three-level `ElementTree` rooted at the foreground window (falls back to the focused element, then the desktop); every element gets a cached `el_N` id. The descent spends an `ElementBudget` (`UiTreeOptions.MaxElements`, from `--max-tree-elements`, default 500) per node and stops when it refuses; the **root** then carries `Truncated: true` and `ElementLimit`, which are omitted from the JSON otherwise
+- `SnapshotAsync(request)` — the whole desktop in one call. Header from `IWindowService` (window list, active window, monitors) and `IInputService` (cursor), each read once; roots by scope — `desktop` walks every non-minimised window topmost first, `foreground` the active entry (falling back to UIA's own foreground window when the inventory flags none), `window` matches a title exact-then-substring and otherwise throws naming up to 15 open titles. One `ElementBudget` (per-call `MaxElements`, else `UiTreeOptions`) covers the whole call on the STA thread; a window whose walk throws is logged and skipped. Each walked node gets an `el_N` id, and the ids the *previous* snapshot issued are evicted from the element cache when the next one starts — a `find_element` id issued in between survives. The pure `internal static Project` splits one walked node into an interactive element and/or a scrollable region and never lets a password's value out
 - `FindElementAsync()` — walks one window root at a time (foreground by default; `scope=window` resolves a title exact-then-substring against the top-level windows and names the open windows when nothing matches; `scope=desktop` walks them all). Every property read is guarded and each element is evaluated inside a catch, so an element that dies mid-walk is skipped rather than failing the call; the kind filter is pushed into a UIA `OrCondition` for descendants and applied client-side to the root. `kind=interactive` is upstream's control-type set plus `Document` (`InteractiveControlTypes`). Off-screen elements and empty bounds are dropped before the 20-result cap unless `includeOffscreen` — an `Edit` with real bounds is kept either way, because browsers over-report it as off-screen
 - `InteractAsync()` — click / invoke / toggle / select / focus / type. Each acts through a UIA pattern (Invoke, SelectionItem, Toggle, Value) or a physical fallback via `IInputService` (a click at the element's centre; keyboard entry when there is no writable ValuePattern) and returns an `InteractResult` naming what fired; an unsupported pattern throws `NotSupportedException` with the control type — never a silent no-op. `FocusAsync()` sets keyboard focus
 - `WaitForAsync()` — polls `FindElementAsync` (same kind/scope/window/off-screen filters, the window re-resolved each poll) via the pure `PollAsync` loop: polls at least once, retries a poll that throws, clamps the sleep to the remaining budget, returns `null` when clean polls found nothing, and throws `TimeoutException` when *every* poll failed
@@ -527,6 +529,18 @@ rule is unit-tested headless:
 - `CursorOverlay` — `RingPoint` (cursor rebased onto the captured rect, null when outside) and `DrawRing` (white 3 px ring at radius 12, black 2 px at radius 8)
 - `UiText.Sanitize` — strips Private Use Area code points, replaces lone UTF-16 surrogates with U+FFFD, drops C0/C1 controls except tab/LF/CR, trims; returns the same instance when nothing needed changing
 - `WindowFilter` — A-1's judgement over the `WindowProbe` records `WindowService` gathers, so every rule is provable on hand-written probes with no desktop attached. `Keep` drops a window that is not visible, a `WS_EX_TOOLWINDOW` without `WS_EX_APPWINDOW`, a DWM-cloaked one (UWP ghosts, other virtual desktops), a zero-area one, the shell chrome classes (`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`, `Progman`, `WorkerW`, `IME`, `MSCTFIME UI`), an untitled one unless `includeHidden` (the title is judged **after** `UiText.Sanitize`) and a minimized one unless `includeMinimized`; `StateOf` reads `Minimized` before `Maximized` (a minimized window keeps `WS_MAXIMIZE`); `IsBrowser` matches `chrome, msedge, firefox, brave, opera, vivaldi` with or without `.exe`; `Build` projects the survivors onto `WindowInfo`, renumbering `ZOrder` from 0 and taking `MonitorIndex` from the window's centre via `CursorMath.MonitorIndexOf`; `ActiveOf` picks the entry flagged `IsActive`, so `active` reports the list's real `ZOrder`
+
+### Snapshot core (`Services/UiTree/`)
+
+`internal` types the `snapshot` tool is built from, split out so everything except the traversal
+itself is unit-tested headless:
+- `UiNode` — the record of every fact one element contributes: control type, name, bounds, window
+  title, depth, enabled, off-screen, focus, password, value, range min/value/max, toggle state,
+  expand state, access key, accelerator key, legacy role, `ScrollInfo`
+- `UiClassifier` — **the single home of D-6's interactive control-type set** (`UIAutomationService.InteractiveControlTypes` now forwards to it, so the find path and the snapshot cannot drift), plus upstream's LegacyIAccessible role fallback for `Custom` elements (`text` counts only when the node carries a value), the informative set, `ActionFor` (`Edit`/`Document` → fill, CheckBox → toggle, ComboBox → select, Slider/Spinner → slide, ScrollBar → scroll, else click), `IsScrollable`, `CenterOf`, `ShortcutOf`
+- `ElementBudget` — `TryTake` per admitted node, `Truncated` on the first refusal, and one `NoteFor(limit)` sentence the renderer prints verbatim
+- `UiTraverser` — walks one window: re-fetches the root under a single FlaUI `CacheRequest` (`TreeScope.Subtree`, `AutomationElementMode.Full`, with each pattern *property* id cached as well) and walks `CachedChildren`, so a subtree costs one cross-process fetch instead of one per property. Every read is guarded, names and values go through `UiText.Sanitize`, each node is clipped to the window rect by the pure `Clip` and dropped when off-screen or zero-area, and the budget is spent once per admitted node. Pre-order, root first
+- `SnapshotRenderer` — the compact text form: cursor line, active window, z-ordered window list, interactive rows grouped by window in first-appearance order with a fixed tag order (action, focused, password, value, toggle, expand, shortcut, range), scrollable rows with percentages and `[reached top]`/`[reached bottom]`, then the budget note when truncated. A password never prints a value, values clip at 80 chars, and CR/LF/tab/backslash are escaped so one element is always one row
 
 ### `OcrService`
 

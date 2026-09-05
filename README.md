@@ -2,7 +2,7 @@
 
 An MCP server for Windows desktop automation, written in C# on the official
 [`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol)
-SDK. See [Tool reference](#tool-reference) for the 64 tools.
+SDK. See [Tool reference](#tool-reference) for the 65 tools.
 
 ## Build
 
@@ -84,10 +84,12 @@ $env:WINDOWSMCP_API_KEY = "<a long random secret>"
 | `--bind <ip>` | `WINDOWSMCP_BIND` | `0.0.0.0` | Listen address; `127.0.0.1` = this machine only |
 | `--cert-thumbprint <hex>` | `WINDOWSMCP_CERT_THUMBPRINT` | — | Certificate in `LocalMachine\My` or `CurrentUser\My`; makes the port **HTTPS only** |
 | `--api-key <key>` | `WINDOWSMCP_API_KEY` | — | Bearer token (≥ 16 printable ASCII chars). **Required** unless `--bind` is loopback |
-| `--screenshot-scale <0.1-1.0>` | `WINDOWSMCP_SCREENSHOT_SCALE` | `1.0` | Multiplies every `screenshot` call's own `scale`; the one option that also applies to **stdio** |
+| `--screenshot-scale <0.1-1.0>` | `WINDOWSMCP_SCREENSHOT_SCALE` | `1.0` | Multiplies every `screenshot` call's own `scale`; also applies to **stdio** |
+| `--max-tree-elements <n>` | `WINDOWSMCP_MAX_TREE_ELEMENTS` | `500` | Element budget for `snapshot`/`get_state` when a call names none; also applies to **stdio** |
 
-`WindowsMcp.exe --help` prints the same options (it lists `--screenshot-scale` under its own
-heading, since it is not HTTP-only). No arguments = stdio, unchanged.
+`WindowsMcp.exe --help` prints the same options (it lists `--screenshot-scale` and
+`--max-tree-elements` under a "Capture options (both transports)" heading, since neither is
+HTTP-only). No arguments = stdio, unchanged.
 
 **Security model.** Every tool — `powershell`, `file_write`, `registry_set`,
 `process kill`, … — is reachable on that port. So the server refuses to start on a
@@ -151,14 +153,14 @@ operations. See [`skills/windows/SKILL.md`](skills/windows/SKILL.md).
 
 ## Tool reference
 
-64 tools, grouped:
+65 tools, grouped:
 
 | Category | Tools |
 |---|---|
 | Input | `click`, `drag`, `hover`, `type`, `key`, `shortcut`, `scroll`, `clipboard` |
 | Screen | `screenshot`, `ocr` |
 | Window | `window`, `switch_to_window`, `launch`, `focus`, `multi_monitor` |
-| UI Automation | `get_state`, `find_element`, `get_element`, `get_text`, `assert_element`, `interact_element`, `get_table`, `wait_for` |
+| UI Automation | `snapshot`, `get_state`, `find_element`, `get_element`, `get_text`, `assert_element`, `interact_element`, `get_table`, `wait_for` |
 | Process / Shell | `process`, `process_inspect`, `start_process`, `powershell` (with `background: true` for jobs), `job`, `service`, `scheduled_task`, `event_log` |
 | File | `file_search`, `file_manage`, `file_dialog`, `file_read`, `file_write`, `file_info`, `file_hash`, `file_streams`, `archive` |
 | Disk | `disk_inspect`, `storage_health` |

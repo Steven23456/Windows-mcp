@@ -38,7 +38,9 @@ internal sealed record ServerOptions(
     string? ApiKey,
     bool ShowHelp = false,
     // A-9: process-wide multiplier on every screenshot's own 'scale' argument, [0.1, 1.0].
-    double ScreenshotScale = 1.0)
+    double ScreenshotScale = 1.0,
+    // A-4: the element budget snapshot/get_state use when a call names none; at least 1.
+    int MaxTreeElements = 500)
 {
     public const int DefaultPort = 8765;
     public const string DefaultBind = "0.0.0.0";
@@ -57,7 +59,7 @@ internal sealed record ServerOptions(
 
     private static readonly string[] HttpOnlyOptions = ["port", "bind", "cert-thumbprint", "api-key"];
     private static readonly HashSet<string> KnownOptions =
-        new(["transport", "screenshot-scale", .. HttpOnlyOptions], StringComparer.OrdinalIgnoreCase);
+        new(["transport", "screenshot-scale", "max-tree-elements", .. HttpOnlyOptions], StringComparer.OrdinalIgnoreCase);
 
     public static string Usage => $"""
         Usage: WindowsMcp.exe [--transport stdio|http] [options]
@@ -84,10 +86,13 @@ internal sealed record ServerOptions(
           --screenshot-scale <0.1-1.0>
                                     Multiply every screenshot's own scale by this (default 1.0):
                                     a cheap way to shrink what the model sees on a 4K desktop.
+          --max-tree-elements <n>   Element budget for snapshot and get_state when a call does not
+                                    name its own (default 500, at least 1); the walk stops there and
+                                    says so.
 
         Environment fallbacks (a flag on the command line wins): {EnvPrefix}TRANSPORT,
         {EnvPrefix}PORT, {EnvPrefix}BIND, {EnvPrefix}CERT_THUMBPRINT, {EnvPrefix}API_KEY,
-        {EnvPrefix}SCREENSHOT_SCALE.
+        {EnvPrefix}SCREENSHOT_SCALE, {EnvPrefix}MAX_TREE_ELEMENTS.
         Prefer {EnvPrefix}API_KEY over --api-key: it stays out of process command lines.
 
         Examples:
@@ -161,12 +166,20 @@ internal sealed record ServerOptions(
                 throw new OptionsException($"Invalid --screenshot-scale '{scaleRaw}'; expected a number from 0.1 to 1.0.");
         }
 
+        var maxTreeElements = 500;
+        if (Get("max-tree-elements", "MAX_TREE_ELEMENTS") is { } treeRaw)
+        {
+            // NumberStyles.None: digits only — no sign, no decimal point, no exponent, no separators.
+            if (!int.TryParse(treeRaw, NumberStyles.None, CultureInfo.InvariantCulture, out maxTreeElements) || maxTreeElements < 1)
+                throw new OptionsException($"Invalid --max-tree-elements '{treeRaw}'; expected a whole number of at least 1.");
+        }
+
         if (transport == TransportKind.Stdio)
         {
             var stray = HttpOnlyOptions.FirstOrDefault(cli.ContainsKey);
             if (stray is not null)
                 throw new OptionsException($"'--{stray}' only applies with '--transport http'.");
-            return Stdio with { ScreenshotScale = screenshotScale };
+            return Stdio with { ScreenshotScale = screenshotScale, MaxTreeElements = maxTreeElements };
         }
 
         var port = DefaultPort;
@@ -202,7 +215,8 @@ internal sealed record ServerOptions(
             apiKey = apiKeyRaw;
         }
 
-        return new ServerOptions(TransportKind.Http, bind, port, thumbprint, apiKey, ScreenshotScale: screenshotScale);
+        return new ServerOptions(TransportKind.Http, bind, port, thumbprint, apiKey,
+            ScreenshotScale: screenshotScale, MaxTreeElements: maxTreeElements);
     }
 
     /// <summary>

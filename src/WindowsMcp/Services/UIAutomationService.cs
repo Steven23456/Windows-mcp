@@ -4,6 +4,7 @@
 // if memory pressure is a concern.
 
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using FlaUI.Core.AutomationElements;
 using Windows.Win32;
@@ -14,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
+using WindowsMcp.Services.UiTree;
 
 namespace WindowsMcp.Services;
 
@@ -28,20 +30,36 @@ public sealed class UIAutomationService : IUIAutomationService
     private int _disposed;   // 0 = alive, 1 = disposed; treat atomically via Interlocked
 
     private readonly IInputService _input;
+    private readonly IWindowService _windows;
+    private readonly UiTreeOptions _treeOptions;
     private readonly ILogger _log;
 
     /// <param name="input">
     /// Physical input for the two <c>interact_element</c> paths that have no UIA pattern to use:
     /// a click at the element's centre, and keyboard entry when there is no writable ValuePattern.
+    /// Also the cursor position in a snapshot's header (A-11).
+    /// </param>
+    /// <param name="windows">
+    /// A-1's inventory: the snapshot's window list, the active window, the monitor inventory the
+    /// cursor's display index is resolved against, and the roots the walk starts from.
+    /// </param>
+    /// <param name="treeOptions">
+    /// A-4 (roadmap C7): the process-level element budget, from <c>--max-tree-elements</c>. Null
+    /// means <see cref="UiTreeOptions.Default"/>, so a test can construct the service directly.
     /// </param>
     /// <param name="log">
     /// Optional so tests can construct the service directly. The find path swallows per-element and
     /// per-window failures by design (D-5); this is where a failure that is <i>not</i> a recognised
     /// stale-element failure gets recorded, so a new failure mode is visible instead of silent.
     /// </param>
-    public UIAutomationService(IInputService input, ILogger<UIAutomationService>? log = null)
+    /// <param name="windows">The A-1 inventory: the snapshot's header and the roots it walks.</param>
+    /// <param name="treeOptions">The element budget in force when a call does not name its own (A-4); null = 500.</param>
+    public UIAutomationService(IInputService input, IWindowService windows,
+        UiTreeOptions? treeOptions = null, ILogger<UIAutomationService>? log = null)
     {
         _input = input;
+        _windows = windows;
+        _treeOptions = treeOptions ?? UiTreeOptions.Default;
         _log = log ?? (ILogger)NullLogger<UIAutomationService>.Instance;
         _automation = new UIA3Automation();
         _staThread = new Thread(WorkerLoop) { IsBackground = true, Name = "WindowsMcp-UA-STA" };
@@ -92,7 +110,14 @@ public sealed class UIAutomationService : IUIAutomationService
     public Task<ElementTree> GetStateAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        return OnStaAsync(() => BuildTree(GetForegroundRoot(), depth: 3), ct);
+        return OnStaAsync(() =>
+        {
+            // A-4: the same depth-3 shape, now bounded. The root reports the truncation, nothing else changes.
+            var budget = new ElementBudget(_treeOptions.MaxElements);
+            var tree = BuildTree(GetForegroundRoot(), depth: 3, budget)
+                ?? new ElementTree(ToInfo(GetForegroundRoot()), Array.Empty<ElementTree>());
+            return budget.Truncated ? tree with { Truncated = true, ElementLimit = budget.Limit } : tree;
+        }, ct);
     }
 
     /// <summary>
@@ -119,12 +144,20 @@ public sealed class UIAutomationService : IUIAutomationService
         return _automation.FocusedElement() ?? _automation.GetDesktop();
     }
 
-    private ElementTree BuildTree(AutomationElement el, int depth)
+    /// <summary>Null when the budget refused this node; a refused child ends the parent's child list.</summary>
+    private ElementTree? BuildTree(AutomationElement el, int depth, ElementBudget budget)
     {
+        if (!budget.TryTake()) return null;
         var info = ToInfo(el);
         if (depth <= 0) return new ElementTree(info, Array.Empty<ElementTree>());
-        var children = el.FindAllChildren().Select(c => BuildTree(c, depth - 1)).ToArray();
-        return new ElementTree(info, children);
+        var children = new List<ElementTree>();
+        foreach (var c in el.FindAllChildren())
+        {
+            var child = BuildTree(c, depth - 1, budget);
+            if (child is null) break;
+            children.Add(child);
+        }
+        return new ElementTree(info, children.ToArray());
     }
 
     private ElementInfo ToInfo(AutomationElement el)
@@ -210,23 +243,184 @@ public sealed class UIAutomationService : IUIAutomationService
     private const int MaxMatches = 20;
 
     /// <summary>
-    /// D-6: upstream's <c>INTERACTIVE_CONTROL_TYPE_NAMES</c> (<c>tree/config.py</c>) plus
-    /// <see cref="ControlType.Document"/>. Upstream's <c>TextBox</c> is omitted — there is no such
-    /// UIA control type; it is <see cref="ControlType.Edit"/>, already here. <c>Document</c> is in
-    /// because <c>find_element</c> has one flat kind and a text area you type into is something you
-    /// interact with (modern Notepad's editor is a Document, not an Edit). Upstream's
-    /// LegacyIAccessible role fallback is deliberately not ported: it costs a second cross-process
-    /// read per element, and belongs with A-2's classifier where a cache makes it affordable.
-    /// One named set so A-2 can take it over without the two drifting apart.
+    /// D-6's interactive set, now owned by <see cref="UiClassifier"/> (A-2) so the find path and
+    /// the snapshot classify from one list. Same instance, so the two cannot drift.
     /// </summary>
-    internal static readonly ControlType[] InteractiveControlTypes =
-    [
-        ControlType.Button, ControlType.ListItem, ControlType.MenuItem, ControlType.Edit,
-        ControlType.CheckBox, ControlType.RadioButton, ControlType.ComboBox, ControlType.Hyperlink,
-        ControlType.SplitButton, ControlType.TabItem, ControlType.TreeItem, ControlType.DataItem,
-        ControlType.HeaderItem, ControlType.Spinner, ControlType.Slider, ControlType.ScrollBar,
-        ControlType.Document,
-    ];
+    internal static ControlType[] InteractiveControlTypes => UiClassifier.InteractiveControlTypes;
+
+    /// <summary>Ids the previous snapshot issued; evicted when the next one starts (roadmap C5).</summary>
+    private readonly List<string> _snapshotIds = new();
+
+    /// <summary>
+    /// A-2: one call for the whole desktop. Header from the A-1 inventory and the cursor, then a
+    /// budgeted (A-4) walk of every non-minimised window (or the foreground / a named one),
+    /// classified into interactive elements with centre coordinates and action hints, and
+    /// scrollable regions with their percentages (A-3). Ids are valid until the next snapshot.
+    /// </summary>
+    public async Task<SnapshotResult> SnapshotAsync(SnapshotRequest request, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (_disposed != 0) throw new ObjectDisposedException(nameof(UIAutomationService));
+        if (request.Scope == SnapshotScope.Window && string.IsNullOrWhiteSpace(request.WindowTitle))
+            throw new ArgumentException("scope=window requires windowTitle: the title of the window to snapshot.", nameof(request.WindowTitle));
+        if (request.Scope != SnapshotScope.Window && request.WindowTitle is not null)
+            throw new ArgumentException("windowTitle is only used with scope=window.", nameof(request.WindowTitle));
+        if (request.MaxElements < 0)
+            throw new ArgumentException($"maxElements must be 0 (the server default) or positive, got {request.MaxElements}", nameof(request.MaxElements));
+
+        var sw = Stopwatch.StartNew();
+        var limit = request.MaxElements > 0 ? request.MaxElements : _treeOptions.MaxElements;
+
+        // Header — each collaborator once; the list is reused for the roots.
+        var cursor = await _input.GetCursorPositionAsync(ct);
+        var monitors = await _windows.EnumerateMonitorsAsync(ct);
+        var windows = await _windows.ListAsync(true, false, ct);
+        var active = WindowFilter.ActiveOf(windows);
+        var cursorMonitor = CursorMath.MonitorIndexOf(cursor.X, cursor.Y, monitors);
+
+        var targets = request.Scope switch
+        {
+            SnapshotScope.Desktop => windows.Where(w => w.State != WindowState.Minimized).ToArray(),
+            SnapshotScope.Foreground => active is null ? Array.Empty<WindowInfo>() : [active],
+            _ => MatchWindows(windows, request.WindowTitle!),
+        };
+
+        var walked = await OnStaAsync(() =>
+        {
+            var budget = new ElementBudget(limit);
+            var traverser = new UiTraverser(_automation);
+            var perWindow = new List<(string Title, IReadOnlyList<UiWalkEntry> Entries)>();
+
+            if (request.Scope == SnapshotScope.Foreground && active is null)
+            {
+                // No inventory entry is flagged active (the desktop, a cloaked window): fall back
+                // to whatever UIA says is in front, as get_state does.
+                var root = GetForegroundRoot();
+                perWindow.Add((TryGetName(root), traverser.Walk(root, TryGetName(root), budget)));
+            }
+
+            foreach (var w in targets)
+            {
+                if (budget.Truncated) break;
+                if (w.Hwnd == 0) continue;
+                try
+                {
+                    var root = _automation.FromHandle((nint)w.Hwnd)
+                        ?? throw new InvalidOperationException("no automation element for the window handle");
+                    perWindow.Add((w.Title, traverser.Walk(root, w.Title, budget)));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LogSkipped($"window '{w.Title}'", ex);
+                }
+            }
+
+            // Ids: evict what the previous snapshot issued, then issue one per walked node so the
+            // tree, the interactive list and get_element all agree.
+            var interactive = new List<SnapshotElement>();
+            var scrollable = new List<SnapshotScrollable>();
+            var trees = new List<ElementTree>();
+            lock (_cacheLock)
+            {
+                foreach (var old in _snapshotIds) _elementCache.Remove(old);
+                _snapshotIds.Clear();
+
+                foreach (var (title, entries) in perWindow)
+                {
+                    var ids = new string[entries.Count];
+                    for (int i = 0; i < entries.Count; i++)
+                    {
+                        ids[i] = $"el_{_nextId++}";
+                        _elementCache[ids[i]] = entries[i].Element;
+                        _snapshotIds.Add(ids[i]);
+                        var (element, region) = Project(entries[i].Node, ids[i]);
+                        if (element is not null) interactive.Add(element);
+                        if (region is not null) scrollable.Add(region);
+                    }
+                    if (request.IncludeTree && entries.Count > 0)
+                        trees.Add(ToTree(entries, ids));
+                }
+            }
+
+            ElementTree? tree = request.IncludeTree
+                ? new ElementTree(new ElementInfo("desktop", "", "Desktop", true, false, null, null, null, null), trees.ToArray())
+                : null;
+            return (Interactive: interactive.ToArray(), Scrollable: scrollable.ToArray(), Tree: tree,
+                    Count: budget.Count, budget.Truncated);
+        }, ct);
+
+        return new SnapshotResult(
+            Windows: windows,
+            ActiveWindow: active,
+            Cursor: cursor,
+            CursorMonitorIndex: cursorMonitor,
+            Interactive: walked.Interactive,
+            Scrollable: walked.Scrollable,
+            Tree: walked.Tree,
+            Truncated: walked.Truncated,
+            ElementLimit: limit,
+            ElementCount: walked.Count,
+            CaptureMs: sw.ElapsedMilliseconds);
+    }
+
+    /// <summary>scope=window against the inventory: exact title first, then substring, case-insensitive; none → name what is open.</summary>
+    private static WindowInfo[] MatchWindows(WindowInfo[] windows, string title)
+    {
+        var named = windows.Where(w => string.Equals(w.Title, title, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (named.Length == 0)
+            named = windows.Where(w => w.Title.Contains(title, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (named.Length == 0)
+        {
+            var open = windows.Select(w => w.Title).Where(t => t.Length > 0).Distinct().Take(15).ToArray();
+            throw new KeyNotFoundException(
+                $"No top-level window matching '{title}'. Open windows: " +
+                (open.Length > 0 ? string.Join(", ", open.Select(n => $"'{n}'")) : "(none with a title)"));
+        }
+        return named;
+    }
+
+    /// <summary>
+    /// One walked node → its place in the lists: an interactive element (never carrying a
+    /// password's value), a scrollable region, both, or neither. Pure, so the password rule and
+    /// the split are testable without a desktop.
+    /// </summary>
+    internal static (SnapshotElement? Interactive, SnapshotScrollable? Scrollable) Project(UiNode n, string id)
+    {
+        if (n.Bounds is not { } b) return (null, null);
+        var (cx, cy) = UiClassifier.CenterOf(b);
+        SnapshotElement? element = null;
+        if (UiClassifier.Classify(n) == UiRole.Interactive)
+        {
+            element = new SnapshotElement(
+                ElementId: id, Window: n.Window, ControlType: n.ControlType, Name: n.Name,
+                CenterX: cx, CenterY: cy, Bounds: b, Action: UiClassifier.ActionFor(n),
+                Focused: n.HasFocus, IsPassword: n.IsPassword, Value: n.IsPassword ? null : n.Value,
+                Toggle: n.ToggleState, Expand: n.ExpandState, Shortcut: UiClassifier.ShortcutOf(n),
+                RangeValue: n.RangeValue, RangeMin: n.RangeMin, RangeMax: n.RangeMax);
+        }
+        SnapshotScrollable? region = UiClassifier.IsScrollable(n)
+            ? new SnapshotScrollable(id, n.Window, n.ControlType, n.Name, cx, cy, b, n.Scroll!)
+            : null;
+        return (element, region);
+    }
+
+    /// <summary>Rebuilds the walk's pre-order entries into an ElementTree, ids matching the lists.</summary>
+    private static ElementTree ToTree(IReadOnlyList<UiWalkEntry> entries, string[] ids)
+    {
+        var children = new List<int>[entries.Count];
+        for (int i = 0; i < entries.Count; i++) children[i] = new List<int>();
+        for (int i = 1; i < entries.Count; i++)
+            if (entries[i].ParentIndex >= 0) children[entries[i].ParentIndex].Add(i);
+
+        ElementTree Build(int i)
+        {
+            var n = entries[i].Node;
+            var info = new ElementInfo(ids[i], n.Name, n.ControlType, n.IsEnabled, n.IsOffscreen, n.Bounds, n.Value,
+                n.ToggleState is null ? null : n.ToggleState == "On", null, n.Scroll);
+            return new ElementTree(info, children[i].Select(Build).ToArray());
+        }
+        return Build(0);
+    }
 
     public Task<FindElementResult> FindElementAsync(string text, FindKind kind = FindKind.Any,
         FindScope scope = FindScope.Foreground, string? windowTitle = null,

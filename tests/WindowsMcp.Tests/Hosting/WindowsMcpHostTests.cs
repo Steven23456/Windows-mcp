@@ -84,4 +84,34 @@ public class WindowsMcpHostTests
         ex.ParamName.Should().Be("cert");
         ex.Message.Should().Contain("certificate");
     }
+
+    // ---- A-2 / A-4 (R1): the element budget crosses into the service layer the same way ------
+    // ServerOptions is internal to the server assembly, so UiTreeOptions is the public record the
+    // sealed UIAutomationService is constructed with (roadmap C7 — no Environment.GetEnvironmentVariable
+    // inside a service). Registered in AddWindowsMcp, so stdio and HTTP get it alike.
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_tree_budget_from_the_server_options()
+    {
+        using var provider = Build(ServerOptions.Stdio with { MaxTreeElements = 200 });
+
+        provider.GetRequiredService<UiTreeOptions>().MaxElements.Should().Be(200);
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_default_tree_budget_when_none_was_configured()
+    {
+        using var provider = Build(ServerOptions.Stdio);
+
+        provider.GetRequiredService<UiTreeOptions>().MaxElements.Should().Be(500);
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_tree_options_as_a_singleton()
+    {
+        using var provider = Build(ServerOptions.Stdio with { MaxTreeElements = 42 });
+
+        provider.GetRequiredService<UiTreeOptions>()
+            .Should().BeSameAs(provider.GetRequiredService<UiTreeOptions>());
+    }
 }

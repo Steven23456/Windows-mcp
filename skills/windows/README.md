@@ -4,7 +4,7 @@ Playbook for driving Windows applications and system inspection over the `window
 
 ## Purpose
 
-A judgment layer over the `windows-mcp` server's 64 atomic tools for Windows desktop automation and system inspection. This skill adds no tools of its own—every action composes existing MCP tools into multi-step workflows with the right safety checks. It steers tool selection (MCP vs. raw PowerShell), sequences operations correctly, and flags destructive operations.
+A judgment layer over the `windows-mcp` server's 65 atomic tools for Windows desktop automation and system inspection. This skill adds no tools of its own—every action composes existing MCP tools into multi-step workflows with the right safety checks. It steers tool selection (MCP vs. raw PowerShell), sequences operations correctly, and flags destructive operations.
 
 Supports five core workflows:
 - **Startup triage** — diagnose slow boot, audit autoruns, verify signatures

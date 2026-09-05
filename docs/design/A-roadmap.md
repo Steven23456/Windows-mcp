@@ -5,9 +5,10 @@ of the parity checklist. This is the implementation plan; each item still gets i
 `docs/design/<ID>-<slug>.md` note when it is picked up (checklist rule 1), and this file is the
 place those notes link back to for the cross-item decisions. ·
 **Status:** planned 2026-09-04 against `main` @ `cb3b488` (64 tools, v0.7.3, all nine D items
-closed). Phase 1 has since shipped — A-7, A-9, A-8, A-11 and A-13 — and phase 2's A-1 with it,
-still 64 tools; where the code deviates from the plan below, the item carries a **Shipped as**
-line and its design note has the reasoning. The rest of section A has not started. ·
+closed). Phase 1 has since shipped — A-7, A-9, A-8, A-11 and A-13 — phase 2's A-1 with it, and
+phase 3's A-2 (with A-4 and A-3 inside it), which is the one new tool: **65 tools**; where the
+code deviates from the plan below, the item carries a **Shipped as** line and its design note has
+the reasoning. Phases 4 and 5 have not started. ·
 **Baseline facts** used below were read from the code on that commit; the `file:line` anchors
 will drift, the member names will not.
 
@@ -268,6 +269,14 @@ without a desktop:
 - **Done when.** One call returns every visible window's interactive elements with centres,
   actions and metadata in the text form, bounded by the cap, and the centres work unchanged with
   `click`/`type`/`scroll`.
+- **Shipped as** ([note](A-2-desktop-snapshot.md)): as planned in two test-first cycles (pure core,
+  then traversal); the `el_N` ids are the labels (no separate numbers); Document → fill; the
+  cache request must cache pattern *properties* too (the GREEN pass caught every pattern read
+  silently null); `find_element` keeps its own walk and does not yet fill `ElementInfo.Scroll`.
+  The A-4 back-port is narrower than planned: `get_state` keeps its own `BuildTree` recursion and
+  only gained the `ElementBudget` (same foreground root, same three-level shape, additive
+  `Truncated`/`ElementLimit` on the root); neither it nor `find_element` was switched to
+  `UiTraverser`.
 
 ### Phase 4 — annotate
 

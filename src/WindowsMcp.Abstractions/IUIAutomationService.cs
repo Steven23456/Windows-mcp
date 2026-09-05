@@ -32,4 +32,11 @@ public interface IUIAutomationService : IDisposable
         FindKind kind = FindKind.Any, FindScope scope = FindScope.Foreground,
         string? windowTitle = null, bool includeOffscreen = false, CancellationToken ct = default);
     Task FocusAsync(string elementId, CancellationToken ct = default);
+
+    /// <summary>
+    /// A-2: the whole labelled desktop in one call — window list (A-1), cursor (A-11), every
+    /// interactive element with its centre and action hint, the scrollable regions (A-3), and the
+    /// budget's verdict (A-4). Element ids are valid until the next snapshot (roadmap C5).
+    /// </summary>
+    Task<SnapshotResult> SnapshotAsync(SnapshotRequest request, CancellationToken ct = default);
 }
