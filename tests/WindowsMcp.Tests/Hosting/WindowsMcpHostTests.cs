@@ -178,6 +178,32 @@ public class WindowsMcpHostTests
             "one overlay per process: two would fight over the same screen area");
     }
 
+    // ---- A-12 phase 1 (R4): the virtual-desktop service --------------------------------------
+    // WindowTools takes it as a constructor argument, so a missing registration is not a quietly
+    // unfilled field — it is a DI failure on every `window` call, on both transports.
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_virtual_desktop_service()
+    {
+        using var provider = Build(ServerOptions.Stdio);
+
+        var desktops = provider.GetRequiredService<IVirtualDesktopService>();
+        desktops.Should().BeOfType<VirtualDesktopService>();
+        desktops.Should().BeSameAs(provider.GetRequiredService<IVirtualDesktopService>(),
+            "one per process, like every other service here");
+    }
+
+    [Fact]
+    public void AddWindowsMcp_still_resolves_the_window_service_and_its_tool()
+    {
+        // WindowService gained an optional IVirtualDesktopService parameter and WindowTools a
+        // required one: both must still come out of the container.
+        using var provider = Build(ServerOptions.Stdio);
+
+        provider.GetRequiredService<IWindowService>().Should().BeOfType<WindowService>();
+        ActivatorUtilities.CreateInstance<WindowsMcp.Tools.WindowTools>(provider).Should().NotBeNull();
+    }
+
     [Fact]
     public void AddWindowsMcp_registers_the_flash_overlay_even_when_the_flash_is_off()
     {

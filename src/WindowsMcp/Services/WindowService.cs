@@ -14,6 +14,15 @@ public sealed class WindowService : IWindowService
     private const uint WM_CLOSE = 0x0010;
     private const uint MONITORINFOF_PRIMARY = 1u;
 
+    /// <summary>
+    /// A-12: the optional virtual-desktop service that fills <c>WindowInfo.DesktopId</c>.
+    /// Optional so the 39 existing <c>new WindowService()</c> call sites (and any host that has
+    /// not registered it) keep working with a null id.
+    /// </summary>
+    private readonly IVirtualDesktopService? _desktops;
+
+    public WindowService(IVirtualDesktopService? desktops = null) => _desktops = desktops;
+
     public Task<WindowAction> ExecuteAsync(string action, string? title, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -68,7 +77,22 @@ public sealed class WindowService : IWindowService
 
         var foreground = PInvoke.GetForegroundWindow();
         var monitors = await EnumerateMonitorsAsync(ct);
-        return WindowFilter.Build(probes, HwndValue(foreground), monitors, includeMinimized, includeHidden);
+        var windows = WindowFilter.Build(probes, HwndValue(foreground), monitors, includeMinimized, includeHidden);
+
+        // A-12: which virtual desktop each listed window is on — asked only for the survivors, and
+        // never allowed to cost the list itself.
+        if (_desktops is not null)
+        {
+            for (int i = 0; i < windows.Length; i++)
+            {
+                string? id;
+                try { id = await _desktops.GetWindowDesktopIdAsync(windows[i].Hwnd, ct); }
+                catch (OperationCanceledException) { throw; }
+                catch { id = null; }
+                if (id is not null) windows[i] = windows[i] with { DesktopId = id };
+            }
+        }
+        return windows;
     }
 
     /// <summary>

@@ -10,14 +10,17 @@ public sealed class WindowTools
 {
     private readonly IWindowService _window;
 
-    public WindowTools(IWindowService window)
+    private readonly IVirtualDesktopService _desktops;
+
+    public WindowTools(IWindowService window, IVirtualDesktopService desktops)
     {
         _window = window;
+        _desktops = desktops;
     }
 
-    [McpServerTool, Description("Inspect or act on top-level windows (parity A-1). actions: list (every user-visible window, z-order topmost first: ZOrder 0 = frontmost), active (the foreground window, or {\"found\":false}), minimize|maximize|restore|close (need 'title'). list/active ignore 'title'. Fields: Title (sanitised), Hwnd (the window handle; no tool takes it yet — target windows by Title), Pid/ProcessName, State (Normal|Minimized|Maximized), Bounds in virtual-desktop pixels, IsActive (the foreground window), IsBrowser (chrome/msedge/firefox/brave/opera/vivaldi), MonitorIndex into multi_monitor's list (-1 = on no monitor, e.g. minimized), DesktopId (reserved, null).")]
+    [McpServerTool, Description("Inspect or act on top-level windows (parity A-1). actions: list (every user-visible window, z-order topmost first: ZOrder 0 = frontmost), active (the foreground window, or {\"found\":false}), desktops (the virtual desktops: {\"current\":{Id,Name,Index,IsCurrent}|null,\"all\":[...]}; Index is the registry's order, Name is the user's name or 'Desktop N'), minimize|maximize|restore|close (need 'title'). list/active/desktops ignore 'title'. Fields: Title (sanitised), Hwnd (the window handle; no tool takes it yet — target windows by Title), Pid/ProcessName, State (Normal|Minimized|Maximized), Bounds in virtual-desktop pixels, IsActive (the foreground window), IsBrowser (chrome/msedge/firefox/brave/opera/vivaldi), MonitorIndex into multi_monitor's list (-1 = on no monitor, e.g. minimized), DesktopId (the virtual desktop the window is on, lower-case GUID; null when unknown).")]
     public async Task<string> Window(
-        [Description("list | active | minimize | maximize | restore | close")] string action,
+        [Description("list | active | desktops | minimize | maximize | restore | close")] string action,
         [Description("Window title to act on (exact match); required for minimize/maximize/restore/close, ignored by list/active")] string? title = null,
         [Description("list: include minimized windows (default true)")] bool include_minimized = true,
         [Description("list: include windows with no title (default false)")] bool include_hidden = false)
@@ -29,13 +32,17 @@ public sealed class WindowTools
             case "active":
                 var active = await _window.GetActiveAsync();
                 return active is null ? "{\"found\":false}" : JsonSerializer.Serialize(active);
+            case "desktops":
+                // One read, one truth: 'current' is the flagged entry of the same list.
+                var all = await _desktops.ListAsync();
+                return JsonSerializer.Serialize(new { current = all.FirstOrDefault(d => d.IsCurrent), all });
             case "minimize" or "maximize" or "restore" or "close":
                 // Validated here, before the service, so a bad call never touches a window.
                 if (string.IsNullOrWhiteSpace(title))
                     throw new ArgumentException($"'{action}' needs a title; only list and active work without one");
                 return JsonSerializer.Serialize(await _window.ExecuteAsync(action, title));
             default:
-                throw new ArgumentException($"Unknown action '{action}'; expected list|active|minimize|maximize|restore|close");
+                throw new ArgumentException($"Unknown action '{action}'; expected list|active|desktops|minimize|maximize|restore|close");
         }
     }
 

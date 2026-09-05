@@ -645,6 +645,43 @@ public class HttpTransportTests
         text.Should().Contain("Interactive (").And.Contain("el_12");
     }
 
+    internal static string WindowToolName(IEnumerable<McpClientTool> tools) =>
+        tools.Single(t => t.Name.Replace("_", "").Equals("window", StringComparison.OrdinalIgnoreCase)).Name;
+
+    /// <summary>
+    /// A-12 phase 1 (R6): <c>window(action:"desktops")</c> through the real host with the real
+    /// services — the one test that fails if <c>IVirtualDesktopService</c> is never registered in
+    /// <c>AddWindowsMcp</c> (WindowTools takes it as a constructor argument, so the tool call
+    /// dies with a DI error). Shape only: a box may legitimately list no desktops.
+    /// </summary>
+    [Fact]
+    public async Task Window_desktops_over_http_returns_the_desktop_envelope()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var window = WindowToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(window, new Dictionary<string, object?>
+        {
+            ["action"] = "desktops",
+        });
+
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject.Text;
+        result.IsError.Should().NotBe(true,
+            "an unusual virtual-desktop registry layout is data, not an error - the server said: {0}", text);
+        using var doc = JsonDocument.Parse(text);
+        doc.RootElement.GetProperty("all").ValueKind.Should().Be(JsonValueKind.Array);
+        doc.RootElement.TryGetProperty("current", out var current).Should().BeTrue();
+        current.ValueKind.Should().BeOneOf(JsonValueKind.Null, JsonValueKind.Object);
+        foreach (var desktop in doc.RootElement.GetProperty("all").EnumerateArray())
+        {
+            desktop.GetProperty("Id").GetString().Should().NotBeNullOrWhiteSpace();
+            desktop.GetProperty("Name").GetString().Should().NotBeNullOrWhiteSpace();
+            desktop.TryGetProperty("Index", out _).Should().BeTrue();
+            desktop.TryGetProperty("IsCurrent", out _).Should().BeTrue();
+        }
+    }
+
     /// <summary>One window, one element, one scrollable - enough that a dropped block shows.</summary>
     private static SnapshotResult FixedSnapshot
     {

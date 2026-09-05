@@ -412,13 +412,14 @@ public class WindowFilterTests
     }
 
     [Fact]
-    public void Build_leaves_DesktopId_null_until_A_12()
+    public void Build_leaves_DesktopId_null_for_the_enumerator_to_fill()
     {
         WindowProbe[] probes = [Probe(hwnd: 10), Probe(hwnd: 11, process: "chrome")];
 
         WindowFilter.Build(probes, foregroundHwnd: 10, SideBySide, includeMinimized: true, includeHidden: false)
             .Should().OnlyContain(w => w.DesktopId == null,
-                "the field is reserved for A-12's virtual-desktop ids and nothing fills it yet");
+                "A-12 left the pure filter alone: a WindowProbe carries no desktop id, and the id "
+                + "comes from a COM call WindowService makes after the filter has chosen the windows");
     }
 
     // ---- ActiveOf ---------------------------------------------------------------------------

@@ -79,6 +79,7 @@ internal static class WindowsMcpHost
         services.AddSingleton<IEventLogService, EventLogService>();
         services.AddSingleton<ITaskSchedulerService, TaskSchedulerService>();
         services.AddSingleton<IProcessService, ProcessService>();
+        services.AddSingleton<IVirtualDesktopService, VirtualDesktopService>();
         services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<IWmiService, WmiService>();
         services.AddSingleton<IStorageService, StorageService>();
