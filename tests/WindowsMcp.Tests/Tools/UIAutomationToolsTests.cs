@@ -31,6 +31,30 @@ public class UIAutomationToolsTests
         mock.VerifyAll();
     }
 
+    /// <summary>
+    /// Not A-5, but the one line of <c>UIAutomationTools</c> the A-5 coverage sweep found
+    /// unreached: <c>"scrollable" =&gt; FindKind.Scrollable</c>. The description advertises
+    /// <c>any|interactive|text|scrollable</c>, so all four are requirements.
+    /// </summary>
+    [Theory]
+    [InlineData("any", FindKind.Any)]
+    [InlineData("interactive", FindKind.Interactive)]
+    [InlineData("text", FindKind.Text)]
+    [InlineData("scrollable", FindKind.Scrollable)]
+    [InlineData("SCROLLABLE", FindKind.Scrollable)]
+    public async Task FindElement_maps_every_advertised_kind(string kind, FindKind expected)
+    {
+        var mock = new Mock<IUIAutomationService>();
+        mock.Setup(s => s.FindElementAsync(It.IsAny<string>(), It.IsAny<FindKind>(), It.IsAny<FindScope>(),
+                It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FindElementResult([]));
+
+        await new UIAutomationTools(mock.Object).FindElement("Save", kind);
+
+        mock.Verify(s => s.FindElementAsync("Save", expected, FindScope.Foreground, null, false,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task FindElement_rejects_unknown_kind_with_clear_message()
     {
@@ -371,18 +395,128 @@ public class UIAutomationToolsTests
         mock.Verify(s => s.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // A-5 is not implemented; the PARAMETER exists so the shape is stable, and passing it is a
-    // refusal rather than a silently ignored argument (the D-2 `select` failure mode).
-    [Fact]
-    public async Task Snapshot_use_dom_is_reserved_for_A5_and_refuses_before_the_service_is_called()
+    // ---- A-5 phase 1 (R6): use_dom is forwarded, not refused ---------------------------------
+    // Before A-5 the tool threw on use_dom:true. It is now a request flag like include_tree: the
+    // tool decides nothing about the DOM, it only passes the caller's intent to the service.
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Snapshot_forwards_use_dom_to_the_service(bool useDom)
     {
         var mock = SnapshotService();
 
+        await new UIAutomationTools(mock.Object).Snapshot(use_dom: useDom);
+
+        mock.Verify(s => s.SnapshotAsync(
+            It.Is<SnapshotRequest>(r => r.UseDom == useDom), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Snapshot_does_not_use_the_dom_unless_it_was_asked_to()
+    {
+        // The default call must reach the service with UseDom false - browser DOM mode changes
+        // WHAT is walked, so a silent default-on would change every existing snapshot.
+        var mock = SnapshotService();
+
+        await new UIAutomationTools(mock.Object).Snapshot();
+
+        mock.Verify(s => s.SnapshotAsync(
+            It.Is<SnapshotRequest>(r => !r.UseDom), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Snapshot_use_dom_no_longer_refuses()
+    {
+        var mock = SnapshotService(PopulatedResult() with { Pages = [Page()] });
+
         Func<Task> act = () => new UIAutomationTools(mock.Object).Snapshot(use_dom: true);
 
-        var message = (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message;
-        message.Should().Contain("A-5").And.ContainEquivalentOf("not implemented");
-        mock.Verify(s => s.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        await act.Should().NotThrowAsync("A-5 phase 1 implements browser DOM mode for Chromium");
+    }
+
+    [Fact]
+    public void Snapshot_use_dom_is_still_the_last_parameter_and_defaults_to_false()
+    {
+        // The MCP schema is positional-by-name, but the parameter ORDER is what every existing
+        // caller and the HTTP schema test rely on; A-5 changes the behaviour, not the signature.
+        var parameters = typeof(UIAutomationTools).GetMethod(nameof(UIAutomationTools.Snapshot))!.GetParameters();
+
+        parameters[^1].Name.Should().Be("use_dom");
+        parameters[^1].ParameterType.Should().Be(typeof(bool));
+        parameters[^1].HasDefaultValue.Should().BeTrue();
+        parameters[^1].DefaultValue.Should().Be(false);
+    }
+
+    [Fact]
+    public async Task Snapshot_json_carries_the_pages_the_service_reported()
+    {
+        var withPages = PopulatedResult() with
+        {
+            Pages = [Page(text: ["Probe heading", "First paragraph of body text."])],
+        };
+        var tools = new UIAutomationTools(SnapshotService(withPages).Object);
+
+        var output = await tools.Snapshot(use_dom: true, format: "json");
+
+        using var doc = JsonDocument.Parse(output);
+        var page = doc.RootElement.GetProperty("Pages")[0];
+        page.GetProperty("DocumentId").GetString().Should().Be("el_7");
+        page.GetProperty("Title").GetString().Should().Be("A5 Probe Page");
+        page.GetProperty("Url").GetString().Should().Be("http://127.0.0.1:9999/a5");
+        page.GetProperty("Text")[0].GetString().Should().Be("Probe heading");
+    }
+
+    [Fact]
+    public async Task Snapshot_text_carries_the_rendered_pages_block()
+    {
+        var withPages = PopulatedResult() with { Pages = [Page(text: ["Probe heading"])] };
+        var tools = new UIAutomationTools(SnapshotService(withPages).Object);
+
+        var output = await tools.Snapshot(use_dom: true);
+
+        output.Should().Contain("Pages (1):")
+              .And.Contain("el_7 \"A5 Probe Page\" http://127.0.0.1:9999/a5")
+              .And.Contain("\n    Probe heading");
+    }
+
+    [Fact]
+    public async Task Snapshot_json_carries_an_empty_pages_array_when_dom_mode_found_no_browser()
+    {
+        // "Pages": [] is an answer the model can act on ("no browser is open"); a missing key
+        // would be indistinguishable from "the flag was dropped on the way to the service".
+        var tools = new UIAutomationTools(SnapshotService(PopulatedResult() with { Pages = [] }).Object);
+
+        var output = await tools.Snapshot(use_dom: true, format: "json");
+
+        using var doc = JsonDocument.Parse(output);
+        var pages = doc.RootElement.GetProperty("Pages");
+        pages.ValueKind.Should().Be(JsonValueKind.Array);
+        pages.GetArrayLength().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Snapshot_text_carries_an_empty_pages_block_when_dom_mode_found_no_browser()
+    {
+        var tools = new UIAutomationTools(SnapshotService(PopulatedResult() with { Pages = [] }).Object);
+
+        var output = await tools.Snapshot(use_dom: true);
+
+        output.Should().Contain("Pages (0):");
+    }
+
+    [Theory]
+    [InlineData("json")]
+    [InlineData("text")]
+    public async Task Snapshot_says_nothing_about_pages_when_the_dom_was_not_asked_for(string format)
+    {
+        // PopulatedResult carries Pages: null - what the service returns for use_dom:false - so
+        // neither output form changes for a caller who never asked (the A-14 rule).
+        var tools = new UIAutomationTools(SnapshotService(PopulatedResult()).Object);
+
+        var output = await tools.Snapshot(format: format);
+
+        output.Should().NotContain("Pages");
     }
 
     [Fact]
@@ -447,11 +581,50 @@ public class UIAutomationToolsTests
                      "--max-tree-elements",                        // where the 0 default comes from
                      "next snapshot",                              // roadmap C5: id lifetime
                      "click", "interact_element", "get_element",   // what an id is good for
-                     "use_dom", "A-5",                             // reserved, and why it refuses
+                     "use_dom",                                    // A-5: browser DOM mode
                  })
             description.Should().ContainEquivalentOf(fragment);
 
         description.Should().MatchRegex("cent(re|er)", "the model is told the coordinates are the element's centre");
         description.Should().MatchRegex("[Tt]runcat", "the truncation note is advertised, not a surprise");
+    }
+
+    /// <summary>
+    /// A-5 phase 1 (R6): the description is the only place the model learns what <c>use_dom</c>
+    /// now DOES. Before A-5 it said "reserved … not implemented yet"; a description that still
+    /// says that is a working feature the model will never call.
+    /// </summary>
+    [Fact]
+    public void Snapshot_description_explains_what_use_dom_does_and_no_longer_calls_it_reserved()
+    {
+        var description = typeof(UIAutomationTools).GetMethod(nameof(UIAutomationTools.Snapshot))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        foreach (var fragment in new[]
+                 {
+                     "use_dom",
+                     "RootWebArea",      // the document the walk starts from
+                     "Chromium",         // and the one engine phase 1 supports
+                     "Pages",            // the block the caller gets back
+                     "Firefox",          // the documented follow-up: walked whole, with a note
+                 })
+            description.Should().ContainEquivalentOf(fragment);
+
+        description.Should().NotContainEquivalentOf("not implemented");
+        description.Should().NotContainEquivalentOf("reserved");
+    }
+
+    [Fact]
+    public void Snapshot_use_dom_parameter_description_tells_the_model_what_it_gets()
+    {
+        // The per-parameter description is what the JSON schema carries; a model that reads only
+        // the schema must still learn that this walks the page and adds the Pages block.
+        var parameter = typeof(UIAutomationTools).GetMethod(nameof(UIAutomationTools.Snapshot))!
+            .GetParameters().Single(p => p.Name == "use_dom");
+        var description = parameter.GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should().ContainEquivalentOf("page");
+        description.Should().NotContainEquivalentOf("not implemented");
+        description.Should().NotContainEquivalentOf("reserved");
     }
 }

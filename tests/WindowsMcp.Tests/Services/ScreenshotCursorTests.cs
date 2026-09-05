@@ -1,6 +1,7 @@
 using FluentAssertions;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Services;
+using WindowsMcp.Tests.Fixtures;
 using Xunit;
 
 namespace WindowsMcp.Tests.Services;
@@ -19,6 +20,7 @@ namespace WindowsMcp.Tests.Services;
 /// </para>
 /// </summary>
 [Trait("Category", "UIAutomation")]
+[Collection(PointerAndPixelCollection.Name)]
 public class ScreenshotCursorTests
 {
     /// <summary>Full resolution, PNG, lossless — so a byte comparison means what it says.</summary>

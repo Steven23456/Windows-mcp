@@ -2,6 +2,7 @@ using FluentAssertions;
 using SkiaSharp;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Services;
+using WindowsMcp.Tests.Fixtures;
 using Xunit;
 using ImageFormat = WindowsMcp.Abstractions.Models.ImageFormat;
 
@@ -21,6 +22,7 @@ namespace WindowsMcp.Tests.Services;
 /// </para>
 /// </summary>
 [Trait("Category", "UIAutomation")]
+[Collection(PointerAndPixelCollection.Name)]
 public class ScreenshotWgcCaptureTests
 {
     /// <summary>Per-channel difference two captures of the same rect may show and still agree.</summary>

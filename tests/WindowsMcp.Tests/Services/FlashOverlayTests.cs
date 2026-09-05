@@ -2,6 +2,7 @@ using FluentAssertions;
 using SkiaSharp;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Services;
+using WindowsMcp.Tests.Fixtures;
 using Xunit;
 
 namespace WindowsMcp.Tests.Services;
@@ -190,6 +191,7 @@ public class FlashOverlayTests
 /// excluded from headless runs like every other test that draws on someone's desktop.
 /// </summary>
 [Trait("Category", "UIAutomation")]
+[Collection(PointerAndPixelCollection.Name)]
 public class FlashOverlayDesktopTests
 {
     /// <summary>The captured rect the glow frames; its window rect is exactly (0,0,220,120).</summary>

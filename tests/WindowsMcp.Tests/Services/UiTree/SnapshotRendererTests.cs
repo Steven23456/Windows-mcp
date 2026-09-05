@@ -520,4 +520,144 @@ public class SnapshotRendererTests
         lines[^2].Should().Be(TruncationNote(500));
         lines[^1].Should().Be("Timing: header 12 ms, walk 130 ms (total 142 ms)");
     }
+
+    // ---- A-5 phase 1 (R5): the Pages block, only when the caller asked for the DOM ------------
+    // The page is what use_dom is FOR: the title, the URL, how far down the page is and what it
+    // actually says. It goes after the element lists (a model reads the ids first) and before the
+    // footers, and a snapshot that did not ask for it is byte-identical to a pre-A-5 one.
+
+    private static readonly SnapshotPage ProbePage = Page(
+        window: "A5 Probe Page - Microsoft Edge",
+        documentId: "el_7",
+        title: "A5 Probe Page",
+        url: "http://127.0.0.1:9999/a5",
+        scroll: new ScrollInfo(12, 0, true, false),
+        text: ["Probe heading", "First paragraph of body text."]);
+
+    private static string[] PagesBlock(SnapshotResult result)
+    {
+        var lines = SnapshotRenderer.Render(result).Split('\n');
+        int start = Array.FindIndex(lines, l => l.StartsWith("Pages (", StringComparison.Ordinal));
+        start.Should().BeGreaterThanOrEqualTo(0, "the rendered text must carry a Pages block");
+        return lines[start..];
+    }
+
+    [Fact]
+    public void Render_prints_the_page_header_and_its_visible_text()
+        => PagesBlock(Result(pages: [ProbePage])).Should().Equal(
+            "Pages (1):",
+            "  el_7 \"A5 Probe Page\" http://127.0.0.1:9999/a5  [v: 12%]",
+            "    Probe heading",
+            "    First paragraph of body text.");
+
+    [Fact]
+    public void Render_puts_the_pages_block_after_the_scrollable_list_and_before_the_footers()
+    {
+        // Position is the contract: ids and scroll targets first (that is what a model acts on),
+        // then the page content, then the advice and the diagnostics.
+        var lines = SnapshotRenderer.Render(
+            TwoWindowSnapshot(truncated: true) with { CaptureMs = 142, Stages = HeaderAndWalk, Pages = [ProbePage] })
+            .Split('\n');
+
+        int scrollable = Array.IndexOf(lines, "Scrollable (1):");
+        int pages = Array.IndexOf(lines, "Pages (1):");
+        scrollable.Should().BeGreaterThanOrEqualTo(0);
+        pages.Should().BeGreaterThan(scrollable, "the pages block follows the scrollable list");
+        lines[pages - 1].Should().StartWith("  el_20 ", "nothing comes between the last scrollable row and Pages");
+        lines[^2].Should().Be(TruncationNote(500), "the truncation note stays second to last");
+        lines[^1].Should().Be("Timing: header 12 ms, walk 130 ms (total 142 ms)", "the timing line stays last");
+    }
+
+    [Fact]
+    public void Render_says_nothing_about_pages_when_the_caller_did_not_ask_for_the_dom()
+        => SnapshotRenderer.Render(TwoWindowSnapshot()).Should().NotContain("Pages (");
+
+    [Fact]
+    public void Render_prints_an_empty_pages_block_when_dom_mode_found_no_browser()
+        // Empty is an answer: "use_dom ran, no browser window was in scope". Silence would look
+        // like the flag was ignored.
+        => PagesBlock(Result(pages: [])).Should().Equal("Pages (0):");
+
+    [Fact]
+    public void Render_omits_the_scroll_tag_for_a_page_that_does_not_scroll()
+        => PagesBlock(Result(pages: [ProbePage with { Scroll = null, Text = [] }])).Should().Equal(
+            "Pages (1):",
+            "  el_7 \"A5 Probe Page\" http://127.0.0.1:9999/a5");
+
+    [Theory]
+    [InlineData(0, "[v: 0%]")]
+    [InlineData(12.4, "[v: 12%]")]
+    [InlineData(12.5, "[v: 13%]")]
+    [InlineData(100, "[v: 100%]")]
+    public void Render_rounds_the_page_scroll_percent_the_way_the_scrollable_line_does(double percent, string expected)
+        => PagesBlock(Result(pages: [ProbePage with { Scroll = new ScrollInfo(percent, 0, true, false), Text = [] }]))[1]
+            .Should().EndWith("  " + expected);
+
+    [Fact]
+    public void Render_prints_a_page_with_no_document_as_one_note_line_against_its_window()
+        => PagesBlock(Result(pages:
+            [
+                Page(window: "Other Browser", documentId: null, title: null, url: null, scroll: null,
+                     note: "no page document found under this window; walked the whole window instead"),
+            ])).Should().Equal(
+            "Pages (1):",
+            "  window \"Other Browser\": no page document found under this window; walked the whole window instead");
+
+    [Fact]
+    public void Render_prints_a_found_page_and_a_page_less_window_in_the_order_reported()
+    {
+        var pageless = Page(window: "Other Browser", documentId: null, title: null, url: null, scroll: null,
+            note: "no page document found under this window; walked the whole window instead");
+
+        PagesBlock(Result(pages: [ProbePage, pageless])).Should().Equal(
+            "Pages (2):",
+            "  el_7 \"A5 Probe Page\" http://127.0.0.1:9999/a5  [v: 12%]",
+            "    Probe heading",
+            "    First paragraph of body text.",
+            "  window \"Other Browser\": no page document found under this window; walked the whole window instead");
+    }
+
+    [Fact]
+    public void Render_escapes_the_page_title_the_window_and_every_text_line()
+    {
+        // Page content is written by whoever wrote the page: a <title> with a newline in it must
+        // not be able to forge a row of this block.
+        var hostile = Page(title: "A \"page\"\nwith lines", text: ["line\r\none", "tab\there"]);
+        var pageless = Page(window: "Odd \"Browser\"\tWindow", documentId: null, title: null, url: null,
+            scroll: null, note: "no page document found under this window; walked the whole window instead");
+
+        PagesBlock(Result(pages: [hostile, pageless])).Should().Equal(
+            "Pages (2):",
+            "  el_7 \"A \\\"page\\\"\\nwith lines\" http://127.0.0.1:9999/a5  [v: 0%]",
+            "    line\\r\\none",
+            "    tab\\there",
+            "  window \"Odd \\\"Browser\\\"\\tWindow\": no page document found under this window; walked the whole window instead");
+    }
+
+    [Fact]
+    public void Render_of_a_found_page_with_no_title_prints_an_empty_title_not_the_word_null()
+        // SnapshotPage.Title is nullable because a page-less entry has none; a FOUND page with a
+        // null title (an untitled document, a non-Chromium source later) must still render one
+        // parseable row, with the quotes and the URL where they always are.
+        => PagesBlock(Result(pages: [ProbePage with { Title = null, Scroll = null, Text = [] }])).Should().Equal(
+            "Pages (1):",
+            "  el_7 \"\" http://127.0.0.1:9999/a5");
+
+    [Fact]
+    public void Render_of_a_found_page_with_no_url_leaves_no_dangling_space()
+        // KNOWN RED (test-agent, A-5 GREEN pass): the header is built as
+        // $"  {id} \"{title}\" {url}", so a null Url renders a trailing space - and, with a scroll
+        // tag, THREE spaces before "[v: …]" where every other row in this renderer uses exactly
+        // two. The URL is optional data; the fix is to append it only when it is there.
+        => PagesBlock(Result(pages: [ProbePage with { Url = null, Text = [] }])).Should().Equal(
+            "Pages (1):",
+            "  el_7 \"A5 Probe Page\"  [v: 12%]");
+
+    [Fact]
+    public void Render_of_a_page_with_no_visible_text_is_just_the_header()
+        // A page whose text is all below the fold still tells the model where it is and that
+        // scrolling is what to do next.
+        => PagesBlock(Result(pages: [ProbePage with { Text = [] }])).Should().Equal(
+            "Pages (1):",
+            "  el_7 \"A5 Probe Page\" http://127.0.0.1:9999/a5  [v: 12%]");
 }

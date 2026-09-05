@@ -79,11 +79,18 @@ public record AssertResult(string ElementId, string State, bool Pass, string Obs
 public enum SnapshotScope { Desktop, Foreground, Window }
 
 /// <param name="MaxElements">0 = use the server default (<see cref="UiTreeOptions"/>).</param>
+/// <param name="UseDom">
+/// A-5 phase 1: walk only the web page (the <c>RootWebArea</c> document) under every browser
+/// window among the targets, instead of the whole window, and report a <see cref="SnapshotPage"/>
+/// for each. Off by default, so a snapshot that does not ask for it is unchanged.
+/// </param>
+
 public record SnapshotRequest(
     SnapshotScope Scope = SnapshotScope.Desktop,
     string? WindowTitle = null,
     bool IncludeTree = false,
-    int MaxElements = 0);
+    int MaxElements = 0,
+    bool UseDom = false);
 
 /// <summary>
 /// A-4 (roadmap C7): the process-level element budget, set from <c>WINDOWSMCP_MAX_TREE_ELEMENTS</c>
@@ -134,7 +141,42 @@ public record SnapshotScrollable(
     Bounds Bounds,
     ScrollInfo Scroll);
 
+/// <summary>
+/// A-5 phase 1: one browser window's web page, as walked from its <c>RootWebArea</c> document.
+/// </summary>
+/// <param name="Window">Title of the browser window the page was found under.</param>
+/// <param name="DocumentId">
+/// The <c>el_N</c> id issued to the page document itself — the same id the scrollable list carries,
+/// and what <c>get_element</c> / <c>scroll</c> accept. Null when no page document was found.
+/// </param>
+/// <param name="Title">The document's Name — the page's &lt;title&gt;. Null when there is no page.</param>
+/// <param name="Url">The document's ValuePattern value — the page URL. Null when there is no page.</param>
+/// <param name="Scroll">The document's scroll position, null when it exposes no scroll pattern.</param>
+/// <param name="Text">
+/// The visible page text: the Names of the Text nodes the walk admitted under the document, in
+/// document order. Empty when there is no page (or the page has no visible text).
+/// </param>
+/// <param name="Note">
+/// Why this page is empty — set only when the window is a browser but no page document was found
+/// (still loading, Firefox, a non-web page), in which case the window was walked whole. Null on success.
+/// </param>
+
+public record SnapshotPage(
+    string Window,
+    string? DocumentId,
+    string? Title,
+    string? Url,
+    ScrollInfo? Scroll,
+    string[] Text,
+    string? Note);
+
 /// <param name="ElementCount">Every element the walk visited, before the interactive/scrollable split.</param>
+/// <param name="Pages">
+/// A-5 phase 1: one entry per browser window among the walked targets. Null when the request did
+/// not set <see cref="SnapshotRequest.UseDom"/> — so a non-DOM response is byte-identical to a
+/// pre-A-5 one — and an array (possibly empty) when it did.
+/// </param>
+
 public record SnapshotResult(
     WindowInfo[] Windows,
     WindowInfo? ActiveWindow,
@@ -147,4 +189,5 @@ public record SnapshotResult(
     int ElementLimit,
     int ElementCount,
     long CaptureMs,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StageTiming[]? Stages = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StageTiming[]? Stages = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SnapshotPage[]? Pages = null);

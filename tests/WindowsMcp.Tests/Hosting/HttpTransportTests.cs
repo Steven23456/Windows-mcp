@@ -13,6 +13,7 @@ using ModelContextProtocol.Protocol;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Hosting;
+using WindowsMcp.Tests.Fixtures;
 
 namespace WindowsMcp.Tests.Hosting;
 
@@ -645,6 +646,45 @@ public class HttpTransportTests
         text.Should().Contain("Interactive (").And.Contain("el_12");
     }
 
+    /// <summary>
+    /// A-5 phase 1 (R7): <c>use_dom</c> reaches the service as a request flag over the wire, and
+    /// the Pages block comes back through the JSON-RPC round trip. Before A-5 this call was a tool
+    /// error; the service is mocked here because the transport, not the browser, is what is under
+    /// test — <c>HttpTransportDomSnapshotTests</c> is the non-mocked sibling.
+    /// </summary>
+    [Fact]
+    public async Task Snapshot_use_dom_over_http_forwards_the_flag_and_returns_the_pages()
+    {
+        var page = new SnapshotPage("A5 Probe Page", "el_7", "A5 Probe Page", "http://127.0.0.1:9999/a5",
+            new ScrollInfo(12, 0, true, false), ["Probe heading"], null);
+        var uia = new Mock<IUIAutomationService>();
+        uia.Setup(s => s.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FixedSnapshot with { Pages = [page] });
+
+        await using var server = await Harness.StartAsync(
+            configureServices: services => services.AddSingleton(uia.Object));
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var snapshot = SnapshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(snapshot, new Dictionary<string, object?>
+        {
+            ["use_dom"] = true,
+            ["format"] = "json",
+        });
+
+        result.IsError.Should().NotBe(true, "use_dom is implemented for Chromium as of A-5 phase 1");
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject.Text;
+        using var doc = JsonDocument.Parse(text);
+        var reported = doc.RootElement.GetProperty("Pages")[0];
+        reported.GetProperty("DocumentId").GetString().Should().Be("el_7");
+        reported.GetProperty("Url").GetString().Should().Be("http://127.0.0.1:9999/a5");
+        reported.GetProperty("Text")[0].GetString().Should().Be("Probe heading");
+
+        uia.Verify(s => s.SnapshotAsync(
+            It.Is<SnapshotRequest>(r => r.UseDom), It.IsAny<CancellationToken>()),
+            Times.Once, "the flag the caller sent is the flag the service is given");
+    }
+
     internal static string WindowToolName(IEnumerable<McpClientTool> tools) =>
         tools.Single(t => t.Name.Replace("_", "").Equals("window", StringComparison.OrdinalIgnoreCase)).Name;
 
@@ -956,5 +996,57 @@ public class HttpTransportScreenshotImageTests
             "the frame came from the compositor and the metadata says so, through the whole stack");
         meta.RootElement.GetProperty("width").GetInt32().Should().Be(64);
         meta.RootElement.GetProperty("height").GetInt32().Should().Be(48);
+    }
+}
+
+
+/// <summary>
+/// A-5 phase 1 (R7): the one DOM test that drives the REAL <c>UIAutomationService</c> against a
+/// real Edge window through the real HTTP host — the non-mocked sibling of
+/// <see cref="HttpTransportTests.Snapshot_use_dom_over_http_forwards_the_flag_and_returns_the_pages"/>,
+/// which proves only that the flag and the DTO survive the wire.
+/// <para>
+/// Split out of <see cref="HttpTransportTests"/> for the same reason as
+/// <see cref="HttpTransportScreenshotImageTests"/>: that class is <c>Category=Integration</c>, and
+/// a <c>Category!=UIAutomation</c> filter does not exclude a test that carries both values.
+/// </para>
+/// </summary>
+[Trait("Category", "UIAutomation")]
+[Collection(EdgeCollection.Name)]
+public class HttpTransportDomSnapshotTests
+{
+    private readonly EdgeFixture _edge;
+
+    public HttpTransportDomSnapshotTests(EdgeFixture edge) => _edge = edge;
+
+    [Fact]
+    public async Task Snapshot_use_dom_over_http_returns_the_real_pages_section()
+    {
+        if (!_edge.Available) return;   // no Edge on this machine: nothing to assert
+
+        await using var server = await HttpTransportTests.Harness.StartAsync();
+        await using var client = await HttpTransportTests.ConnectAsync(server.McpEndpoint);
+        var snapshot = HttpTransportTests.SnapshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(snapshot, new Dictionary<string, object?>
+        {
+            ["scope"] = "window",
+            ["window"] = _edge.WindowTitle,
+            ["use_dom"] = true,
+            ["format"] = "json",
+        });
+
+        result.IsError.Should().NotBe(true);
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject.Text;
+        using var doc = JsonDocument.Parse(text);
+
+        var pages = doc.RootElement.GetProperty("Pages");
+        pages.GetArrayLength().Should().Be(1, "one browser window was in scope");
+        var page = pages[0];
+        page.GetProperty("Title").GetString().Should().Be(EdgeFixture.PageTitle);
+        page.GetProperty("Url").GetString().Should().StartWith(_edge.BaseUrl);
+        page.GetProperty("DocumentId").GetString().Should().NotBeNullOrWhiteSpace();
+        page.GetProperty("Text").EnumerateArray().Select(t => t.GetString())
+            .Should().Contain("Probe heading", "the page's visible text crosses the transport intact");
     }
 }

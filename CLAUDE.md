@@ -58,6 +58,12 @@ bundle/WindowsMcp.exe --screenshot-scale 0.5      # or $env:WINDOWSMCP_SCREENSHO
 
 # Bound every UI walk process-wide (snapshot and get_state; a call's own max_elements wins):
 bundle/WindowsMcp.exe --max-tree-elements 200     # or $env:WINDOWSMCP_MAX_TREE_ELEMENTS = "200"
+
+# The post-capture glow and per-stage timings (both transports; on|off):
+bundle/WindowsMcp.exe --flash off --profile-snapshot on   # or $env:WINDOWSMCP_FLASH / WINDOWSMCP_PROFILE_SNAPSHOT
+
+# Which backend reads the screen when a screenshot call says auto (both transports):
+bundle/WindowsMcp.exe --screenshot-backend wgc    # auto (default: wgc, else gdi) | gdi | wgc; or $env:WINDOWSMCP_SCREENSHOT_BACKEND
 ```
 
 - **`[Trait("Category","UIAutomation")]` tests need an interactive desktop** with the target
