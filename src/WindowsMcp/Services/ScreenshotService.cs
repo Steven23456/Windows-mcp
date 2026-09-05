@@ -62,19 +62,22 @@ public sealed class ScreenshotService : IScreenshotService
 
             var (width, height, coordinateScale) = ScaleMath.Fit(bmp.Width, bmp.Height, o.MaxWidth, o.MaxHeight, o.Scale);
 
+            // A-6: annotations go on AFTER the downscale (so 2 px boxes and chips stay legible at the
+            // output size), mapped through the same coordinate scale the metadata reports.
             byte[] bytes;
+            int drawn;
             if (width != bmp.Width || height != bmp.Height)
             {
                 using var scaled = Downscale(skBmp, width, height);
-                bytes = Encode(scaled, o.Format, o.Quality);
+                (bytes, drawn) = EncodeAnnotated(scaled, o.Format, o.Quality, o.Annotations, r, coordinateScale, o.Grid);
             }
             else
             {
-                bytes = Encode(skBmp, o.Format, o.Quality);
+                (bytes, drawn) = EncodeAnnotated(skBmp, o.Format, o.Quality, o.Annotations, r, coordinateScale, o.Grid);
             }
 
             return Task.FromResult(new ScreenshotResult(
-                bytes, width, height, o.Format, bmp.Width, bmp.Height, coordinateScale, cursorDrawn));
+                bytes, width, height, o.Format, bmp.Width, bmp.Height, coordinateScale, cursorDrawn, drawn));
         }
         finally
         {
@@ -166,6 +169,30 @@ public sealed class ScreenshotService : IScreenshotService
             throw new InvalidOperationException($"SKBitmap.ScalePixels to {width}x{height} failed.");
         }
         return dst;
+    }
+
+    /// <summary>
+    /// A-6: draws the boxes and the grid onto <paramref name="bmp"/> (already downscaled, so the
+    /// mapping uses <paramref name="coordinateScale"/>) and then encodes it, reporting how many
+    /// boxes landed. With no boxes and no grid the bytes are exactly <see cref="Encode"/>'s.
+    /// The one step of the annotate path that needs no desktop, so the pixels can be checked by
+    /// decoding the result on a synthetic bitmap.
+    /// </summary>
+    internal static (byte[] Bytes, int Drawn) EncodeAnnotated(
+        SKBitmap bmp, ImageFormat format, int quality, IReadOnlyList<AnnotationBox>? boxes,
+        ScreenRegion captured, double coordinateScale, GridSpec? grid)
+    {
+        if (quality is < 1 or > 100)
+            throw new ArgumentOutOfRangeException(nameof(quality), quality, "Quality must be 1-100.");
+
+        bool anyBox = boxes is { Count: > 0 };
+        if (!anyBox && grid is null)
+            return (Encode(bmp, format, quality), 0);   // nothing to draw: byte-identical to a plain encode
+
+        // Draw on a copy: the caller's bitmap may be the zero-copy view of a read-only GDI lock.
+        using var canvasBmp = bmp.Copy();
+        int drawn = Annotator.Draw(canvasBmp, boxes ?? Array.Empty<AnnotationBox>(), captured, coordinateScale, grid);
+        return (Encode(canvasBmp, format, quality), drawn);
     }
 
     /// <summary>Encodes <paramref name="bmp"/>; <paramref name="quality"/> is 1-100 (used by JPEG, validated always).</summary>

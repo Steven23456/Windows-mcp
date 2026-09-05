@@ -6,6 +6,7 @@ using ModelContextProtocol.Server;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Services;
+using WindowsMcp.Services.UiTree;
 
 namespace WindowsMcp.Tools;
 
@@ -16,6 +17,7 @@ public sealed class ScreenTools
     private readonly IOcrService _ocr;
     private readonly IWindowService _windows;
     private readonly IInputService _input;
+    private readonly IUIAutomationService _uia;
     private readonly ScreenshotOptions _options;
 
     /// <param name="windows">
@@ -27,14 +29,22 @@ public sealed class ScreenTools
     /// so tests and other hosts can construct the tool without it.
     /// </param>
     /// <param name="input">Where the cursor is (A-11): reported on every screenshot in the same virtual-desktop pixels.</param>
-    public ScreenTools(IScreenshotService screenshot, IOcrService ocr, IWindowService windows, IInputService input, ScreenshotOptions? options = null)
+    /// <param name="uia">
+    /// A-6: the element list <c>annotate</c> draws and lists, from the same snapshot the text
+    /// block renders — so label N in the picture is row N in the text of the same call.
+    /// </param>
+    public ScreenTools(IScreenshotService screenshot, IOcrService ocr, IWindowService windows, IInputService input, IUIAutomationService uia, ScreenshotOptions? options = null)
     {
         _screenshot = screenshot;
         _ocr = ocr;
         _windows = windows;
         _input = input;
+        _uia = uia;
         _options = options ?? ScreenshotOptions.Default;
     }
+
+    /// <summary>More divisions than this draws a line every few pixels and a caption per line: unreadable, and slow.</summary>
+    private const int MaxGridDivisions = 64;
 
     private const string RegionDescription =
         "Region as 'x,y,w,h' in virtual-desktop pixels (the same space click/drag/scroll use; a monitor left of or above the primary has negative coordinates). Must lie inside the virtual screen — it is rejected, not clipped. Wins over 'display'. Default: none";
@@ -87,7 +97,7 @@ public sealed class ScreenTools
         return $"virtual-desktop x = {region.X} + imageX × {s}, y = {region.Y} + imageY × {s} — use these for click/drag/scroll";
     }
 
-    [McpServerTool, Description("Capture a screenshot and return it as MCP image content the model can see directly (parity A-7/A-8/A-9). Result content: a text block with one JSON object of metadata {width, height, originalWidth, originalHeight, format, coordinateSpace:'virtual-desktop', region (the rect actually captured, in virtual-desktop pixels), displays (every monitor: index, x, y, width, height, isPrimary), selectedDisplays? (when 'display' picked the rect), cursor {x, y, monitorIndex} (always: the mouse pointer in virtual-desktop pixels and which display it is on, -1 = none), cursorDrawn? ('icon' or 'ring', only when the pointer was painted onto the image), path? (file output), coordinateScale? (only when the image was downscaled) and note? (whenever image pixels are not virtual-desktop pixels 1:1 — a downscale, a region origin away from 0,0, or both: multiply image pixel coordinates by coordinateScale and add the region origin — the note spells it out; do this before calling click/drag/scroll)} followed, for inline output, by an image block. Default: the primary display, downscaled to fit max_width x max_height (1920x1080).")]
+    [McpServerTool, Description("Capture a screenshot and return it as MCP image content the model can see directly (parity A-7/A-8/A-9). Result content: a text block with one JSON object of metadata {width, height, originalWidth, originalHeight, format, coordinateSpace:'virtual-desktop', region (the rect actually captured, in virtual-desktop pixels), displays (every monitor: index, x, y, width, height, isPrimary), selectedDisplays? (when 'display' picked the rect), cursor {x, y, monitorIndex} (always: the mouse pointer in virtual-desktop pixels and which display it is on, -1 = none), cursorDrawn? ('icon' or 'ring', only when the pointer was painted onto the image), path? (file output), coordinateScale? (only when the image was downscaled) and note? (whenever image pixels are not virtual-desktop pixels 1:1 — a downscale, a region origin away from 0,0, or both: multiply image pixel coordinates by coordinateScale and add the region origin — the note spells it out; do this before calling click/drag/scroll)} followed, for inline output, by an image block. Default: the primary display, downscaled to fit max_width x max_height (1920x1080). With annotate:true (parity A-6) the same call also walks the desktop and returns THREE blocks — metadata, the element list (the rows snapshot prints, filtered to what this picture contains), then the image — and draws a 2 px coloured box with a matching label chip around every interactive element in the picture; the labels are the snapshot's el_N ids, so label N in the image is row N of the text block from the same call, and they go straight to click/interact_element (valid until the next snapshot or annotated screenshot). Metadata then gains annotated:true, annotations (boxes that landed) and grid:{columns,rows} when a grid was asked for; grid captions are virtual-desktop coordinates, not image pixels.")]
     public async Task<CallToolResult> Screenshot(
         [Description(RegionDescription)] string? region = null,
         [Description(DisplayDescription)] string? display = null,
@@ -97,7 +107,10 @@ public sealed class ScreenTools
         [Description("Downscale so the image is at most this tall, in pixels; 0 = no limit (default 1080)")] int max_height = 1080,
         [Description("Extra shrink factor applied on top of the max_width/max_height fit, in (0, 1] (default 1.0); the server's --screenshot-scale multiplies it further")] double scale = 1.0,
         [Description("JPEG encoder quality, 1-100 (default 90); ignored for png")] int quality = 90,
-        [Description("Draw the mouse cursor onto the capture (default: true): the real cursor image when it can be composited, otherwise a drawn ring — cursorDrawn in the metadata says which. The cursor position is reported either way")] bool include_cursor = true)
+        [Description("Draw the mouse cursor onto the capture (default: true): the real cursor image when it can be composited, otherwise a drawn ring — cursorDrawn in the metadata says which. The cursor position is reported either way")] bool include_cursor = true,
+        [Description("Draw a labelled box around every interactive element in the picture and return the matching element list as a second text block (default: false). Costs one desktop UI walk (the same snapshot walk, so it evicts the previous snapshot's ids); the labels are the snapshot's el_N ids")] bool annotate = false,
+        [Description("Overlay this many equal columns as vertical guide lines, each captioned with its virtual-desktop x coordinate; 0 = no vertical lines (default 0, max 64). Works without annotate")] int grid_columns = 0,
+        [Description("Overlay this many equal rows as horizontal guide lines, each captioned with its virtual-desktop y coordinate; 0 = no horizontal lines (default 0, max 64). Works without annotate")] int grid_rows = 0)
     {
         // Validate every argument before touching the screen: a bad call must not cost a capture.
         bool toFile = ParseOutput(output);
@@ -110,14 +123,33 @@ public sealed class ScreenTools
             throw new ArgumentException($"scale must be in (0, 1], got {scale.ToString(CultureInfo.InvariantCulture)}");
         if (quality is < 1 or > 100)
             throw new ArgumentException($"quality must be 1-100, got {quality}");
+        if (grid_columns is < 0 or > MaxGridDivisions)
+            throw new ArgumentException($"grid_columns must be 0 (no grid) to {MaxGridDivisions}, got {grid_columns}");
+        if (grid_rows is < 0 or > MaxGridDivisions)
+            throw new ArgumentException($"grid_rows must be 0 (no grid) to {MaxGridDivisions}, got {grid_rows}");
         var (r, monitors, selected) = await ResolveRegionAsync(region, display);
         // Read before the capture so the reported position is at most one capture old, and so a
         // broken cursor read (a broken desktop) never costs a capture. It is not masked.
         var cursor = await _input.GetCursorPositionAsync();
 
+        // A-6: the element walk happens BEFORE the capture so label N in the picture is row N of
+        // the text block from this same call; only what lies inside the captured rect is kept.
+        SnapshotResult? listed = null;
+        IReadOnlyList<AnnotationBox>? boxes = null;
+        if (annotate)
+        {
+            var snapshot = await _uia.SnapshotAsync(new SnapshotRequest(SnapshotScope.Desktop));
+            var kept = snapshot.Interactive.Where(e => Overlaps(e.Bounds, r)).ToArray();
+            var keptScroll = snapshot.Scrollable.Where(e => Overlaps(e.Bounds, r)).ToArray();
+            listed = snapshot with { Interactive = kept, Scrollable = keptScroll };
+            if (kept.Length > 0)
+                boxes = kept.Select(e => new AnnotationBox(e.ElementId, e.Bounds)).ToArray();
+        }
+        GridSpec? grid = grid_columns > 0 || grid_rows > 0 ? new GridSpec(grid_columns, grid_rows) : null;
+
         // The process-level --screenshot-scale applies on top of the call's own scale.
         var result = await _screenshot.CaptureAsync(r,
-            new CaptureOptions(fmt, max_width, max_height, scale * _options.Scale, quality, include_cursor, cursor));
+            new CaptureOptions(fmt, max_width, max_height, scale * _options.Scale, quality, include_cursor, cursor, boxes, grid));
 
         // Report what was ENCODED, not what was asked for — the image block must never lie
         // about the bytes it carries.
@@ -145,6 +177,15 @@ public sealed class ScreenTools
         // Absent when nothing needs translating: the model only sees the instruction when it applies.
         if (CoordinateNote(r, result.CoordinateScale) is { } note)
             meta["note"] = note;
+        if (annotate)
+        {
+            meta["annotated"] = true;
+            meta["annotations"] = result.AnnotationsDrawn;
+        }
+        if (grid is not null)
+            meta["grid"] = new { columns = grid.Columns, rows = grid.Rows };
+
+        var elementList = listed is null ? null : new TextContentBlock { Text = SnapshotRenderer.Render(listed) };
 
         if (toFile)
         {
@@ -153,21 +194,20 @@ public sealed class ScreenTools
             var filePath = Path.Combine(dir, $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss_fff}.{(isJpeg ? "jpg" : "png")}");
             await File.WriteAllBytesAsync(filePath, result.Bytes);
             meta["path"] = filePath;
-            return new CallToolResult
-            {
-                Content = [new TextContentBlock { Text = JsonSerializer.Serialize(meta) }],
-            };
+            var fileContent = new List<ContentBlock> { new TextContentBlock { Text = JsonSerializer.Serialize(meta) } };
+            if (elementList is not null) fileContent.Add(elementList);
+            return new CallToolResult { Content = fileContent };
         }
 
-        return new CallToolResult
-        {
-            Content =
-            [
-                new TextContentBlock { Text = JsonSerializer.Serialize(meta) },
-                ImageContentBlock.FromBytes(result.Bytes, isJpeg ? "image/jpeg" : "image/png"),
-            ],
-        };
+        var content = new List<ContentBlock> { new TextContentBlock { Text = JsonSerializer.Serialize(meta) } };
+        if (elementList is not null) content.Add(elementList);
+        content.Add(ImageContentBlock.FromBytes(result.Bytes, isJpeg ? "image/jpeg" : "image/png"));
+        return new CallToolResult { Content = content };
     }
+
+    /// <summary>Half-open overlap in virtual-desktop pixels: an element touching the rect's far edge is outside.</summary>
+    private static bool Overlaps(Bounds b, ScreenRegion r)
+        => b.X < r.X + r.Width && b.X + b.Width > r.X && b.Y < r.Y + r.Height && b.Y + b.Height > r.Y;
 
     /// <summary>True for file output, false for inline; "base64" is the pre-A-7 alias of inline.</summary>
     private static bool ParseOutput(string output) => output.ToLowerInvariant() switch

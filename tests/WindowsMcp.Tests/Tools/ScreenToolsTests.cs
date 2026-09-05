@@ -8,6 +8,7 @@ using ModelContextProtocol.Protocol;
 using Moq;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
+using WindowsMcp.Services.UiTree;
 using WindowsMcp.Tools;
 using Xunit;
 
@@ -43,7 +44,7 @@ public class ScreenToolsTests : IDisposable
     private static Mock<IScreenshotService> ShotMock(
         byte[]? bytes = null, int width = 100, int height = 100, ImageFormat? resultFormat = null,
         int? originalWidth = null, int? originalHeight = null, double coordinateScale = 1.0,
-        string? cursorDrawn = null)
+        string? cursorDrawn = null, int annotationsDrawn = 0)
     {
         var mock = new Mock<IScreenshotService>();
         mock.Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
@@ -53,7 +54,8 @@ public class ScreenToolsTests : IDisposable
                 return new ScreenshotResult(
                     bytes ?? (effective == ImageFormat.Jpeg ? JpegBytes : PngBytes),
                     width, height, effective,
-                    originalWidth ?? width, originalHeight ?? height, coordinateScale, cursorDrawn);
+                    originalWidth ?? width, originalHeight ?? height, coordinateScale, cursorDrawn,
+                    annotationsDrawn);
             });
         return mock;
     }
@@ -104,11 +106,27 @@ public class ScreenToolsTests : IDisposable
         return mock;
     }
 
+    /// <summary>
+    /// A-6: the element source <c>annotate</c> draws from. The default returns an EMPTY snapshot,
+    /// so every pre-A-6 test behaves exactly as it did — a tool that called it anyway would still
+    /// have nothing to draw, which is why the annotate tests below verify the call itself.
+    /// </summary>
+    internal static SnapshotResult EmptySnapshot =>
+        new([], null, new CursorPosition(0, 0), -1, [], [], null, false, 500, 0, 0);
+
+    private static Mock<IUIAutomationService> UiaMock(SnapshotResult? snapshot = null)
+    {
+        var mock = new Mock<IUIAutomationService>();
+        mock.Setup(u => u.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(snapshot ?? EmptySnapshot);
+        return mock;
+    }
+
     private static ScreenTools MakeTools(
         IScreenshotService? shot = null, IOcrService? ocr = null, ScreenshotOptions? options = null,
-        IWindowService? windows = null, IInputService? input = null) =>
+        IWindowService? windows = null, IInputService? input = null, IUIAutomationService? uia = null) =>
         new(shot ?? ShotMock().Object, ocr ?? new Mock<IOcrService>().Object,
-            windows ?? WinMock().Object, input ?? InputMock().Object, options);
+            windows ?? WinMock().Object, input ?? InputMock().Object, uia ?? UiaMock().Object, options);
 
     /// <summary>The whole primary display — what a call with neither region nor display captures (roadmap C3).</summary>
     private static readonly ScreenRegion PrimaryRect = new(0, 0, 1920, 1080);
@@ -123,8 +141,10 @@ public class ScreenToolsTests : IDisposable
         return calls[0].Arguments[1].Should().BeOfType<CaptureOptions>().Subject;
     }
 
+    // The metadata block is always the FIRST text block; with annotate:true a second text block
+    // (the element list) follows it, so this must not assume a single one.
     private static TextContentBlock TextBlock(CallToolResult result) =>
-        result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject;
+        result.Content.OfType<TextContentBlock>().First();
 
     private static ImageContentBlock ImageBlock(CallToolResult result) =>
         result.Content.OfType<ImageContentBlock>().Should().ContainSingle().Subject;
@@ -730,11 +750,12 @@ public class ScreenToolsTests : IDisposable
     [Fact]
     public async Task Screenshot_without_process_options_uses_scale_one()
     {
-        // ScreenTools(shot, ocr, windows, input) — the options-less form (A-8 added the monitor
-        // inventory, A-11 the cursor source) — must behave as ScreenshotOptions.Default.
+        // ScreenTools(shot, ocr, windows, input, uia) — the options-less form (A-8 added the monitor
+        // inventory, A-11 the cursor source, A-6 the element source) — must behave as
+        // ScreenshotOptions.Default.
         var mock = ShotMock();
         var tools = new ScreenTools(mock.Object, new Mock<IOcrService>().Object,
-            WinMock().Object, InputMock().Object);
+            WinMock().Object, InputMock().Object, UiaMock().Object);
 
         await tools.Screenshot(null, format: "png", output: "inline", scale: 0.5);
 
@@ -1654,14 +1675,20 @@ public class ScreenToolsTests : IDisposable
     }
 
     [Fact]
-    public void Screenshot_include_cursor_is_the_last_parameter_and_defaults_to_true()
+    public void Screenshot_include_cursor_is_appended_after_the_A9_arguments_and_defaults_to_true()
     {
         // Appended, not inserted: every existing caller and test passes the earlier arguments
-        // positionally, and the schema default is what the model reads.
+        // positionally, and the schema default is what the model reads. A-11 put include_cursor
+        // last; A-6 appended annotate/grid_columns/grid_rows AFTER it, so it is no longer the
+        // final parameter — but it is still after everything A-9 added, which is what "appended"
+        // protects. Screenshot_annotate_arguments_are_appended_after_include_cursor pins the tail.
         var parameters = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!.GetParameters();
 
-        parameters[^1].Name.Should().Be("include_cursor");
-        parameters[^1].DefaultValue.Should().Be(true);
+        var includeCursor = parameters.Single(p => p.Name == "include_cursor");
+        includeCursor.DefaultValue.Should().Be(true);
+        Array.IndexOf(parameters, includeCursor).Should()
+            .BeGreaterThan(Array.IndexOf(parameters, parameters.Single(p => p.Name == "quality")),
+                "include_cursor came after every argument that existed before A-11");
     }
 
     [Fact]
@@ -1711,5 +1738,499 @@ public class ScreenToolsTests : IDisposable
         await act.Should().ThrowAsync<ArgumentException>();
         ShouldNeverReadTheCursor(input);
         ShouldNeverCapture(mock);
+    }
+
+    // ---- A-6 (R4) — annotate: one snapshot, the boxes, the text block, the grid ---------------
+
+    /// <summary>An interactive element at <paramref name="bounds"/>; the centre is the rect's centre.</summary>
+    private static SnapshotElement Element(string id, Bounds bounds, string name = "Save") =>
+        new(id, "Untitled - Notepad", "Button", name,
+            bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2, bounds,
+            "click", false, false, null, null, null, null, null, null, null);
+
+    private static SnapshotScrollable Scrollable(string id, Bounds bounds) =>
+        new(id, "Untitled - Notepad", "Document", "Text Editor",
+            bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2, bounds,
+            new ScrollInfo(37, 0, true, false));
+
+    private static SnapshotResult SnapshotOf(
+        SnapshotElement[] interactive, SnapshotScrollable[]? scrollable = null) =>
+        new([], null, new CursorPosition(0, 0), -1, interactive, scrollable ?? [], null,
+            false, 500, interactive.Length, 0);
+
+    /// <summary>The metadata block of a result that may carry more than one text block (annotate does).</summary>
+    private static JsonElement MetaBlock(CallToolResult result)
+    {
+        var block = result.Content[0].Should().BeOfType<TextContentBlock>(
+            "the metadata block is always first").Subject;
+        using var doc = JsonDocument.Parse(block.Text);
+        doc.RootElement.ValueKind.Should().Be(JsonValueKind.Object);
+        return doc.RootElement.Clone();
+    }
+
+    /// <summary>The A-6 element-list block: the second block, the same list the labels came from.</summary>
+    private static string SnapshotText(CallToolResult result) =>
+        result.Content[1].Should().BeOfType<TextContentBlock>(
+            "the snapshot text is the second block, between the metadata and the image").Subject.Text;
+
+    private static void ShouldNeverSnapshot(Mock<IUIAutomationService> mock) =>
+        mock.Verify(u => u.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never, "a capture that was not asked to annotate must not cost a desktop walk");
+
+    // -- the boxes ---------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_annotate_boxes_only_the_elements_that_intersect_the_captured_rect()
+    {
+        // A box for an element that is not in the picture would be drawn nowhere (or, worse,
+        // clamped onto an unrelated pixel) and would still consume a label the text block lists.
+        var inside = Element("el_1", new Bounds(100, 100, 50, 20));
+        var outside = Element("el_2", new Bounds(2000, 100, 50, 20));
+        var straddling = Element("el_3", new Bounds(1900, 100, 50, 20));
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object, uia: UiaMock(SnapshotOf([inside, outside, straddling])).Object);
+
+        await tools.Screenshot(format: "png", output: "inline", annotate: true);
+
+        CapturedOptions(shot).Annotations.Should().BeEquivalentTo(
+            new[] { new AnnotationBox("el_1", inside.Bounds), new AnnotationBox("el_3", straddling.Bounds) },
+            o => o.WithStrictOrdering(),
+            "the kept elements keep the snapshot's order, and the label is the id click accepts");
+    }
+
+    [Theory]
+    [InlineData(100, true)]      // wholly inside the primary rect
+    [InlineData(1900, true)]     // straddles the right edge
+    [InlineData(1920, false)]    // starts exactly where the rect ends: no overlap at all
+    [InlineData(-20, true)]      // straddles the left edge
+    [InlineData(-60, false)]     // ends exactly where the rect starts: no overlap at all
+    public async Task Screenshot_annotate_keeps_an_element_exactly_when_it_overlaps_the_rect(int x, bool kept)
+    {
+        var element = Element("el_1", new Bounds(x, 100, 50, 20));
+        var shot = ShotMock();
+        var uia = UiaMock(SnapshotOf([element]));
+        var tools = MakeTools(shot.Object, uia: uia.Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline", annotate: true);
+
+        // The walk happens either way — annotate always produces the element list block, even when
+        // nothing in it is inside the picture. Without this the "not kept" rows would pass against
+        // a tool that ignored 'annotate' altogether.
+        uia.Verify(u => u.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        result.Content.Should().HaveCount(3);
+        if (kept)
+            CapturedOptions(shot).Annotations.Should().ContainSingle().Which.Label.Should().Be("el_1");
+        else
+            CapturedOptions(shot).Annotations.Should().BeNull(
+                "nothing was kept, so nothing is drawn — an empty list would still cost a draw pass");
+    }
+
+    [Fact]
+    public async Task Screenshot_annotate_with_no_elements_at_all_passes_no_annotations()
+    {
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object, uia: UiaMock().Object);   // the empty snapshot
+
+        var result = await tools.Screenshot(format: "png", output: "inline", annotate: true);
+
+        CapturedOptions(shot).Annotations.Should().BeNull();
+        result.Content.Should().HaveCount(3, "the text block is still there, saying the list is empty");
+    }
+
+    // -- the text block ----------------------------------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_annotate_returns_metadata_then_the_element_list_then_the_image()
+    {
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object,
+            uia: UiaMock(SnapshotOf([Element("el_1", new Bounds(100, 100, 50, 20))])).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline", annotate: true);
+
+        result.Content.Should().HaveCount(3);
+        result.Content[0].Should().BeOfType<TextContentBlock>("metadata first");
+        result.Content[1].Should().BeOfType<TextContentBlock>("then the element list the labels index");
+        result.Content[2].Should().BeOfType<ImageContentBlock>("then the annotated picture");
+    }
+
+    [Fact]
+    public async Task Screenshot_annotate_text_block_is_exactly_the_rendered_filtered_snapshot()
+    {
+        // "Label N in the image is row N in the text from the SAME call" (roadmap A-6) only holds
+        // if the text is rendered from the same filtered list the boxes were built from.
+        var inside = Element("el_1", new Bounds(100, 100, 50, 20));
+        var outside = Element("el_2", new Bounds(2000, 100, 50, 20));
+        var scrollIn = Scrollable("el_20", new Bounds(0, 0, 800, 600));
+        var scrollOut = Scrollable("el_21", new Bounds(3000, 0, 800, 600));
+        var snapshot = SnapshotOf([inside, outside], [scrollIn, scrollOut]);
+        var tools = MakeTools(uia: UiaMock(snapshot).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline", annotate: true);
+
+        var expected = SnapshotRenderer.Render(snapshot with { Interactive = [inside], Scrollable = [scrollIn] });
+        SnapshotText(result).Should().Be(expected,
+            "the model reads one list; anything the picture does not show must not be in it");
+    }
+
+    [Fact]
+    public async Task Screenshot_annotate_text_block_drops_the_scrollables_outside_the_rect()
+    {
+        var snapshot = SnapshotOf(
+            [Element("el_1", new Bounds(100, 100, 50, 20))],
+            [Scrollable("el_20", new Bounds(0, 0, 800, 600)), Scrollable("el_21", new Bounds(3000, 0, 800, 600))]);
+        var tools = MakeTools(uia: UiaMock(snapshot).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline", annotate: true);
+
+        var text = SnapshotText(result);
+        text.Should().Contain("Scrollable (1)").And.Contain("el_20");
+        text.Should().NotContain("el_21", "that region is not in the picture");
+    }
+
+    // -- the call itself ---------------------------------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_annotate_takes_exactly_one_desktop_snapshot()
+    {
+        var uia = UiaMock();
+        var tools = MakeTools(uia: uia.Object);
+
+        await tools.Screenshot(format: "png", output: "inline", annotate: true);
+
+        uia.Verify(u => u.SnapshotAsync(
+            It.Is<SnapshotRequest>(r => r.Scope == SnapshotScope.Desktop && r.WindowTitle == null
+                                        && !r.IncludeTree && r.MaxElements == 0),
+            It.IsAny<CancellationToken>()),
+            Times.Once, "one walk per screenshot, over the whole desktop the capture can contain");
+    }
+
+    [Fact]
+    public async Task Screenshot_annotate_snapshots_after_the_rect_is_resolved_and_before_the_capture()
+    {
+        // The filter needs the rect, so the inventory comes first; and the picture must be of the
+        // desktop the element list describes, so the walk must not run after the shutter.
+        var order = new List<string>();
+        var windows = new Mock<IWindowService>();
+        windows.Setup(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => { order.Add("monitors"); return SingleMonitor; });
+        var uia = new Mock<IUIAutomationService>();
+        uia.Setup(u => u.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => { order.Add("snapshot"); return EmptySnapshot; });
+        var shot = new Mock<IScreenshotService>();
+        shot.Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                order.Add("capture");
+                return new ScreenshotResult(PngBytes, 100, 100, ImageFormat.Png, 100, 100, 1.0);
+            });
+        var tools = MakeTools(shot.Object, windows: windows.Object, uia: uia.Object);
+
+        await tools.Screenshot(format: "png", output: "inline", annotate: true);
+
+        order.Should().ContainInOrder("monitors", "snapshot", "capture");
+    }
+
+    [Fact]
+    public async Task Screenshot_without_annotate_never_walks_the_desktop()
+    {
+        var uia = UiaMock(SnapshotOf([Element("el_1", new Bounds(100, 100, 50, 20))]));
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object, uia: uia.Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline");
+
+        ShouldNeverSnapshot(uia);
+        result.Content.Should().HaveCount(2, "A-7's two blocks, unchanged");
+        CapturedOptions(shot).Annotations.Should().BeNull();
+    }
+
+    // -- the grid ----------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(3, 0)]
+    [InlineData(0, 2)]
+    [InlineData(4, 4)]
+    public async Task Screenshot_grid_arguments_reach_the_capture_as_a_GridSpec(int columns, int rows)
+    {
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object);
+
+        await tools.Screenshot(format: "png", output: "inline", grid_columns: columns, grid_rows: rows);
+
+        CapturedOptions(shot).Grid.Should().Be(new GridSpec(columns, rows));
+    }
+
+    [Fact]
+    public async Task Screenshot_without_a_grid_passes_no_grid()
+    {
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object);
+
+        await tools.Screenshot(format: "png", output: "inline");
+
+        CapturedOptions(shot).Grid.Should().BeNull("absent, not a zero-by-zero grid to draw nothing with");
+    }
+
+    [Fact]
+    public async Task Screenshot_grid_without_annotate_needs_no_snapshot()
+    {
+        // A grid is pure geometry over the captured rect: it costs a draw, never a desktop walk.
+        var uia = UiaMock();
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object, uia: uia.Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline", grid_columns: 3, grid_rows: 3);
+
+        ShouldNeverSnapshot(uia);
+        result.Content.Should().HaveCount(2, "no annotate means no element list");
+        CapturedOptions(shot).Grid.Should().Be(new GridSpec(3, 3));
+    }
+
+    [Theory]
+    [InlineData(65, 0, "grid_columns")]
+    [InlineData(0, 65, "grid_rows")]
+    public async Task Screenshot_grid_above_sixty_four_is_rejected_naming_the_argument(int columns, int rows, string argument)
+    {
+        // Unbounded, a large value draws a line every pixel plus a caption per line: unreadable and slow.
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object);
+
+        Func<Task> act = () => tools.Screenshot(format: "png", output: "inline", grid_columns: columns, grid_rows: rows);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain(argument).And.Contain("64");
+        shot.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Screenshot_grid_of_sixty_four_is_accepted()
+    {
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object);
+
+        await tools.Screenshot(format: "png", output: "inline", grid_columns: 64, grid_rows: 64);
+
+        CapturedOptions(shot).Grid.Should().Be(new GridSpec(64, 64));
+    }
+
+    [Theory]
+    [InlineData(-1, 0, "grid_columns")]
+    [InlineData(0, -1, "grid_rows")]
+    [InlineData(-2, -2, "grid_columns")]
+    public async Task Screenshot_negative_grid_throws_naming_the_argument_and_does_nothing(
+        int columns, int rows, string named)
+    {
+        var shot = ShotMock();
+        var uia = UiaMock();
+        var input = InputMock();
+        var windows = WinMock();
+        var tools = MakeTools(shot.Object, windows: windows.Object, input: input.Object, uia: uia.Object);
+
+        Func<Task> act = () => tools.Screenshot(
+            format: "png", output: "inline", grid_columns: columns, grid_rows: rows);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain(named);
+        ShouldNeverSnapshot(uia);
+        ShouldNeverCapture(shot);
+        ShouldNeverReadTheCursor(input);
+        windows.Verify(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()),
+            Times.Never, "arguments are validated before any work, as every other A-8/A-9 rule is");
+    }
+
+    [Fact]
+    public async Task Screenshot_zero_grid_is_legal_and_means_no_grid()
+    {
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object);
+
+        await tools.Screenshot(format: "png", output: "inline", grid_columns: 0, grid_rows: 0);
+
+        CapturedOptions(shot).Grid.Should().BeNull();
+    }
+
+    // -- the metadata ------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_annotate_metadata_says_so_and_echoes_what_was_drawn()
+    {
+        var shot = ShotMock(annotationsDrawn: 7);
+        var tools = MakeTools(shot.Object,
+            uia: UiaMock(SnapshotOf([Element("el_1", new Bounds(100, 100, 50, 20))])).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline", annotate: true);
+
+        var meta = MetaBlock(result);
+        Field(meta, "annotated").GetBoolean().Should().BeTrue();
+        Field(meta, "annotations").GetInt32().Should().Be(7,
+            "the count is what the SERVICE drew, not how many boxes were asked for");
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_omits_the_annotate_fields_when_not_annotating()
+    {
+        var result = await MakeTools().Screenshot(format: "png", output: "inline");
+
+        var meta = Meta(result);
+        meta.TryGetProperty("annotated", out _).Should().BeFalse("absent, never false (A-7's rule)");
+        meta.TryGetProperty("annotations", out _).Should().BeFalse();
+        meta.TryGetProperty("grid", out _).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(3, 0)]
+    [InlineData(0, 2)]
+    [InlineData(4, 4)]
+    public async Task Screenshot_metadata_reports_the_grid_that_was_requested(int columns, int rows)
+    {
+        var tools = MakeTools();
+
+        var result = await tools.Screenshot(
+            format: "png", output: "inline", grid_columns: columns, grid_rows: rows);
+
+        var grid = Field(Meta(result), "grid");
+        Field(grid, "columns").GetInt32().Should().Be(columns);
+        Field(grid, "rows").GetInt32().Should().Be(rows);
+    }
+
+    [Fact]
+    public async Task Screenshot_metadata_omits_the_grid_when_none_was_requested()
+    {
+        var result = await MakeTools().Screenshot(format: "png", output: "inline", annotate: true);
+
+        var meta = MetaBlock(result);
+        Field(meta, "annotated").GetBoolean().Should().BeTrue("this IS the annotate path");
+        meta.TryGetProperty("grid", out _).Should().BeFalse("annotate does not imply a grid");
+    }
+
+    // -- file output -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Screenshot_annotate_to_file_writes_the_annotated_bytes_and_still_lists_the_elements()
+    {
+        byte[] annotated = [0x89, 0x50, 0x4E, 0x47, 0x01, 0x02, 0x03, 0x04];
+        var shot = ShotMock(annotated, annotationsDrawn: 1);
+        var element = Element("el_1", new Bounds(100, 100, 50, 20));
+        var snapshot = SnapshotOf([element]);
+        var tools = MakeTools(shot.Object, uia: UiaMock(snapshot).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "file", annotate: true);
+        var path = TrackPath(result);
+
+        result.Content.Should().HaveCount(2, "file output has no image block, but still has the element list");
+        result.Content.OfType<ImageContentBlock>().Should().BeEmpty();
+        SnapshotText(result).Should().Be(SnapshotRenderer.Render(snapshot));
+        (await File.ReadAllBytesAsync(path)).Should().Equal(annotated,
+            "the file holds the picture the boxes were drawn on");
+        Field(MetaBlock(result), "annotations").GetInt32().Should().Be(1);
+    }
+
+    /// <summary>The metadata block of an annotated FILE result — the same first block, past the second.</summary>
+    [Fact]
+    public async Task Screenshot_annotate_to_file_metadata_keeps_the_path_and_the_annotate_fields()
+    {
+        var shot = ShotMock(annotationsDrawn: 2);
+        var tools = MakeTools(shot.Object,
+            uia: UiaMock(SnapshotOf([Element("el_1", new Bounds(100, 100, 50, 20))])).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "file", annotate: true, grid_columns: 2);
+        var path = TrackPath(result);
+
+        var meta = MetaBlock(result);
+        Field(meta, "path").GetString().Should().Be(path);
+        Field(meta, "annotated").GetBoolean().Should().BeTrue();
+        Field(meta, "annotations").GetInt32().Should().Be(2);
+        Field(Field(meta, "grid"), "columns").GetInt32().Should().Be(2);
+    }
+
+    // -- the shape of the signature and what the model is told ---------------------------------
+
+    [Fact]
+    public void Screenshot_annotate_arguments_are_appended_after_include_cursor()
+    {
+        // Appended, not inserted: every existing caller passes the earlier arguments positionally.
+        var parameters = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!.GetParameters();
+
+        parameters[^4].Name.Should().Be("include_cursor");
+        parameters[^3].Name.Should().Be("annotate");
+        parameters[^3].DefaultValue.Should().Be(false, "annotate is opt-in: it costs a desktop walk");
+        parameters[^2].Name.Should().Be("grid_columns");
+        parameters[^2].DefaultValue.Should().Be(0);
+        parameters[^1].Name.Should().Be("grid_rows");
+        parameters[^1].DefaultValue.Should().Be(0);
+    }
+
+    [Fact]
+    public void Screenshot_description_documents_annotate_the_grid_and_the_shared_labels()
+    {
+        var description = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should()
+            .Contain("annotate", "the model cannot use an argument the description never mentions")
+            .And.Contain("el_", "the labels in the picture are the snapshot ids click/interact_element accept")
+            .And.Contain("same call", "label N is row N of THIS call's list — ids expire on the next snapshot");
+
+        ParameterDescription(nameof(ScreenTools.Screenshot), "annotate").Should()
+            .Contain("box").And.Contain("default", "opt-in, and the model must know what it costs");
+        ParameterDescription(nameof(ScreenTools.Screenshot), "grid_columns").Should()
+            .Contain("0").And.Contain("column");
+        ParameterDescription(nameof(ScreenTools.Screenshot), "grid_rows").Should()
+            .Contain("0").And.Contain("row");
+    }
+
+    [Fact]
+    public async Task Screenshot_annotate_filters_against_the_requested_region_not_the_display()
+    {
+        // The rect the boxes are filtered by is the one that was CAPTURED, not the display it sits
+        // on: with a region, an element elsewhere on the same monitor is not in this picture.
+        var inRegion = Element("el_1", new Bounds(150, 150, 20, 20));
+        var elsewhereOnTheDisplay = Element("el_2", new Bounds(20, 20, 20, 20));
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object, uia: UiaMock(SnapshotOf([inRegion, elsewhereOnTheDisplay])).Object);
+
+        var result = await tools.Screenshot("100,100,200,200", format: "png", output: "inline", annotate: true);
+
+        CapturedOptions(shot).Annotations.Should().ContainSingle().Which.Label.Should().Be("el_1");
+        SnapshotText(result).Should().Contain("el_1").And.NotContain("el_2",
+            "the list and the picture describe the same rect");
+    }
+
+    [Theory]
+    [InlineData(100, true)]      // wholly inside the primary rect
+    [InlineData(1060, true)]     // straddles the bottom edge
+    [InlineData(1080, false)]    // starts exactly where the rect ends: no overlap at all
+    [InlineData(-10, true)]      // straddles the top edge
+    [InlineData(-20, false)]     // ends exactly where the rect starts: no overlap at all
+    public async Task Screenshot_annotate_applies_the_same_overlap_rule_on_the_y_axis(int y, bool kept)
+    {
+        // The x axis is covered above; the y terms of the same predicate are a separate pair of
+        // comparisons and a copy-paste there would keep every row of the x theory green.
+        var element = Element("el_1", new Bounds(100, y, 50, 20));
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object, uia: UiaMock(SnapshotOf([element])).Object);
+
+        await tools.Screenshot(format: "png", output: "inline", annotate: true);
+
+        if (kept)
+            CapturedOptions(shot).Annotations.Should().ContainSingle().Which.Label.Should().Be("el_1");
+        else
+            CapturedOptions(shot).Annotations.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Screenshot_annotate_with_a_grid_passes_both_to_the_capture()
+    {
+        // The two overlays are independent arguments on the same call and must not exclude each
+        // other: the desktop test can only see that three blocks came back.
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object,
+            uia: UiaMock(SnapshotOf([Element("el_1", new Bounds(100, 100, 50, 20))])).Object);
+
+        await tools.Screenshot(
+            format: "png", output: "inline", annotate: true, grid_columns: 4, grid_rows: 3);
+
+        var options = CapturedOptions(shot);
+        options.Annotations.Should().ContainSingle().Which.Label.Should().Be("el_1");
+        options.Grid.Should().Be(new GridSpec(4, 3));
     }
 }

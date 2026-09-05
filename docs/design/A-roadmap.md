@@ -296,6 +296,10 @@ without a desktop:
   with `output:"file"` writes the annotated bytes; element ordering identical between text
   and drawing (assert on a fake node list rendered to a bitmap, sample pixel colours).
 - **Done when.** Label N sits on element N from the same call.
+- **Shipped as** ([note](A-6-annotated-screenshot.md)): annotations travel in `CaptureOptions` and are
+  drawn after the downscale on a copy; the walk is always `scope=desktop` (a capture can show
+  several windows); the cursor is A-11's, not redrawn; `LabelPlacement.Clamp` shipped as
+  `Annotator.ChipRect`; grid divisions capped at 64.
 
 ### Phase 5 — long tail
 

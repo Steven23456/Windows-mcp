@@ -69,7 +69,7 @@ function names are the stable anchor.
 | A-3 | Scrollable regions with scroll percentages | P2 | S | A-2 | ☑ |
 | A-4 | Element budget, truncation note, UIA caching | P1 | M | A-2 | ☑ |
 | A-5 | Browser DOM mode (Chromium; Firefox IA2) | P2 | L | A-2 | ☐ |
-| A-6 | Annotated screenshot (boxes, labels, grid, cursor) | P2 | M | A-2, A-7 | ☐ |
+| A-6 | Annotated screenshot (boxes, labels, grid, cursor) | P2 | M | A-2, A-7 | ☑ |
 | A-7 | Return screenshot as MCP image content | P1 | S | — | ☑ |
 | A-8 | Multi-display / virtual-desktop-coordinate capture | P1 | M | — | ☑ |
 | A-9 | Auto-downscale + scale env + coordinate-scale report | P1 | S | A-7 | ☑ |
@@ -624,14 +624,14 @@ observe the **vtable-gap rule** in `CLAUDE.md`. Expose through `snapshot(use_dom
 page text without address-bar/tab-strip elements; Firefox is a documented follow-up.
 
 ### A-6 — Annotated screenshot (bounding boxes, labels, grid, cursor)  `P2 · M`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-6-annotated-screenshot.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `Snapshot(use_vision=true, use_annotation=true)` draws a coloured rectangle and
 numbered label per interactive node, highlights the cursor, and optionally overlays a reference
 grid (`width_reference_line`/`height_reference_line`) — `desktop/service.py`
 `get_annotated_screenshot()` (~1217, `draw_annotation`, `draw_label`, `get_random_color`).
 
-**Ours.** Plain capture only.
+**Ours (before A-6).** Plain capture only. Now `screenshot(annotate:true, grid_columns, grid_rows)` — see the design note.
 
 **Sketch.** SkiaSharp (already referenced) `SKCanvas` over the captured bitmap: box per element
 (2 px, colour from a fixed palette by index), label chip with contrast text at the box's top-left
