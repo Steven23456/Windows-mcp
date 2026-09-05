@@ -76,7 +76,7 @@ function names are the stable anchor.
 | A-9 | Auto-downscale + scale env + coordinate-scale report | P1 | S | A-7 | ☑ |
 | A-10 | Alternative capture backend (WGC / DXGI) | P3 | M–L | — | ☐ |
 | A-11 | Cursor position in responses + drawn on capture | P2 | S | — | ☑ |
-| A-12 | Virtual desktops (report; optional manage) | P3 | L | A-1 | ☐ |
+| A-12 | Virtual desktops (report; optional manage) | P3 | L | A-1 | ☑ (phase 1) |
 | A-13 | Unicode hygiene (PUA strip, surrogate repair) | P2 | S | — | ☑ |
 | A-14 | Post-capture flash overlay + snapshot profiling | P3 | M | — | ☑ |
 | B-1 | `type`: target, clear, caret, press_enter, paste path | P1 | M | D-2 | ☐ |
@@ -738,7 +738,7 @@ true), or a drawn ring when the real cursor cannot be composited.
 **Done when.** Screenshot metadata reports the cursor and the image shows it.
 
 ### A-12 — Virtual desktops  `P3 · L`
-- [ ] Not started
+- [x] Phase 1 done 2026-09-05 — [design note](design/A-12-virtual-desktops.md); in `CHANGELOG.md [Unreleased]`, ships with the next release. Phase 2 (the undocumented interface) is not planned.
 
 **Upstream.** Every snapshot shows **Active Desktop** and **All Desktops** (names). `vdm/core.py`
 wraps the documented `IVirtualDesktopManager` (is-window-on-current, window's desktop GUID) and
@@ -747,7 +747,7 @@ move window) with names read from
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops\Desktops\{guid}\Name`.
 Only current/all are wired into tools; the rest are library functions.
 
-**Ours.** Nothing.
+**Ours (before A-12).** Nothing. Now `window(action:"desktops")` and `DesktopId` on every listed window — see the design note (on this Windows 11 build the registry has no `VirtualDesktopIDs`; the service falls back to the `Desktops` subkeys and to the foreground window's desktop).
 
 **Sketch.** Phase 1 (safe): documented `IVirtualDesktopManager` (`CLSID_VirtualDesktopManager`)
 to tag A-1 windows with `DesktopId`, plus registry names → `virtual_desktop(action=list|current)`.

@@ -2,6 +2,15 @@
 
 ### Added
 
+- **Virtual desktops, phase 1** (parity A-12). `window(action:"desktops")` lists every virtual
+  desktop (`Id`, `Name` or `Desktop N`, `Index`, `IsCurrent`) and the current one; every window
+  `list`/`active` returns now carries `DesktopId`. Only the documented `IVirtualDesktopManager`
+  (declared in vtable order per the COM rule) and the registry are used; the per-build internal
+  interface is not. On this Windows 11 build the registry holds no `VirtualDesktopIDs` blob, so the
+  service falls back to the `Desktops` subkeys for the list and to the desktop the foreground
+  window is on for the current one. Every failure is an empty list or a null, never an error. New
+  `IVirtualDesktopService`/`VirtualDesktopService`, `VirtualDesktopInfo`; `WindowService` takes an
+  optional `IVirtualDesktopService`. Design note: `docs/design/A-12-virtual-desktops.md`.
 - **A post-capture flash and per-stage profiling** (parity A-14). After every `screenshot` an
   orange glow is drawn around the captured area for ~3.5 s — a layered, click-through, top-most,
   non-activating tool window on its own thread (`FlashOverlay`, painted by a pure `FlashGlow`),

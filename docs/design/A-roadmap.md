@@ -335,6 +335,10 @@ without a desktop:
 - **RED seed.** COM declaration smoke (`Integration`: create the manager and query the test
   host's own window); registry name parsing on fake `IRegistryService` values (missing name →
   `"Desktop N"`); `DesktopId` appears in `window list`.
+- **Shipped as** ([note](A-12-virtual-desktops.md)): phase 1 only, with fallbacks the plan did not
+  foresee — this Windows 11 build has no `VirtualDesktopIDs`/`CurrentVirtualDesktop`, so the list
+  comes from the `Desktops` subkeys and the current desktop from the foreground window's; the
+  envelope is the full `VirtualDesktopInfo`; no `IsOnCurrentDesktop` on `WindowInfo`.
 
 #### A-10 — Alternative capture backend  `P3 · M–L · ~3 days`
 

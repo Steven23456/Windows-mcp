@@ -154,9 +154,12 @@ public class WindowServiceDesktopIdTests
         if (probe is null || await service.GetWindowDesktopIdAsync(probe.Hwnd) is null)
             return;   // no interactive desktop, or no IVirtualDesktopManager on this build
 
-        windows.Where(w => w.State != WindowState.Minimized).Should()
-            .OnlyContain(w => w.DesktopId != null, "a window that is showing is on some desktop")
-            .And.OnlyContain(w => GuidD.IsMatch(w.DesktopId!), "the id is a lower-case dashed GUID");
+        // The manager answers for only a few of the hundreds of top-level windows (the rest refuse
+        // or report GUID_NULL), so "every showing window is tagged" would flake on the desktop's
+        // composition. What holds: at least one is, and every id present is well-formed.
+        windows.Should().Contain(w => w.DesktopId != null, "the probe window above was tagged, so the list carries ids");
+        windows.Where(w => w.DesktopId != null).Should()
+            .OnlyContain(w => GuidD.IsMatch(w.DesktopId!), "the id is a lower-case dashed GUID");
 
         var desktops = await service.ListAsync();
         if (desktops.Length == 0)
