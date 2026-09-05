@@ -118,6 +118,8 @@ A-2 have unlocked B-6, B-8 and B-10, and A-5's DOM work has unlocked C-5. Quick 
 B-2, B-3, C-2, C-7, S-8, S-1 can be interleaved anywhere; S-4 last.
 The section-A sequencing, cross-item decisions (coordinate space, defaults, tool count, element
 ids, env vars) and per-item test seeds are in [`docs/design/A-roadmap.md`](design/A-roadmap.md).
+The section-B plan (four phases, the element-target resolver, window matcher, typing planner and
+app-catalog decisions, per-item test seeds) is in [`docs/design/B-roadmap.md`](design/B-roadmap.md).
 
 ---
 
