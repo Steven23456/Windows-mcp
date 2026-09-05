@@ -149,7 +149,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 | Method | Description |
 |--------|-------------|
-| `Window` | `minimize` / `maximize` / `restore` / `close` a window found by exact title (`FindWindow`) |
+| `Window` | `list` every user-visible top-level window in z-order (`include_minimized` default true, `include_hidden` default false) / `active` the foreground one (`{"found":false}` when there is none) / `minimize`, `maximize`, `restore`, `close` a window found by exact title (`FindWindow`); the action is validated first, then the title the four acting actions require |
 | `SwitchToWindow` | Bring a window to the foreground by exact title (`SetForegroundWindow`) |
 | `Focus` | Alias of `SwitchToWindow` |
 | `Launch` | Launch an application by name or path via ShellExecute; returns the PID |
@@ -381,7 +381,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IEventLogService` | `QueryAsync` |
 | `ITaskSchedulerService` | `ListAsync`, `ListDetailedAsync`, `GetAsync`, `CreateAsync`, `DeleteAsync`, `RunAsync` |
 | `IProcessService` | `ListAsync`, `InspectAsync`, `StartDetachedAsync`, `KillAsync`, `ListLineageAsync`, `GroupByRootAsync`, `KillGuardedAsync`, `KillTreeAsync` |
-| `IWindowService` | `ExecuteAsync(action, title)`, `SwitchToAsync(title)`, `LaunchAsync(app)`, `EnumerateMonitorsAsync` |
+| `IWindowService` | `ExecuteAsync(action, title)`, `SwitchToAsync(title)`, `LaunchAsync(app)`, `EnumerateMonitorsAsync`, `ListAsync(includeMinimized, includeHidden)` → `WindowInfo[]`, `GetActiveAsync()` → `WindowInfo?` |
 | `IWmiService` | `QueryAsync(className, properties?, where?)` → rows |
 | `IStorageService` | `GetHealthAsync(driveLetter?, includeUsage, timeoutSeconds)` → `StorageHealthReport` |
 | `IDiskService` | `GetUsageAsync`, `GetFileTypesAsync`, `GetStaleAsync`, `GetReclaimableAsync` |
@@ -414,7 +414,7 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 21 f
 | `InputDtos.cs` | `ClickResult`, `DragResult`, `TypeResult`, `CursorPosition`, `MouseButton` (enum) |
 | `ScreenDtos.cs` | `ScreenRegion`, `CaptureOptions`, `ScreenshotResult`, `ScreenshotOptions`, `ImageFormat` (enum) |
 | `UIAutomationDtos.cs` | `ElementInfo`, `Bounds`, `ElementTree`, `FindElementResult`, `FindKind` (enum), `FindScope` (enum), `TableData`, `InteractResult`, `AssertResult` |
-| `WindowDtos.cs` | `WindowAction`, `MonitorInfo` |
+| `WindowDtos.cs` | `WindowAction`, `MonitorInfo`, `WindowInfo`, `WindowProbe`, `WindowState` (enum, serialised by name) |
 | `ProcessDtos.cs` | `ProcessDto`, `ProcessDetailDto`, `ModuleInfo`, `ProcessLineageDto`, `ProcessGroupDto` |
 | `PowerShellDtos.cs` | `PSResult` (success, stdout, stderr, exit code, parsed errors) |
 | `JobDtos.cs` | `JobInfo`, `JobOutput` |
@@ -517,7 +517,7 @@ GDI capture + **SkiaSharp** downscale and encode:
 - Returns `ScreenshotResult(Bytes, Width, Height, Format, OriginalWidth, OriginalHeight, CoordinateScale, CursorDrawn)`; the `screenshot` tool turns that into an image content block plus a metadata text block (`output="file"` writes to `%TEMP%\WindowsMcp` and returns the path instead)
 - Which rect to capture is the tool's decision (`RegionMath` over `IWindowService.EnumerateMonitorsAsync`); the service captures whatever rect it is handed
 
-### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `UiText`)
+### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `UiText`, `WindowFilter`)
 
 `internal static` classes in `Services/` with no Win32, no screen and no UIA dependency, so every
 rule is unit-tested headless:
@@ -526,6 +526,7 @@ rule is unit-tested headless:
 - `CursorMath.MonitorIndexOf(x, y, monitors)` — the monitor a virtual-desktop point sits on, `-1` for none
 - `CursorOverlay` — `RingPoint` (cursor rebased onto the captured rect, null when outside) and `DrawRing` (white 3 px ring at radius 12, black 2 px at radius 8)
 - `UiText.Sanitize` — strips Private Use Area code points, replaces lone UTF-16 surrogates with U+FFFD, drops C0/C1 controls except tab/LF/CR, trims; returns the same instance when nothing needed changing
+- `WindowFilter` — A-1's judgement over the `WindowProbe` records `WindowService` gathers, so every rule is provable on hand-written probes with no desktop attached. `Keep` drops a window that is not visible, a `WS_EX_TOOLWINDOW` without `WS_EX_APPWINDOW`, a DWM-cloaked one (UWP ghosts, other virtual desktops), a zero-area one, the shell chrome classes (`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`, `Progman`, `WorkerW`, `IME`, `MSCTFIME UI`), an untitled one unless `includeHidden` (the title is judged **after** `UiText.Sanitize`) and a minimized one unless `includeMinimized`; `StateOf` reads `Minimized` before `Maximized` (a minimized window keeps `WS_MAXIMIZE`); `IsBrowser` matches `chrome, msedge, firefox, brave, opera, vivaldi` with or without `.exe`; `Build` projects the survivors onto `WindowInfo`, renumbering `ZOrder` from 0 and taking `MonitorIndex` from the window's centre via `CursorMath.MonitorIndexOf`; `ActiveOf` picks the entry flagged `IsActive`, so `active` reports the list's real `ZOrder`
 
 ### `OcrService`
 

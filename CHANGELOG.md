@@ -15,7 +15,8 @@
   (taskbars, Program Manager, WorkerW, IME) and untitled windows are dropped. New
   `IWindowService.ListAsync`/`GetActiveAsync`, `WindowInfo`/`WindowProbe`/`WindowState`. The
   `window` tool now validates the action first and only the acting actions need a `title`; an
-  unknown action is an error naming the six actions (it used to return `Success:false`).
+  unknown action is an error naming the six actions before any window is touched (it used to
+  reach the service, which reported `Success:false` whenever no window carried that title).
   `UIAutomationService`'s last stray `DllImport` (`GetForegroundWindow`) is retired for CsWin32
   (roadmap C9). Design note: `docs/design/A-1-window-inventory.md`.
 

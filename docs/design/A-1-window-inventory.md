@@ -49,8 +49,10 @@ focused and open windows (name, z-order, status, size, handle, process, browser 
   `IsWindowVisible`, `GetWindowLong`, `GetWindowRect`, `GetWindowThreadProcessId`, `IsIconic`,
   `IsZoomed`, `DwmGetWindowAttribute`, `GetClassName`, `GetForegroundWindow`,
   `GetWindowTextLength`); `UIAutomationService`'s stray `DllImport GetForegroundWindow` — the
-  last one in `src/` — is retired. CsWin32 has no `GetWindowLongPtr` entry; `GetWindowLong` maps
-  to the pointer-sized export on x64.
+  last one in the UI-automation and window code — is retired. (The pre-C9 `DllImport`s in
+  `AuthenticodeInspector`, `LspEnumerator`, `UsnService` and `StartupReportService`'s
+  `GetSystemMetrics` are untouched; C9 governs *new* native surface.) CsWin32 has no
+  `GetWindowLongPtr` entry; `GetWindowLong` maps to the pointer-sized export on x64.
 
 ## Changes
 
