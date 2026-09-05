@@ -268,6 +268,10 @@ without a desktop:
 - **Done when.** One call returns every visible window's interactive elements with centres,
   actions and metadata in the text form, bounded by the cap, and the centres work unchanged with
   `click`/`type`/`scroll`.
+- **Shipped as** ([note](A-2-desktop-snapshot.md)): as planned in two test-first cycles (pure core,
+  then traversal); the `el_N` ids are the labels (no separate numbers); Document → fill; the
+  cache request must cache pattern *properties* too (the GREEN pass caught every pattern read
+  silently null); `find_element` keeps its own walk and does not yet fill `ElementInfo.Scroll`.
 
 ### Phase 4 — annotate
 
