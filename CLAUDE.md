@@ -67,6 +67,9 @@ bundle/WindowsMcp.exe --max-tree-elements 200     # or $env:WINDOWSMCP_MAX_TREE_
   when another app holds the clipboard) — a lone clipboard failure under `Category!=UIAutomation`
   is environmental, not a regression.
 - Other tests are unit (`Category=Unit`, mocked) or read-only integration (`Category=Integration`).
+  Anything that **injects input** (a click, typed text, a pointer move) is `UIAutomation` too, even
+  without the Notepad fixture: it lands on whatever window has focus, so it must never run
+  unattended.
 - **`PowerShellServiceTests` are real-process integration tests** — each `RunAsync` spawns a full
   `powershell.exe` cold-start, which under Defender scanning on a loaded box is ~15–75 s *each*, so
   the serialized-calls test can take many minutes. That slowness is environmental (excluding system
