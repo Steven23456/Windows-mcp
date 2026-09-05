@@ -219,6 +219,10 @@ checklist unless corrected.
   interactively, contains the test host's console window title.
 - **Done when.** `window(action:"list")` returns every user-visible top-level window in
   z-order; `action:"active"` returns the foreground one.
+- **Shipped as** ([note](A-1-window-inventory.md)): as planned, plus `WindowFilter.ActiveOf` so
+  `active` is the list's flagged entry (real `ZOrder`) and the choice is testable without a
+  desktop; the tool validates action-then-title instead of reordering `ExecuteAsync`; CsWin32
+  has no `GetWindowLongPtr`, `GetWindowLong` is the x64 entry; C9's last `DllImport` is gone.
 
 ### Phase 3 — snapshot core
 

@@ -64,7 +64,7 @@ function names are the stable anchor.
 | D-7 | `find_element` / `wait_for` return off-screen elements by default | P2 | S | D-5 | ☑ |
 | D-8 | `powershell` ships the CLIXML progress stream to the model on every call | P2 | S | — | ☑ |
 | D-9 | `job output` still returns raw CLIXML on stderr | P3 | S | D-8 | ☑ |
-| A-1 | Whole-desktop window inventory | P1 | M | — | ☐ |
+| A-1 | Whole-desktop window inventory | P1 | M | — | ☑ |
 | A-2 | Desktop-wide labeled interactive-element snapshot | P1 | L | A-1 | ☐ |
 | A-3 | Scrollable regions with scroll percentages | P2 | S | A-2 | ☐ |
 | A-4 | Element budget, truncation note, UIA caching | P1 | M | A-2 | ☐ |
@@ -453,7 +453,7 @@ no complete document still passes through raw.
 ## A — Desktop state and screenshots
 
 ### A-1 — Whole-desktop window inventory  `P1 · M`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-1-window-inventory.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream behaviour.** Every `Snapshot`/`Screenshot` response lists **Focused Window** and
 **Opened Windows** as a table: name, depth (z-order), status (Maximized/Minimized/Normal/Hidden),
@@ -462,9 +462,9 @@ Source: `desktop/service.py` `get_controls_handles()` (EnumWindows callback, ~92
 `get_windows()` (~1036), `get_active_window()` (~959), `is_overlay_window()` (~910),
 `get_window_status()` (~314); `desktop/views.py` `Window`, `Status`, `Browser`.
 
-**Ours today.** No enumeration anywhere. `IWindowService` has `ExecuteAsync`, `SwitchToAsync`,
-`LaunchAsync`, `EnumerateMonitorsAsync` only. `window` acts on an exact title through
-`PInvoke.FindWindow` (`Services/WindowService.cs:16`).
+**Ours (before A-1).** No enumeration anywhere. `IWindowService` had `ExecuteAsync`, `SwitchToAsync`,
+`LaunchAsync`, `EnumerateMonitorsAsync` only. `window` acted on an exact title through
+`PInvoke.FindWindow`. Now `window(action:"list"|"active")` (see the design note).
 
 **Implementation sketch.**
 - New DTO `WindowInfo(string Title, long Hwnd, int Pid, string ProcessName, WindowState State,

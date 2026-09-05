@@ -6,6 +6,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using FlaUI.Core.AutomationElements;
+using Windows.Win32;
 using FlaUI.Core.Conditions;
 using FlaUI.Core.Definitions;
 using FlaUI.UIA3;
@@ -100,14 +101,16 @@ public sealed class UIAutomationService : IUIAutomationService
     /// Rooting at the focused element directly is wrong — a focused leaf control (a text box,
     /// a button) has no children, yielding an empty, useless tree.
     /// </summary>
+    private static unsafe nint HwndPointer(Windows.Win32.Foundation.HWND h) => (nint)h.Value;
+
     private AutomationElement GetForegroundRoot()
     {
         try
         {
-            var hwnd = GetForegroundWindow();
-            if (hwnd != IntPtr.Zero)
+            var hwnd = PInvoke.GetForegroundWindow();
+            if (!hwnd.IsNull)
             {
-                var window = _automation.FromHandle(hwnd);
+                var window = _automation.FromHandle(HwndPointer(hwnd));
                 if (window is not null) return window;
             }
         }
@@ -115,9 +118,6 @@ public sealed class UIAutomationService : IUIAutomationService
 
         return _automation.FocusedElement() ?? _automation.GetDesktop();
     }
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetForegroundWindow();
 
     private ElementTree BuildTree(AutomationElement el, int depth)
     {

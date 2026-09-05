@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+### Added
+
+- **`window(action:"list"|"active")` — the whole-desktop window inventory** (parity A-1). `list`
+  returns every user-visible top-level window in z-order (`ZOrder` 0 = frontmost): `Title`
+  (sanitised, A-13), `Hwnd`, `Pid`/`ProcessName`, `State` (`Normal|Minimized|Maximized`, by
+  name), `Bounds` in virtual-desktop pixels, `IsActive`, `IsBrowser` (chrome/msedge/firefox/brave/
+  opera/vivaldi), `MonitorIndex` into `multi_monitor`'s list (-1 when the window's centre is on no
+  monitor, e.g. minimized), and `DesktopId` (reserved for A-12, null). `active` returns the
+  foreground window as the list sees it, or `{"found":false}`. `include_minimized` (default
+  true) and `include_hidden` (default false: untitled windows) narrow or widen the list. The
+  filter is a pure `WindowFilter` over `WindowProbe` records: invisible, tool windows (unless
+  `WS_EX_APPWINDOW`), DWM-cloaked (UWP ghosts, other virtual desktops), zero-area, shell chrome
+  (taskbars, Program Manager, WorkerW, IME) and untitled windows are dropped. New
+  `IWindowService.ListAsync`/`GetActiveAsync`, `WindowInfo`/`WindowProbe`/`WindowState`. The
+  `window` tool now validates the action first and only the acting actions need a `title`; an
+  unknown action is an error naming the six actions (it used to return `Success:false`).
+  `UIAutomationService`'s last stray `DllImport` (`GetForegroundWindow`) is retired for CsWin32
+  (roadmap C9). Design note: `docs/design/A-1-window-inventory.md`.
+
 ### Changed
 
 - **`screenshot` returns the image as MCP image content** (parity A-7). The tool result is now a

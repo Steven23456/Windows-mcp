@@ -29,3 +29,14 @@ GetCursorInfo
 GetIconInfo
 DrawIconEx
 DeleteObject
+EnumWindows
+IsWindowVisible
+GetWindowLong
+GetWindowRect
+GetWindowThreadProcessId
+IsIconic
+IsZoomed
+DwmGetWindowAttribute
+GetClassName
+GetForegroundWindow
+GetWindowTextLength

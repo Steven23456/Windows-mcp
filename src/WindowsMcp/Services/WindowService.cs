@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Windows.Win32;
 using Windows.Win32.Foundation;
+using Windows.Win32.Graphics.Dwm;
 using Windows.Win32.Graphics.Gdi;
 using Windows.Win32.UI.WindowsAndMessaging;
 using WindowsMcp.Abstractions;
@@ -46,6 +47,94 @@ public sealed class WindowService : IWindowService
         }
 
         return Task.FromResult(new WindowAction(action, title, found));
+    }
+
+    /// <summary>
+    /// A-1: every top-level window in z-order (topmost first), filtered by <see cref="WindowFilter"/>.
+    /// The enumerator only gathers facts (<see cref="Probe"/>); every judgement is in the pure
+    /// filter so it can be tested without a desktop.
+    /// </summary>
+    public async Task<WindowInfo[]> ListAsync(bool includeMinimized = true, bool includeHidden = false, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        var probes = new List<WindowProbe>();
+        var processNames = new Dictionary<uint, string>();   // many windows per process; one lookup each
+        PInvoke.EnumWindows((hwnd, _) =>
+        {
+            probes.Add(Probe(hwnd, processNames));
+            return true;
+        }, default);
+
+        var foreground = PInvoke.GetForegroundWindow();
+        var monitors = await EnumerateMonitorsAsync(ct);
+        return WindowFilter.Build(probes, HwndValue(foreground), monitors, includeMinimized, includeHidden);
+    }
+
+    /// <summary>
+    /// The foreground window as the inventory sees it — so its <c>ZOrder</c> is real, not a
+    /// lie — or null when there is none or it is filtered out (the desktop, a cloaked window).
+    /// </summary>
+    public async Task<WindowInfo?> GetActiveAsync(CancellationToken ct = default)
+    {
+        return WindowFilter.ActiveOf(await ListAsync(ct: ct));
+    }
+
+    /// <summary>HWND.Value is a raw pointer; this is the one place it is turned into a number.</summary>
+    private static unsafe long HwndValue(HWND h) => (long)h.Value;
+
+    /// <summary>The raw Win32 facts about one window. Every read is guarded: a window can die mid-enumeration.</summary>
+    private static unsafe WindowProbe Probe(HWND hwnd, Dictionary<uint, string> processNames)
+    {
+        bool visible = PInvoke.IsWindowVisible(hwnd);
+        uint exStyle = (uint)PInvoke.GetWindowLong(hwnd, WINDOW_LONG_PTR_INDEX.GWL_EXSTYLE);
+
+        uint cloakedFlags = 0;
+        bool cloaked = PInvoke.DwmGetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE.DWMWA_CLOAKED, &cloakedFlags, sizeof(uint)).Succeeded
+            && cloakedFlags != 0;
+
+        var bounds = new Bounds(0, 0, 0, 0);
+        if (PInvoke.GetWindowRect(hwnd, out var rc))
+            bounds = new Bounds(rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top);
+
+        string? title = null;
+        int len = PInvoke.GetWindowTextLength(hwnd);
+        if (len > 0)
+        {
+            Span<char> buf = len < 512 ? stackalloc char[len + 1] : new char[len + 1];
+            int n = PInvoke.GetWindowText(hwnd, buf);
+            title = new string(buf[..Math.Max(0, n)]);
+        }
+        else
+        {
+            title = "";
+        }
+
+        Span<char> cls = stackalloc char[256];
+        int clsLen = PInvoke.GetClassName(hwnd, cls);
+        string className = clsLen > 0 ? new string(cls[..clsLen]) : "";
+
+        uint pid = 0;
+        PInvoke.GetWindowThreadProcessId(hwnd, &pid);
+        if (!processNames.TryGetValue(pid, out var processName))
+        {
+            try { processName = Process.GetProcessById((int)pid).ProcessName; }
+            catch { processName = ""; }   // gone, or access denied (a protected process)
+            processNames[pid] = processName;
+        }
+
+        return new WindowProbe(
+            Hwnd: HwndValue(hwnd),
+            IsVisible: visible,
+            ExStyle: exStyle,
+            IsCloaked: cloaked,
+            Bounds: bounds,
+            Title: title,
+            ClassName: className,
+            IsMinimized: PInvoke.IsIconic(hwnd),
+            IsMaximized: PInvoke.IsZoomed(hwnd),
+            Pid: (int)pid,
+            ProcessName: processName);
     }
 
     public Task<bool> SwitchToAsync(string title, CancellationToken ct = default)
