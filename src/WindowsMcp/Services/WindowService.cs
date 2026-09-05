@@ -81,19 +81,18 @@ public sealed class WindowService : IWindowService
     {
         ct.ThrowIfCancellationRequested();
 
-        var monitors = new List<(HMONITOR Handle, int Order)>();
-        int index = 0;
+        var monitors = new List<HMONITOR>();
 
         PInvoke.EnumDisplayMonitors(default, null,
             (hMonitor, hdcMonitor, lprcMonitor, lParam) =>
             {
-                monitors.Add((hMonitor, index++));
+                monitors.Add(hMonitor);
                 return true;
             },
             default);
 
         var results = new List<MonitorInfo>();
-        foreach (var (handle, order) in monitors)
+        foreach (var handle in monitors)
         {
             var info = new MONITORINFO
             {
