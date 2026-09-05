@@ -156,4 +156,42 @@ public class ScreenshotServiceTests
         result.OriginalHeight.Should().Be(union.Height);
         result.Bytes.Take(4).Should().Equal(new byte[] { 0x89, 0x50, 0x4E, 0x47 }, "a real PNG came back");
     }
+
+    // ---- A-14 (R4): per-stage timings of the real capture pipeline ----------------------------
+    // The four stages are the four things CaptureAsync does, and the only way to see them is to
+    // run the real pipeline: a mocked IScreenshotService would report whatever the test wrote.
+
+    [Fact]
+    public async Task CaptureAsync_reports_its_four_stages_when_profiling_is_on()
+    {
+        var result = await new ScreenshotService().CaptureAsync(
+            new ScreenRegion(0, 0, 200, 100),
+            new CaptureOptions(ImageFormat.Png, MaxWidth: 100, MaxHeight: 0, IncludeCursor: true, Profile: true));
+
+        result.Stages.Should().NotBeNull();
+        result.Stages!.Select(x => x.Stage).Should().Equal(["capture", "cursor", "resize", "encode"],
+            "the pipeline's four steps, in the order they run");
+        result.Stages.Should().OnlyContain(x => x.Ms >= 0);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_reports_no_stages_when_profiling_is_off()
+    {
+        var result = await new ScreenshotService().CaptureAsync(
+            new ScreenRegion(0, 0, 200, 100), new CaptureOptions(ImageFormat.Png));
+
+        result.Stages.Should().BeNull("off is the default and an unprofiled result is unchanged");
+    }
+
+    [Fact]
+    public async Task CaptureAsync_reports_every_stage_even_when_the_step_did_nothing()
+    {
+        // No downscale (no caps) and no cursor: those stages still appear, at ~0 ms. A stage that
+        // vanishes when it is cheap makes two profiled runs impossible to compare.
+        var result = await new ScreenshotService().CaptureAsync(
+            new ScreenRegion(0, 0, 200, 100),
+            new CaptureOptions(ImageFormat.Png, MaxWidth: 0, MaxHeight: 0, IncludeCursor: false, Profile: true));
+
+        result.Stages!.Select(x => x.Stage).Should().Equal(["capture", "cursor", "resize", "encode"]);
+    }
 }

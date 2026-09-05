@@ -2,6 +2,7 @@ using System.Diagnostics;
 using FlaUI.Core.AutomationElements;
 using FlaUI.UIA3;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Moq;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
@@ -58,8 +59,9 @@ public class UIAutomationSnapshotArgumentTests
     }
 
     private static UIAutomationService NewService(
-        Mock<IInputService>? input = null, Mock<IWindowService>? windows = null, UiTreeOptions? options = null)
-        => new((input ?? CursorMock()).Object, (windows ?? WindowsMock()).Object, options);
+        Mock<IInputService>? input = null, Mock<IWindowService>? windows = null, UiTreeOptions? options = null,
+        ILogger<UIAutomationService>? log = null)
+        => new((input ?? CursorMock()).Object, (windows ?? WindowsMock()).Object, options, log);
 
     // ---- R3.1 validation, before any UIA work ------------------------------------------------
 
@@ -300,6 +302,81 @@ public class UIAutomationSnapshotArgumentTests
         var snap = await svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Desktop, MaxElements: 7));
 
         snap.ElementLimit.Should().Be(7, "the per-call cap wins over --max-tree-elements");
+    }
+
+    // ---- A-14 (R4): per-stage timings, on when --profile-snapshot is on -----------------------
+    // The header reads (cursor, monitors, window list) and the STA walk are the two halves of a
+    // snapshot's cost, and which of them is slow is the whole question profiling answers. Mocked
+    // collaborators make the numbers small, not meaningless: the NAMES, the ORDER and the
+    // relationship to CaptureMs are the contract, and all three are visible here.
+
+    [Fact]
+    public async Task SnapshotAsync_reports_the_header_and_walk_stages_when_profiling_is_on()
+    {
+        using var svc = NewService(options: new UiTreeOptions(500, Profile: true));
+
+        var snap = await svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Desktop));
+
+        snap.Stages.Should().NotBeNull("--profile-snapshot asks for exactly this");
+        snap.Stages!.Select(x => x.Stage).Should().Equal(["header", "walk"],
+            "the two stages, in the order they run");
+        snap.Stages.Should().OnlyContain(x => x.Ms >= 0, "a duration is never negative");
+        snap.Stages.Sum(x => x.Ms).Should().BeLessThanOrEqualTo(snap.CaptureMs + 5,
+            "the stages are parts of the whole call, so they cannot add up to more than it took " +
+            "(5 ms of slack for the stopwatch reads themselves)");
+    }
+
+    [Fact]
+    public async Task SnapshotAsync_reports_no_stages_when_profiling_is_off()
+    {
+        using var svc = NewService(options: new UiTreeOptions(500));
+
+        var snap = await svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Desktop));
+
+        snap.Stages.Should().BeNull("off is the default, and an unprofiled response is unchanged");
+        snap.CaptureMs.Should().BeGreaterThanOrEqualTo(0, "CaptureMs is reported either way, as it always was");
+    }
+
+    [Fact]
+    public async Task SnapshotAsync_profiling_changes_nothing_else_about_the_result()
+    {
+        using var profiled = NewService(options: new UiTreeOptions(42, Profile: true));
+
+        var snap = await profiled.SnapshotAsync(new SnapshotRequest(SnapshotScope.Desktop));
+
+        snap.ElementLimit.Should().Be(42);
+        snap.Cursor.Should().Be(new CursorPosition(2000, 10));
+        snap.CursorMonitorIndex.Should().Be(1);
+        snap.Interactive.Should().BeEmpty();
+        snap.Truncated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SnapshotAsync_logs_the_stage_timings_when_profiling_is_on()
+    {
+        // --profile-snapshot exists so an operator can see WHERE a slow snapshot went, on stderr,
+        // without reading the response. Computing the stages and not logging them would satisfy
+        // every other test in this section.
+        var log = new RecordingLogger<UIAutomationService>();
+        using var svc = NewService(options: new UiTreeOptions(500, Profile: true), log: log);
+
+        await svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Desktop));
+
+        var line = log.MessagesAt(LogLevel.Information).Should().ContainSingle(
+            "one line per profiled snapshot, at the level the stderr logger emits").Subject;
+        line.Should().Contain("header").And.Contain("walk").And.Contain("ms");
+    }
+
+    [Fact]
+    public async Task SnapshotAsync_logs_nothing_when_profiling_is_off()
+    {
+        var log = new RecordingLogger<UIAutomationService>();
+        using var svc = NewService(options: new UiTreeOptions(500), log: log);
+
+        await svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Desktop));
+
+        log.MessagesAt(LogLevel.Information).Should().BeEmpty(
+            "an unprofiled snapshot is silent, as it was before A-14");
     }
 }
 

@@ -460,4 +460,64 @@ public class SnapshotRendererTests
     [Fact]
     public void Render_says_nothing_about_truncation_when_the_walk_finished()
         => SnapshotRenderer.Render(TwoWindowSnapshot()).Should().NotContain("Truncated at");
+
+    // ---- A-14 (R4): the timing footer, only when the snapshot was profiled --------------------
+    // One line, last, so a model reading the element rows never has to skip past it, and an
+    // unprofiled snapshot's text is byte-identical to what it was before A-14.
+
+    private static readonly StageTiming[] HeaderAndWalk = [new("header", 12), new("walk", 130)];
+
+    [Fact]
+    public void Render_appends_the_timing_line_when_the_snapshot_was_profiled()
+        => SnapshotRenderer.Render(Result(captureMs: 142, stages: HeaderAndWalk))
+            .Split('\n').Last().Should().Be("Timing: header 12 ms, walk 130 ms (total 142 ms)");
+
+    [Fact]
+    public void Render_says_nothing_about_timing_when_the_snapshot_was_not_profiled()
+        => SnapshotRenderer.Render(TwoWindowSnapshot()).Should().NotContain("Timing:");
+
+    [Fact]
+    public void Render_timing_total_is_the_snapshots_own_elapsed_time_not_the_sum_of_the_stages()
+    {
+        // The stages do not have to add up to the whole call (nothing is measured between them),
+        // so the total is CaptureMs - the number the JSON form reports - not a re-derived sum.
+        SnapshotRenderer.Render(Result(captureMs: 999, stages: HeaderAndWalk))
+            .Split('\n').Last().Should().Be("Timing: header 12 ms, walk 130 ms (total 999 ms)");
+    }
+
+    [Fact]
+    public void Render_lists_the_stages_in_the_order_the_service_reported_them()
+    {
+        // Reported order is running order; re-sorting it would hide which stage came first.
+        SnapshotRenderer.Render(Result(captureMs: 142, stages: [new("walk", 130), new("header", 12)]))
+            .Split('\n').Last().Should().Be("Timing: walk 130 ms, header 12 ms (total 142 ms)");
+    }
+
+    [Fact]
+    public void Render_timing_line_handles_a_single_stage_and_a_zero_duration()
+        => SnapshotRenderer.Render(Result(captureMs: 0, stages: [new("header", 0)]))
+            .Split('\n').Last().Should().Be("Timing: header 0 ms (total 0 ms)");
+
+    [Fact]
+    public void Render_timing_line_survives_a_profiled_snapshot_that_reported_no_stages()
+    {
+        // Non-null but empty: profiling was on, so the line is printed; there is just nothing to
+        // list. Exact spacing is deliberately NOT pinned here - only that the line is well formed.
+        var last = SnapshotRenderer.Render(Result(captureMs: 12, stages: [])).Split('\n').Last();
+
+        last.Should().StartWith("Timing:").And.Contain("(total 12 ms)").And.NotContain(",");
+    }
+
+    [Fact]
+    public void Render_puts_the_timing_line_after_the_truncation_note()
+    {
+        // Order matters: the note is advice about the RESULT and belongs with it; the timing is
+        // diagnostics about the CALL and goes last.
+        var lines = SnapshotRenderer.Render(
+            TwoWindowSnapshot(truncated: true) with { CaptureMs = 142, Stages = HeaderAndWalk })
+            .Split('\n');
+
+        lines[^2].Should().Be(TruncationNote(500));
+        lines[^1].Should().Be("Timing: header 12 ms, walk 130 ms (total 142 ms)");
+    }
 }

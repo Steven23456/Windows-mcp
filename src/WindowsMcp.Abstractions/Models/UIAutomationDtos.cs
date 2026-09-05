@@ -90,7 +90,11 @@ public record SnapshotRequest(
 /// by <c>ServerOptions</c> and injected into the service — never read from the environment inside
 /// a service. A per-call <c>max_elements</c> overrides it.
 /// </summary>
-public record UiTreeOptions(int MaxElements)
+/// <param name="Profile">
+/// A-14: report per-stage timings on the snapshot (<c>--profile-snapshot</c>). Off by default, so
+/// an unprofiled response is byte-identical to a pre-A-14 one.
+/// </param>
+public record UiTreeOptions(int MaxElements, bool Profile = false)
 {
     public static UiTreeOptions Default { get; } = new(500);
 }
@@ -142,4 +146,5 @@ public record SnapshotResult(
     bool Truncated,
     int ElementLimit,
     int ElementCount,
-    long CaptureMs);
+    long CaptureMs,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StageTiming[]? Stages = null);

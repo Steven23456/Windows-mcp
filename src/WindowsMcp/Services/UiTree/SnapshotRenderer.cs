@@ -49,6 +49,13 @@ internal static class SnapshotRenderer
         if (r.Truncated)
             lines.Add(ElementBudget.NoteFor(r.ElementLimit));
 
+        // A-14: only when the server was started with --profile-snapshot (Stages is null otherwise).
+        if (r.Stages is { } stages)
+        {
+            var parts = string.Join(", ", stages.Select(s => $"{s.Stage} {s.Ms} ms"));
+            lines.Add(parts.Length == 0 ? $"Timing: (total {r.CaptureMs} ms)" : $"Timing: {parts} (total {r.CaptureMs} ms)");
+        }
+
         return string.Join("\n", lines);
     }
 

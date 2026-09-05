@@ -2,6 +2,18 @@
 
 ### Added
 
+- **A post-capture flash and per-stage profiling** (parity A-14). After every `screenshot` an
+  orange glow is drawn around the captured area for ~3.5 s — a layered, click-through, top-most,
+  non-activating tool window on its own thread (`FlashOverlay`, painted by a pure `FlashGlow`),
+  hidden again before the next capture so it is never in a picture, invisible to `window list`
+  and `snapshot`, and a silent no-op wherever there is no desktop. On by default under both
+  transports; `--flash off` / `WINDOWSMCP_FLASH=off` turns it off. Metadata carries `flash: true`
+  when the glow was actually shown. `--profile-snapshot on` / `WINDOWSMCP_PROFILE_SNAPSHOT=on`
+  adds per-stage timings: `snapshot` reports `header`/`walk` (a `Timing:` line in the text form,
+  `Stages` in JSON) and `screenshot` reports `stages` (`resolve`, `cursor`, `snapshot`, `capture`,
+  `resize`, `encode`) — both also logged to stderr at Information. Off, the responses are
+  byte-identical to before. New `IFlashOverlay`, `StageTiming`; `ScreenshotOptions` and
+  `UiTreeOptions` carry the switches. Design note: `docs/design/A-14-flash-and-profiling.md`.
 - **`screenshot(annotate:true)` — boxes, label chips and a captioned grid on the capture** (parity
   A-6). The same call walks the desktop (one `snapshot`), keeps the interactive elements inside
   the captured rect, draws a 2 px coloured box with a label chip around each — the labels are the

@@ -319,6 +319,10 @@ without a desktop:
 - **RED seed.** Stage timings present and non-negative; flash window class not present in the
   A-1 window list (it is a tool window — the filter test covers it); a capture taken during the
   flash does not contain the glow (`Integration`, pixel sample at the border).
+- **Shipped as** ([note](A-14-flash-and-profiling.md)): `--flash on|off` / `WINDOWSMCP_FLASH` and
+  `--profile-snapshot on|off` / `WINDOWSMCP_PROFILE_SNAPSHOT` (the parser has no valueless flags,
+  so no `--no-flash`); timings only when profiling is on, not always; logged at Information, not
+  Debug (the stderr logger's minimum); `flash` metadata reports the outcome.
 
 #### A-12 — Virtual desktops, phase 1 only  `P3 · L (phase 1: S) · ~1 day`
 

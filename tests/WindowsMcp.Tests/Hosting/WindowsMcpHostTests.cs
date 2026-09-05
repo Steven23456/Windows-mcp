@@ -1,8 +1,10 @@
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Hosting;
+using WindowsMcp.Services;
 
 namespace WindowsMcp.Tests.Hosting;
 
@@ -113,5 +115,77 @@ public class WindowsMcpHostTests
 
         provider.GetRequiredService<UiTreeOptions>()
             .Should().BeSameAs(provider.GetRequiredService<UiTreeOptions>());
+    }
+
+    // ---- A-14 (R1): the flash switch, the profiling switch, and the overlay singleton ---------
+    // Both switches ride the SAME two options records the earlier items introduced (roadmap C7),
+    // so nothing new crosses into the tool layer except the overlay itself. The overlay is
+    // registered unconditionally: the TOOL gates on ScreenshotOptions.Flash, so a server started
+    // with --flash off still resolves ScreenTools.
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_flash_switch_from_the_server_options()
+    {
+        using var on = Build(ServerOptions.Stdio);
+        using var off = Build(ServerOptions.Stdio with { Flash = false });
+
+        on.GetRequiredService<ScreenshotOptions>().Flash.Should().BeTrue("the flash is on by default");
+        off.GetRequiredService<ScreenshotOptions>().Flash.Should().BeFalse("--flash off must reach the tool layer");
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_profiling_switch_on_both_options_records()
+    {
+        using var provider = Build(ServerOptions.Stdio with { ProfileSnapshot = true });
+
+        provider.GetRequiredService<ScreenshotOptions>().Profile
+            .Should().BeTrue("--profile-snapshot profiles the capture stages too, not only the walk");
+        provider.GetRequiredService<UiTreeOptions>().Profile
+            .Should().BeTrue("--profile-snapshot profiles the snapshot walk");
+    }
+
+    [Fact]
+    public void AddWindowsMcp_leaves_profiling_off_when_none_was_configured()
+    {
+        using var provider = Build(ServerOptions.Stdio);
+
+        provider.GetRequiredService<ScreenshotOptions>().Profile.Should().BeFalse();
+        provider.GetRequiredService<UiTreeOptions>().Profile.Should().BeFalse();
+    }
+
+    [Fact]
+    public void ScreenshotOptions_Default_flashes_and_does_not_profile()
+    {
+        ScreenshotOptions.Default.Flash.Should().BeTrue();
+        ScreenshotOptions.Default.Profile.Should().BeFalse();
+    }
+
+    [Fact]
+    public void UiTreeOptions_Default_does_not_profile()
+    {
+        UiTreeOptions.Default.MaxElements.Should().Be(500);
+        UiTreeOptions.Default.Profile.Should().BeFalse();
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_flash_overlay_as_a_singleton()
+    {
+        using var provider = Build(ServerOptions.Stdio);
+
+        var overlay = provider.GetRequiredService<IFlashOverlay>();
+        overlay.Should().BeOfType<FlashOverlay>();
+        overlay.Should().BeSameAs(provider.GetRequiredService<IFlashOverlay>(),
+            "one overlay per process: two would fight over the same screen area");
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_flash_overlay_even_when_the_flash_is_off()
+    {
+        // The tool gates on ScreenshotOptions.Flash; the registration is unconditional so that
+        // ScreenTools still resolves - a missing registration would fail every screenshot with a
+        // DI error instead of quietly not flashing.
+        using var provider = Build(ServerOptions.Stdio with { Flash = false });
+
+        provider.GetService<IFlashOverlay>().Should().NotBeNull();
     }
 }

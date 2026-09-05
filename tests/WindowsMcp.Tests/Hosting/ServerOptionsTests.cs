@@ -76,9 +76,10 @@ public class ServerOptionsTests
     public void Usage_documents_every_option()
     {
         foreach (var opt in new[] { "--transport", "--port", "--bind", "--cert-thumbprint", "--api-key", "--help",
-                                    "--screenshot-scale", "--max-tree-elements",
+                                    "--screenshot-scale", "--max-tree-elements", "--flash", "--profile-snapshot",
                                     "WINDOWSMCP_API_KEY", "WINDOWSMCP_TRANSPORT", "WINDOWSMCP_SCREENSHOT_SCALE",
-                                    "WINDOWSMCP_MAX_TREE_ELEMENTS", "/mcp" })
+                                    "WINDOWSMCP_MAX_TREE_ELEMENTS", "WINDOWSMCP_FLASH", "WINDOWSMCP_PROFILE_SNAPSHOT",
+                                    "/mcp" })
             ServerOptions.Usage.Should().Contain(opt);
     }
 
@@ -472,5 +473,198 @@ public class ServerOptionsTests
         var act = () => Parse("--max-tree-elements", "100", "--max-tree-elements", "200");
 
         act.Should().Throw<OptionsException>().WithMessage("*more than once*");
+    }
+
+    // ---- A-14 (R1) - --flash / WINDOWSMCP_FLASH and --profile-snapshot / WINDOWSMCP_PROFILE_SNAPSHOT ----
+    // Two on/off switches that configure a tool rather than a listener, so - like --screenshot-scale
+    // and --max-tree-elements - they are parsed BEFORE the stdio early return and apply to both
+    // transports. The flash matters MORE under HTTP, not less (roadmap section 7): the glow is the
+    // only signal a person at the target machine gets that a remote agent just captured their screen.
+
+    /// <summary>Every spelling of "true" and "false" this parser accepts, in both cases.</summary>
+    public static TheoryData<string, bool> BooleanValues => new()
+    {
+        { "on", true }, { "ON", true }, { "On", true },
+        { "true", true }, { "TRUE", true }, { "True", true },
+        { "1", true },
+        { "off", false }, { "OFF", false }, { "Off", false },
+        { "false", false }, { "FALSE", false }, { "False", false },
+        { "0", false },
+    };
+
+    [Fact]
+    public void Flash_is_on_by_default_under_both_transports()
+    {
+        Parse().Flash.Should().BeTrue("the courtesy glow is opt-OUT, not opt-in");
+        Parse("--transport", "http").Flash.Should().BeTrue("it matters more under HTTP, not less");
+        ServerOptions.Stdio.Flash.Should().BeTrue("the no-argument configuration carries the default too");
+    }
+
+    [Fact]
+    public void Profile_snapshot_is_off_by_default_under_both_transports()
+    {
+        Parse().ProfileSnapshot.Should().BeFalse();
+        Parse("--transport", "http").ProfileSnapshot.Should().BeFalse();
+        ServerOptions.Stdio.ProfileSnapshot.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Flash_applies_to_stdio_too_it_is_not_an_http_only_option()
+    {
+        var fromFlag = Parse("--flash", "off");
+
+        fromFlag.Transport.Should().Be(TransportKind.Stdio);
+        fromFlag.Flash.Should().BeFalse();
+
+        ServerOptions.Parse([], Env(("WINDOWSMCP_FLASH", "off"))).Flash.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Profile_snapshot_applies_to_stdio_too_it_is_not_an_http_only_option()
+    {
+        var fromFlag = Parse("--profile-snapshot", "on");
+
+        fromFlag.Transport.Should().Be(TransportKind.Stdio);
+        fromFlag.ProfileSnapshot.Should().BeTrue();
+
+        ServerOptions.Parse([], Env(("WINDOWSMCP_PROFILE_SNAPSHOT", "on"))).ProfileSnapshot.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Flash_and_profile_snapshot_come_from_the_environment_under_http_as_well()
+    {
+        var o = ServerOptions.Parse(["--transport", "http"],
+            Env(("WINDOWSMCP_FLASH", "off"), ("WINDOWSMCP_PROFILE_SNAPSHOT", "on")));
+
+        o.Transport.Should().Be(TransportKind.Http);
+        o.Flash.Should().BeFalse();
+        o.ProfileSnapshot.Should().BeTrue();
+    }
+
+    [Theory]
+    [MemberData(nameof(BooleanValues))]
+    public void Flash_accepts_on_off_true_false_one_zero_in_any_case(string raw, bool expected)
+    {
+        Parse("--flash", raw).Flash.Should().Be(expected);
+        Parse("--flash=" + raw).Flash.Should().Be(expected);
+        ServerOptions.Parse([], Env(("WINDOWSMCP_FLASH", raw))).Flash.Should().Be(expected);
+    }
+
+    [Theory]
+    [MemberData(nameof(BooleanValues))]
+    public void Profile_snapshot_accepts_on_off_true_false_one_zero_in_any_case(string raw, bool expected)
+    {
+        Parse("--profile-snapshot", raw).ProfileSnapshot.Should().Be(expected);
+        Parse("--profile-snapshot=" + raw).ProfileSnapshot.Should().Be(expected);
+        ServerOptions.Parse([], Env(("WINDOWSMCP_PROFILE_SNAPSHOT", raw))).ProfileSnapshot.Should().Be(expected);
+    }
+
+    [Fact]
+    public void Flash_and_profile_snapshot_on_the_command_line_beat_the_environment()
+    {
+        var env = Env(("WINDOWSMCP_FLASH", "on"), ("WINDOWSMCP_PROFILE_SNAPSHOT", "off"));
+
+        var o = ServerOptions.Parse(["--flash", "off", "--profile-snapshot", "on"], env);
+
+        o.Flash.Should().BeFalse();
+        o.ProfileSnapshot.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Blank_flash_and_profile_snapshot_in_the_environment_count_as_unset()
+    {
+        ServerOptions.Parse([], Env(("WINDOWSMCP_FLASH", "   "))).Flash.Should().BeTrue();
+        ServerOptions.Parse([], Env(("WINDOWSMCP_FLASH", ""))).Flash.Should().BeTrue();
+        ServerOptions.Parse([], Env(("WINDOWSMCP_PROFILE_SNAPSHOT", "   "))).ProfileSnapshot.Should().BeFalse();
+        ServerOptions.Parse([], Env(("WINDOWSMCP_PROFILE_SNAPSHOT", ""))).ProfileSnapshot.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("yes")]          // close enough to be a plausible typo, and still not accepted
+    [InlineData("no")]
+    [InlineData("enabled")]
+    [InlineData("2")]
+    [InlineData("-1")]
+    [InlineData("o n")]
+    [InlineData(" on")]          // no surrounding whitespace, like --max-tree-elements
+    [InlineData("on ")]
+    public void Invalid_flash_values_are_rejected_from_the_command_line(string raw)
+    {
+        var act = () => Parse("--flash", raw);
+
+        var message = act.Should().Throw<OptionsException>().Which.Message;
+        message.Should().Contain("flash", "the message names the option");
+        message.Should().Contain("on").And.Contain("off", "the message names the accepted values");
+    }
+
+    [Theory]
+    [InlineData("yes")]
+    [InlineData("no")]
+    [InlineData("2")]
+    public void Invalid_profile_snapshot_values_are_rejected_from_the_command_line(string raw)
+    {
+        var act = () => Parse("--profile-snapshot", raw);
+
+        var message = act.Should().Throw<OptionsException>().Which.Message;
+        message.Should().Contain("profile-snapshot", "the message names the option");
+        message.Should().Contain("on").And.Contain("off", "the message names the accepted values");
+    }
+
+    [Theory]
+    [InlineData("WINDOWSMCP_FLASH")]
+    [InlineData("WINDOWSMCP_PROFILE_SNAPSHOT")]
+    public void Invalid_switch_values_are_rejected_from_the_environment_too(string variable)
+    {
+        var act = () => ServerOptions.Parse([], Env((variable, "yes")));
+
+        act.Should().Throw<OptionsException>().Which.Message.Should().Contain("on");
+    }
+
+    [Theory]
+    [InlineData("--flash")]
+    [InlineData("--profile-snapshot")]
+    public void Switch_flags_without_a_value_are_an_error(string flag)
+    {
+        // This parser has no valueless flags (--help aside): every option takes a value, which is
+        // why the roadmap's --no-flash ships as '--flash off'. A bare '--flash' must therefore say
+        // it needs a value rather than being read as "turn it on" or "turn it off".
+        var missing = () => Parse(flag);
+        var empty = () => Parse(flag + "=");
+
+        missing.Should().Throw<OptionsException>().WithMessage("*requires a value*");
+        empty.Should().Throw<OptionsException>().WithMessage("*requires a value*");
+    }
+
+    [Theory]
+    [InlineData("--flash")]
+    [InlineData("--profile-snapshot")]
+    public void Repeated_switches_are_an_error(string flag)
+    {
+        var act = () => Parse(flag, "on", flag, "off");
+
+        act.Should().Throw<OptionsException>().WithMessage("*more than once*");
+    }
+
+    [Theory]
+    [InlineData("--no-flash")]
+    [InlineData("--disable-flash")]
+    [InlineData("--profile")]
+    public void The_valueless_spellings_the_roadmap_sketched_are_unknown_options(string flag)
+    {
+        // The roadmap sketch said '--no-flash'; the parser has no valueless flags, so the shipped
+        // spelling is '--flash off'. Pinned so the sketch cannot come back as a silent alias: an
+        // operator who types the old name is told, not ignored.
+        var act = () => Parse(flag, "x");
+
+        act.Should().Throw<OptionsException>().WithMessage($"*Unknown option '{flag}'*");
+    }
+
+    [Fact]
+    public void The_disable_flash_environment_variable_the_roadmap_sketched_has_no_effect()
+    {
+        // WINDOWSMCP_DISABLE_FLASH is not read: WINDOWSMCP_FLASH=off is the one switch. An unknown
+        // WINDOWSMCP_* variable is ignored rather than rejected, as every other one is.
+        ServerOptions.Parse([], Env(("WINDOWSMCP_DISABLE_FLASH", "1"))).Flash
+            .Should().BeTrue("the only switch is WINDOWSMCP_FLASH / --flash");
     }
 }

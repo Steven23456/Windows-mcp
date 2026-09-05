@@ -313,6 +313,52 @@ public class UIAutomationToolsTests
             output.Should().StartWith("Cursor:", "the text form starts with the renderer's header");
     }
 
+    // ---- A-14 (R4): a profiled snapshot's timings reach the caller in BOTH formats -----------
+    // SnapshotRendererTests pins the text line and StageTimingDtosTests the JSON shape; both call
+    // their target directly. This is the tool: it must not strip, re-order or re-serialise the
+    // stages on the way out - json is the DTO, text is the renderer, and there is no third shape.
+
+    [Fact]
+    public async Task Snapshot_json_carries_the_stage_timings_the_service_reported()
+    {
+        var profiled = PopulatedResult() with { CaptureMs = 142, Stages = [new("header", 12), new("walk", 130)] };
+        var tools = new UIAutomationTools(SnapshotService(profiled).Object);
+
+        var output = await tools.Snapshot(format: "json");
+
+        using var doc = JsonDocument.Parse(output);
+        var stages = doc.RootElement.GetProperty("Stages");
+        stages.GetArrayLength().Should().Be(2);
+        stages[0].GetProperty("Stage").GetString().Should().Be("header");
+        stages[1].GetProperty("Ms").GetInt64().Should().Be(130);
+        doc.RootElement.GetProperty("CaptureMs").GetInt64().Should().Be(142);
+    }
+
+    [Fact]
+    public async Task Snapshot_text_ends_with_the_timing_line_when_the_snapshot_was_profiled()
+    {
+        var profiled = PopulatedResult() with { CaptureMs = 142, Stages = [new("header", 12), new("walk", 130)] };
+        var tools = new UIAutomationTools(SnapshotService(profiled).Object);
+
+        var output = await tools.Snapshot(format: "text");
+
+        output.Split('\n').Last().Should().Be("Timing: header 12 ms, walk 130 ms (total 142 ms)");
+    }
+
+    [Theory]
+    [InlineData("json")]
+    [InlineData("text")]
+    public async Task Snapshot_says_nothing_about_timings_when_profiling_is_off(string format)
+    {
+        // The default server: neither output form mentions a stage, so no existing caller's
+        // parsing changes because A-14 shipped.
+        var tools = new UIAutomationTools(SnapshotService(PopulatedResult()).Object);
+
+        var output = await tools.Snapshot(format: format);
+
+        output.Should().NotContain("Stages").And.NotContain("Timing:");
+    }
+
     [Fact]
     public async Task Snapshot_rejects_an_unknown_format_naming_both_choices()
     {

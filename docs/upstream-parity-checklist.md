@@ -78,7 +78,7 @@ function names are the stable anchor.
 | A-11 | Cursor position in responses + drawn on capture | P2 | S | — | ☑ |
 | A-12 | Virtual desktops (report; optional manage) | P3 | L | A-1 | ☐ |
 | A-13 | Unicode hygiene (PUA strip, surrogate repair) | P2 | S | — | ☑ |
-| A-14 | Post-capture flash overlay + snapshot profiling | P3 | M | — | ☐ |
+| A-14 | Post-capture flash overlay + snapshot profiling | P3 | M | — | ☑ |
 | B-1 | `type`: target, clear, caret, press_enter, paste path | P1 | M | D-2 | ☐ |
 | B-2 | `drag`: duration / intermediate motion / from-cursor | P2 | S | D-3 | ☐ |
 | B-3 | `scroll` at current cursor or element | P2 | S | — | ☐ |
@@ -778,7 +778,7 @@ titles: strip PUA, replace lone surrogates with U+FFFD, trim control chars.
 **Done when.** A window title containing an emoji and a VS Code sidebar both serialise cleanly.
 
 ### A-14 — Post-capture flash overlay and snapshot profiling  `P3 · M`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/A-14-flash-and-profiling.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `desktop/flash_overlay.py`: a layered, click-through, always-on-top window draws an
 orange glow around the captured area for ~3.5 s **after** capture (torn down before the next
@@ -786,7 +786,9 @@ capture so it never appears in an image); `WINDOWS_MCP_DISABLE_FLASH` turns it o
 `WINDOWS_MCP_PROFILE_SNAPSHOT` logs per-stage timings (context, tree, region filter, capture,
 resize, build).
 
-**Ours.** Neither.
+**Ours (before A-14).** Neither. Now `--flash on|off` / `WINDOWSMCP_FLASH` (the parser has no
+valueless flags, so the sketch's `WINDOWSMCP_DISABLE_FLASH` shipped as `--flash off`) and
+`--profile-snapshot on|off` / `WINDOWSMCP_PROFILE_SNAPSHOT` — see the design note.
 
 **Sketch.** Flash: `WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOPMOST` window with
 `UpdateLayeredWindow` on a dedicated thread; env `WINDOWSMCP_DISABLE_FLASH`. Profiling:

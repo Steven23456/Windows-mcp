@@ -661,6 +661,77 @@ public class HttpTransportTests
         }
     }
 
+    // ---- A-14 ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A-14 (R5): the flash reaches the tool through DI. <c>ScreenToolsTests</c> constructs the
+    /// tool by hand and would stay green if <c>IFlashOverlay</c> were never registered — the whole
+    /// screenshot surface would then fail to resolve at run time. Every collaborator the tool needs
+    /// is mocked here, so this is the DI edge and nothing else.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_shows_the_flash_overlay_resolved_from_the_container()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        var screenshotService = new Mock<IScreenshotService>();
+        screenshotService
+            .Setup(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ScreenshotResult(png, 1920, 1080, ImageFormat.Png, 1920, 1080, 1.0));
+        var windowService = new Mock<IWindowService>();
+        windowService.Setup(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new MonitorInfo(0, "Monitor0", 0, 0, 1920, 1080, true)]);
+        var inputService = new Mock<IInputService>();
+        inputService.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CursorPosition(100, 100));
+        var uia = new Mock<IUIAutomationService>();
+        var flash = new Mock<IFlashOverlay>();
+
+        await using var server = await Harness.StartAsync(configureServices: services =>
+        {
+            services.AddSingleton(screenshotService.Object);
+            services.AddSingleton(windowService.Object);
+            services.AddSingleton(inputService.Object);
+            services.AddSingleton(uia.Object);
+            services.AddSingleton(flash.Object);
+        });
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var screenshot = ScreenshotToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(screenshot, new Dictionary<string, object?> { ["format"] = "png" });
+
+        result.IsError.Should().NotBe(true);
+        flash.Verify(f => f.Hide(), Times.Once, "the previous glow comes down before the shutter");
+        flash.Verify(f => f.Show(new ScreenRegion(0, 0, 1920, 1080), TimeSpan.FromSeconds(3.5)), Times.Once,
+            "the overlay the container handed the tool is the one that flashes");
+    }
+
+    /// <summary>
+    /// A-14 adds no tool arguments: the flash and the profiling are process options
+    /// (<c>--flash</c>, <c>--profile-snapshot</c>, roadmap C7), not per-call parameters. The schema
+    /// is the whole spec the model reads, so pinning the exact property set is what stops a knob
+    /// from leaking into it.
+    /// </summary>
+    [Fact]
+    public async Task Screenshot_and_snapshot_schemas_gained_no_parameters_in_A14()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        var screenshot = tools.Single(t => t.Name == ScreenshotToolName(tools));
+        screenshot.ProtocolTool.InputSchema.GetProperty("properties").EnumerateObject()
+            .Select(p => p.Name).Should().BeEquivalentTo(
+            [
+                "region", "display", "format", "output", "max_width", "max_height",
+                "scale", "quality", "include_cursor", "annotate", "grid_columns", "grid_rows",
+            ], "no flash or profiling argument belongs on the tool");
+
+        var snapshot = tools.Single(t => t.Name == SnapshotToolName(tools));
+        snapshot.ProtocolTool.InputSchema.GetProperty("properties").EnumerateObject()
+            .Select(p => p.Name).Should().BeEquivalentTo(
+            ["scope", "window", "include_tree", "max_elements", "format", "use_dom"]);
+    }
+
     /// <summary>
     /// The seam itself: a service registered through <c>configureServices</c> must be the one the
     /// tools resolve. Without this, the test above could pass for the wrong reason on a machine

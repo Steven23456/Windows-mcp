@@ -270,6 +270,7 @@ public sealed class UIAutomationService : IUIAutomationService
 
         var sw = Stopwatch.StartNew();
         var limit = request.MaxElements > 0 ? request.MaxElements : _treeOptions.MaxElements;
+        long headerMs = 0;
 
         // Header — each collaborator once; the list is reused for the roots.
         var cursor = await _input.GetCursorPositionAsync(ct);
@@ -277,6 +278,7 @@ public sealed class UIAutomationService : IUIAutomationService
         var windows = await _windows.ListAsync(true, false, ct);
         var active = WindowFilter.ActiveOf(windows);
         var cursorMonitor = CursorMath.MonitorIndexOf(cursor.X, cursor.Y, monitors);
+        headerMs = sw.ElapsedMilliseconds;
 
         var targets = request.Scope switch
         {
@@ -349,6 +351,14 @@ public sealed class UIAutomationService : IUIAutomationService
                     Count: budget.Count, budget.Truncated);
         }, ct);
 
+        StageTiming[]? stages = null;
+        if (_treeOptions.Profile)
+        {
+            stages = [new StageTiming("header", headerMs), new StageTiming("walk", Math.Max(0, sw.ElapsedMilliseconds - headerMs))];
+            _log.LogInformation("snapshot: header {HeaderMs} ms, walk {WalkMs} ms, {Count} elements ({Interactive} interactive)",
+                stages[0].Ms, stages[1].Ms, walked.Count, walked.Interactive.Length);
+        }
+
         return new SnapshotResult(
             Windows: windows,
             ActiveWindow: active,
@@ -360,7 +370,8 @@ public sealed class UIAutomationService : IUIAutomationService
             Truncated: walked.Truncated,
             ElementLimit: limit,
             ElementCount: walked.Count,
-            CaptureMs: sw.ElapsedMilliseconds);
+            CaptureMs: sw.ElapsedMilliseconds,
+            Stages: stages);
     }
 
     /// <summary>scope=window against the inventory: exact title first, then substring, case-insensitive; none → name what is open.</summary>

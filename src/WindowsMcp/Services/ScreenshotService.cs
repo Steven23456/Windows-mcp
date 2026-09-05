@@ -1,5 +1,8 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using SkiaSharp;
 using Windows.Win32;
 using Windows.Win32.Graphics.Gdi;
@@ -12,6 +15,12 @@ namespace WindowsMcp.Services;
 
 public sealed class ScreenshotService : IScreenshotService
 {
+    private readonly ILogger _log;
+
+    /// <param name="log">Optional so tests can construct the service directly; stage timings are logged here when profiling is on (A-14).</param>
+    public ScreenshotService(ILogger<ScreenshotService>? log = null)
+        => _log = log ?? (ILogger)NullLogger<ScreenshotService>.Instance;
+
     /// <summary>
     /// capture → cursor overlay (A-11, on the full-resolution bitmap) → <see cref="ScaleMath.Fit"/>
     /// → <see cref="Downscale"/> (only when the size changes) → <see cref="Encode"/> (A-9). The GDI
@@ -24,6 +33,8 @@ public sealed class ScreenshotService : IScreenshotService
         ct.ThrowIfCancellationRequested();
 
         var o = options ?? new CaptureOptions();
+        var sw = o.Profile ? Stopwatch.StartNew() : null;
+        long captureMs = 0, cursorMs = 0, resizeMs = 0;
 
         int screenW = PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CXSCREEN);
         int screenH = PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CYSCREEN);
@@ -34,6 +45,7 @@ public sealed class ScreenshotService : IScreenshotService
             g.CopyFromScreen(r.X, r.Y, 0, 0, new Size(r.Width, r.Height));
 
         ct.ThrowIfCancellationRequested();
+        if (sw is not null) captureMs = sw.ElapsedMilliseconds;
 
         // The caller's own read wins (the tool reports that same point in the metadata, so the
         // picture and the numbers cannot disagree); a live read is the fallback for direct callers.
@@ -44,6 +56,7 @@ public sealed class ScreenshotService : IScreenshotService
             if (at is null && PInvoke.GetCursorPos(out var live)) at = new CursorPosition(live.X, live.Y);
             if (at is not null) cursorDrawn = DrawCursor(bmp, r, at, TryDrawCursorIcon);
         }
+        if (sw is not null) cursorMs = sw.ElapsedMilliseconds - captureMs;
 
         // Zero-copy: wrap the locked GDI pixel buffer in an SKBitmap via
         // InstallPixels (stride-aware; avoids assumption that Stride == Width*4).
@@ -66,9 +79,11 @@ public sealed class ScreenshotService : IScreenshotService
             // output size), mapped through the same coordinate scale the metadata reports.
             byte[] bytes;
             int drawn;
+            long beforeResize = sw?.ElapsedMilliseconds ?? 0;
             if (width != bmp.Width || height != bmp.Height)
             {
                 using var scaled = Downscale(skBmp, width, height);
+                if (sw is not null) resizeMs = sw.ElapsedMilliseconds - beforeResize;
                 (bytes, drawn) = EncodeAnnotated(scaled, o.Format, o.Quality, o.Annotations, r, coordinateScale, o.Grid);
             }
             else
@@ -76,8 +91,17 @@ public sealed class ScreenshotService : IScreenshotService
                 (bytes, drawn) = EncodeAnnotated(skBmp, o.Format, o.Quality, o.Annotations, r, coordinateScale, o.Grid);
             }
 
+            StageTiming[]? stages = null;
+            if (sw is not null)
+            {
+                long encodeMs = sw.ElapsedMilliseconds - beforeResize - resizeMs;
+                stages = [new("capture", captureMs), new("cursor", cursorMs), new("resize", resizeMs), new("encode", encodeMs)];
+                _log.LogInformation("screenshot: capture {CaptureMs} ms, cursor {CursorMs} ms, resize {ResizeMs} ms, encode {EncodeMs} ms ({W}x{H} -> {OutW}x{OutH})",
+                    captureMs, cursorMs, resizeMs, encodeMs, bmp.Width, bmp.Height, width, height);
+            }
+
             return Task.FromResult(new ScreenshotResult(
-                bytes, width, height, o.Format, bmp.Width, bmp.Height, coordinateScale, cursorDrawn, drawn));
+                bytes, width, height, o.Format, bmp.Width, bmp.Height, coordinateScale, cursorDrawn, drawn, stages));
         }
         finally
         {

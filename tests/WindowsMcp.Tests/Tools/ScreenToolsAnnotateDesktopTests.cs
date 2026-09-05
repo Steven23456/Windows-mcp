@@ -33,10 +33,13 @@ public class ScreenToolsAnnotateDesktopTests : IClassFixture<NotepadFixture>
         _np.BringToForeground();
     }
 
-    /// <summary>The real graph — only OCR is mocked, because nothing here calls it.</summary>
+    /// <summary>
+    /// The real graph — only OCR and the A-14 flash are mocked: nothing here calls OCR, and a real
+    /// glow would paint on the desktop these tests are capturing for reasons unrelated to A-6.
+    /// </summary>
     private static ScreenTools RealTools(UIAutomationService uia) =>
         new(new ScreenshotService(), new Mock<IOcrService>().Object,
-            new WindowService(), new InputService(), uia);
+            new WindowService(), new InputService(), uia, new Mock<IFlashOverlay>().Object);
 
     private static UIAutomationService NewUia() => new(new InputService(), new WindowService());
 

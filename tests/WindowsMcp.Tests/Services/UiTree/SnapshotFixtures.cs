@@ -74,7 +74,8 @@ internal static class SnapshotFixtures
         bool truncated = false,
         int elementLimit = 500,
         int elementCount = 57,
-        long captureMs = 12)
+        long captureMs = 12,
+        StageTiming[]? stages = null)
         => new(windows ?? [], active, cursor ?? new CursorPosition(612, 388), cursorMonitorIndex,
-            interactive ?? [], scrollable ?? [], tree, truncated, elementLimit, elementCount, captureMs);
+            interactive ?? [], scrollable ?? [], tree, truncated, elementLimit, elementCount, captureMs, stages);
 }
