@@ -3,7 +3,7 @@
 **Baseline:** 2026-09-04
 **Upstream:** [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) `main` = **v0.8.5**
 (released 2026-08-01; Python ≥ 3.14, FastMCP 3, 20 tools).
-**Ours:** `main` @ `8cb40b6` + the phase-2/3/4/5 branches, 65 tools, plugin `0.7.3`, `CHANGELOG.md
+**Ours:** `main` @ `8cb40b6` + the phase-2/3/4/5 branches, 68 tools, plugin `0.7.3`, `CHANGELOG.md
 [Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1,
 phase 3's A-2/A-3/A-4, phase 4's A-6 and phase 5's A-14, A-12 (phase 1), A-10 and A-5 (phase 1).
 SDK `ModelContextProtocol` 2.2.0.
@@ -87,8 +87,8 @@ function names are the stable anchor.
 | B-3 | `scroll` at current cursor or element | P2 | S | [B-3](design/B-3-scroll.md) | ☑ |
 | B-4 | `click` by element id; `clicks=0` hover | P2 | S | D-2 · [B-4](design/B-4-click-by-element.md) | ☑ |
 | B-5 | Plain `wait` tool | P1 | S | [B-5](design/B-5-wait.md) | ☑ |
-| B-6 | `wait_for` conditions + window filter | P2 | M | A-1, A-2 | ☐ |
-| B-7 | `multi_select` / `multi_edit` batch tools | P2 | S–M | B-1 | ☐ |
+| B-6 | `wait_for` conditions + window filter | P2 | M | A-1, A-2 · [B-6](design/B-6-wait-for-conditions.md) | ☑ |
+| B-7 | `multi_select` / `multi_edit` batch tools | P2 | S–M | B-1 · [B-7](design/B-7-batch-tools.md) | ☑ |
 | B-8 | Launch by Start Menu name (fuzzy) + wait for window | P1 | M | A-1 · [B-8](design/B-8-launch-catalog.md) | ☑ |
 | B-9 | Window resize / move | P2 | S | [B-9](design/B-9-window-bounds.md) | ☑ |
 | B-10 | Fuzzy window match + robust bring-to-foreground | P1 | M | A-1 · [B-10](design/B-10-window-matching.md) | ☑ |
@@ -100,7 +100,7 @@ function names are the stable anchor.
 | C-4 | Notification `app_id` (AUMID) | P3 | S | — | ☐ |
 | C-5 | `scrape`: DOM source, query, MCP sampling summary | P2 | M | A-5 (DOM part) | ☐ |
 | C-6 | `powershell`: per-call timeout; env rebuild from registry | P2 | S–M | — | ☐ |
-| C-7 | Tool annotations on all 65 tools | P2 | S | — | ☐ |
+| C-7 | Tool annotations on all 68 tools | P2 | S | — | ☐ |
 | S-1 | Tool allow/deny lists (`--tools`, `--exclude-tools`) | P2 | S | — | ☐ |
 | S-2 | IP allowlist (CIDR v4/v6) | P2 | S | S-8 | ☐ |
 | S-3 | CORS origins | P3 | S | — | ☐ |
@@ -112,10 +112,10 @@ function names are the stable anchor.
 | S-9 | Claude Desktop Extension (`.mcpb`) + registry `server.json` | P3 | M | — | ☐ |
 | S-10 | Per-tool black-box tester skill | P3 | S | — | ☐ |
 
-**Suggested order.** **All defects (D-1 … D-9) are done** — the D section is closed — and **so is
-section A** (A-5's Firefox phase is the only open sub-item; A-12's phase 2 is not planned). A-1 and
-A-2 have unlocked B-6, B-8 and B-10, and A-5's DOM work has unlocked C-5. Quick wins B-5, B-1,
-B-2, B-3, C-2, C-7, S-8, S-1 can be interleaved anywhere; S-4 last.
+**Suggested order.** **All defects (D-1 … D-9) are done** — the D section is closed — and **so are
+sections A and B** (A-5's Firefox phase and D-2's `interact_element(type) clear` are the open
+sub-items; A-12's phase 2 is not planned). What is left is sections C and S: A-5's DOM work
+has unlocked C-5, and quick wins C-2, C-7, S-8, S-1 can be interleaved anywhere; S-4 last.
 The section-A sequencing, cross-item decisions (coordinate space, defaults, tool count, element
 ids, env vars) and per-item test seeds are in [`docs/design/A-roadmap.md`](design/A-roadmap.md).
 The section-B plan (four phases, the element-target resolver, window matcher, typing planner and
@@ -887,7 +887,7 @@ serialization gate.
 returns `"waited Ns"`. Annotate read-only/idempotent (C-7).
 
 ### B-6 — `wait_for` conditions and window filter  `P2 · M`
-- [ ] Not started
+- [x] Done 2026-09-06 — [design note](design/B-6-wait-for-conditions.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `WaitFor(condition, text?, window_name?, timeout≤120s, interval≤5s, use_dom)`
 with conditions `text_exists`, `active_window`, `element_exists`, `element_enabled`,
@@ -895,7 +895,7 @@ with conditions `text_exists`, `active_window`, `element_exists`, `element_enabl
 returns elapsed + attempts + a detail string; raises `TimeoutError` with the last detail
 (`tools/input.py` `_matches_wait_condition`, `_validate_wait_for_args`).
 
-**Ours.** `wait_for(text, timeout_ms, interval_ms)` — element-name text only, foreground only.
+**Ours (before B-6).** `wait_for(text, timeout_ms, interval_ms)` — element-name text only, foreground only.
 **Scope note:** the `window_name` filter is delivered by [D-5](design/D-5-find-path-resilience.md)
 (`scope=foreground|window|desktop` on both `find_element` and `wait_for`); B-6 keeps the
 `condition` enum and `use_dom`. Do not build the filter twice.
@@ -908,13 +908,13 @@ than throwing (keeps the existing contract of returning `null` on timeout — de
 **Done when.** `wait_for(condition="active_window", text="Notepad")` resolves after `launch`.
 
 ### B-7 — `multi_select` / `multi_edit` batch tools  `P2 · S–M`
-- [ ] Not started
+- [x] Done 2026-09-06 — [design note](design/B-7-batch-tools.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `MultiSelect(locs|labels, press_ctrl=true)` holds Ctrl while clicking each point
 (`multi_select()` ~868); `MultiEdit(locs=[[x,y,text],…]|labels=[[label,text],…])` clicks + types
 each field (`multi_edit()` ~880). Both tolerate JSON-stringified lists (Claude Desktop quirk).
 
-**Ours.** None; agents issue N round-trips.
+**Ours (before B-7).** None; agents issued N round-trips.
 
 **Sketch.** `multi_select(points_json | element_ids, ctrl=true)` and
 `multi_edit(entries_json)` where entries are `{x,y}|{element_id}` + `text`, reusing B-1's
@@ -1100,7 +1100,7 @@ which makes `git`, `node`, etc. "not found" inside tool calls.
 `PATH` lacks `%SystemRoot%\System32` or is empty, rebuild from the registry as above and inject
 into `ProcessStartInfo.Environment` (foreground and jobs share `PowerShellInvocation`).
 
-### C-7 — Tool annotations on all 65 tools  `P2 · S`
+### C-7 — Tool annotations on all 68 tools  `P2 · S`
 - [ ] Not started
 
 **Upstream.** Every tool declares `ToolAnnotations(title, readOnlyHint, destructiveHint,
@@ -1127,7 +1127,7 @@ every listed tool has explicit annotations.
 `__main__.py` `_apply_tool_filter()`; unknown names error at startup. Lets an operator run a
 screenshot-only or no-PowerShell server.
 
-**Ours.** All 65 tools always.
+**Ours.** All 68 tools always.
 
 **Sketch.** `ServerOptions` gains `Tools`/`ExcludeTools` (flags + `WINDOWSMCP_TOOLS`/
 `WINDOWSMCP_EXCLUDE_TOOLS`, valid for both transports); in `WindowsMcpHost.AddWindowsMcp` filter
@@ -1254,7 +1254,7 @@ cleanup, VM/Sandbox recommendation for destructive tools.
 
 **Ours.** `skills/windows/SKILL.md` is a usage playbook, not a tester.
 
-**Sketch.** `skills/windows-tool-tester/SKILL.md` adapted to our 65 tools and `confirm:true`
+**Sketch.** `skills/windows-tool-tester/SKILL.md` adapted to our 68 tools and `confirm:true`
 gates; wire into the plugin manifest.
 
 ---
@@ -1275,7 +1275,7 @@ gates; wire into the plugin manifest.
 
 ## Appendix A — Tool name map (upstream → ours)
 
-| Upstream (20) | Ours (65) | Gap items |
+| Upstream (20) | Ours (68) | Gap items |
 |---|---|---|
 | `Snapshot` | `snapshot`, `get_state`, `find_element`, `get_element`, `get_text`, `window` (list/active) | A-1..A-6, A-11..A-13 |
 | `Screenshot` | `screenshot`, `ocr` | A-7..A-11 |

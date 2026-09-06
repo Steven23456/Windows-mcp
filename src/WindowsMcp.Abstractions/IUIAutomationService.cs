@@ -31,6 +31,14 @@ public interface IUIAutomationService : IDisposable
     Task<ElementInfo?> WaitForAsync(string text, int timeoutMs, int intervalMs,
         FindKind kind = FindKind.Any, FindScope scope = FindScope.Foreground,
         string? windowTitle = null, bool includeOffscreen = false, CancellationToken ct = default);
+
+    /// <summary>
+    /// B-6 (roadmap C4): wait for one of the five <see cref="WaitCondition"/>s and ALWAYS answer
+    /// with a <see cref="WaitForResult"/> — a timeout is <c>Satisfied:false</c> carrying the last
+    /// poll's detail, never a <see cref="TimeoutException"/> and never null. A poll that throws is
+    /// retried (D-5); when every poll threw, the detail says so.
+    /// </summary>
+    Task<WaitForResult> WaitForAsync(WaitRequest request, CancellationToken ct = default);
     Task FocusAsync(string elementId, CancellationToken ct = default);
 
     /// <summary>

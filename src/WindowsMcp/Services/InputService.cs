@@ -253,6 +253,20 @@ public sealed class InputService : IInputService
         return Task.CompletedTask;
     }
 
+    public Task KeyDownAsync(string key, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        Sink.KeyDown(key);
+        return Task.CompletedTask;
+    }
+
+    public Task KeyUpAsync(string key, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        Sink.KeyUp(key);
+        return Task.CompletedTask;
+    }
+
     public Task PressShortcutAsync(string shortcut, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -334,6 +348,10 @@ internal sealed class SimulatorKeyboardSink(InputSimulator sim) : IKeyboardSink
         else
             sim.Keyboard.ModifiedKeyStroke(token.ImpliedModifiers, token.Key);    // e.g. key("+") on a US layout = Shift + OEM_PLUS
     }
+
+    public void KeyDown(string key) => sim.Keyboard.KeyDown(ShortcutParser.ResolveKey(key).Key);
+
+    public void KeyUp(string key) => sim.Keyboard.KeyUp(ShortcutParser.ResolveKey(key).Key);
 
     public void Text(string text)
     {

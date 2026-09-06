@@ -39,6 +39,11 @@ public class InputServiceTypeTests
         public void Key(string key) => Log.Add($"key:{key}");
         public void Text(string text) => Log.Add($"text:{text}");
 
+        // B-7 added the held-modifier pair to the sink; typing never uses them, and a type plan
+        // that started holding keys down would show up here.
+        public void KeyDown(string key) => Log.Add($"down:{key}");
+        public void KeyUp(string key) => Log.Add($"up:{key}");
+
         public Task<string?> GetTextAsync(CancellationToken ct = default)
         {
             Log.Add("clipboard.get");

@@ -36,6 +36,16 @@ public interface IInputService
     /// </summary>
     Task ScrollAsync(int x, int y, string direction, int amount, bool shiftWheel, CancellationToken ct = default);
 
+    /// <summary>
+    /// B-7: hold a key down until <see cref="KeyUpAsync"/> releases it — the modifier half of
+    /// <c>multi_select</c>'s Ctrl+click batch. The key name is the same vocabulary
+    /// <see cref="PressKeyAsync"/> takes (<c>ctrl</c>, <c>shift</c>, <c>alt</c>, a character).
+    /// </summary>
+    Task KeyDownAsync(string key, CancellationToken ct = default);
+
+    /// <summary>B-7: release a key held by <see cref="KeyDownAsync"/>. Always called in a finally.</summary>
+    Task KeyUpAsync(string key, CancellationToken ct = default);
+
     /// <summary>The live cursor position in virtual-desktop pixels (A-11).</summary>
     Task<CursorPosition> GetCursorPositionAsync(CancellationToken ct = default);
 }

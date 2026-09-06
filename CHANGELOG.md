@@ -2,6 +2,43 @@
 
 ### Added
 
+- **`multi_select` and `multi_edit` — a batch of clicks, or a whole form, in one call** (parity
+  B-7; 66 → 68 tools, roadmap C3's last two slots). `multi_select(targets_json, ctrl = true)`
+  takes a JSON array of `{x, y}` points or `{element_id}` objects — a JSON *string* holding that
+  array is unwrapped once, for clients that stringify arguments — and clicks every one of them
+  with Ctrl held from before the first click until after the last (`ctrl: false` clicks without
+  it; the release sits in a `finally`, so a failure mid-batch never leaves the modifier down).
+  `multi_edit(entries_json)` takes the same targets plus `text` (required) and the optional
+  `clear` / `press_enter`, and per entry clicks the target then types through B-1's `TypeAsync`
+  path, so `clear`, `press_enter` and the long-text paste mean exactly what they mean on `type`.
+  Both resolve **every** target through B-4's `ResolveTargetAsync` before any input is sent, so a
+  batch holding one off-screen element is refused with nothing done; both then run in order and
+  **stop at the first failure**, returning `failedIndex` and `error` alongside the per-entry
+  `results` produced so far — the batch is deliberately not atomic, and the response says how far
+  it got. Returns `{count, ctrl, results:[{index, x, y, elementId?, name?, ok}], failedIndex?,
+  error?}` and `{count, results:[{index, x, y, elementId?, name?, typed, method, ok}],
+  failedIndex?, error?}`. New pure `Services/BatchTargets.cs` (one parser for both parameters,
+  every refusal naming the parameter and the offending entry's index) and
+  `IInputService.KeyDownAsync` / `KeyUpAsync` over new `KeyDown` / `KeyUp` members on the internal
+  `IKeyboardSink` seam. No new service and no new CLI option — the service count stays 39. Design
+  note: `docs/design/B-7-batch-tools.md`.
+- **`wait_for` waits for a condition, not just an element** (parity B-6, roadmap C4).
+  `wait_for(text, timeout_ms, interval_ms, kind, scope, window, include_offscreen,
+  condition = "element_exists", use_dom = false)` adds four conditions beside today's behaviour:
+  `element_enabled` (the same `find_element` path, but the match must be enabled),
+  `focused_element` (the element holding keyboard focus is the one named), `text_exists` (the text
+  anywhere in a `snapshot` of the scope — element names and values, scrollable regions, and with
+  `use_dom: true` the browser page's own words, A-5) and `active_window` (the foreground window's
+  title, matched exact → substring → fuzzy ≥ 70), which reads only the window inventory and never
+  walks the UI tree. Upstream's short aliases `element`, `enabled`, `focused`, `text` and `window`
+  are accepted; an unknown condition is an `ArgumentException` listing all five. `timeout_ms` is
+  now range-checked at 0–120000 and `interval_ms` at 0–5000, and a blank `text` is refused naming
+  the condition. Existing calls are unaffected: the default condition is exactly the old
+  behaviour, and `text` keeps its place as the first parameter. New `WaitCondition`, `WaitRequest`
+  and `WaitForResult` DTOs, the pure `Services/UiTree/WaitConditions.cs` evaluator (roadmap C10 —
+  one poll's evidence in, verdict and detail out, no UIA and no clock) and
+  `IUIAutomationService.WaitForAsync(WaitRequest)` beside the original overload, which is
+  unchanged. Design note: `docs/design/B-6-wait-for-conditions.md`.
 - **`launch` opens an app by the name a person would say it, and hands back its window** (parity
   B-8). `launch(app_name, wait_for_window = true, timeout_ms = 10000)`: a path, or an executable
   name that exists on `PATH`, is still started outright; anything else is resolved against an
@@ -244,6 +281,17 @@
 
 ### Changed
 
+- **`wait_for` always returns a result object; a timeout is no longer the string `"null"`**
+  (parity B-6, roadmap C4 — the one contract break in section B). The tool used to answer with a
+  serialized `ElementInfo`, the literal string `"null"` when nothing turned up, or an error when
+  every poll had failed, so a caller had to string-compare to tell "not there" from "found". It
+  now always returns `{Satisfied, Condition, ElapsedMs, Attempts, Detail, Element?}`: a timeout is
+  `Satisfied: false` carrying the last poll's `Detail` (what was seen instead), and the
+  every-poll-failed case is that same result with `Detail` of `every poll failed: <last message>`
+  rather than a `TimeoutException`. **Migration:** read `Satisfied` instead of comparing the
+  response to `"null"`, and take the element from `Element` (omitted when there is none). The old
+  `IUIAutomationService.WaitForAsync(text, timeoutMs, …)` overload and its `PollAsync` loop are
+  untouched for direct callers; no tool uses them any more.
 - **`launch` returns a result object instead of `"launched (pid=N)"`.** The tool used to answer
   with that sentence and nothing else, so a caller could not tell which app the name had resolved
   to or whether a window ever appeared. It now returns `{MatchedName, Kind, Score, Pid, Hwnd,

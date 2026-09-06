@@ -176,7 +176,13 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
 ## Click Data Flow (and the shared target resolver)
 
 `click`, `type`, `scroll` and `drag` all start at `InputTools.ResolveTargetAsync` (roadmap C1),
-so the point is decided — and an unreachable element refused — before any input is injected.
+so the point is decided — and an unreachable element refused — before any input is injected. B-7's
+`multi_select` and `multi_edit` run that same resolver over *every* entry of their JSON array
+(parsed by the pure `BatchTargets`) before the first click, so a batch holding one off-screen
+element is refused with nothing done; the entries then run in order and stop at the first failure,
+reporting `failedIndex`/`error` with the results so far. `multi_select` wraps the run in
+`KeyDownAsync("ctrl")` … `KeyUpAsync("ctrl")` with the release in a `finally`; `multi_edit` types
+each entry through B-1's `TypeAsync(text, TypeOptions(clear, Idle, press_enter, 5))`.
 
 ```
 ┌──────────┐   ┌────────────┐   ┌──────────────────┐   ┌────────────────────┐
@@ -574,46 +580,67 @@ station shows nothing). With `--profile-snapshot` the tool's own stages (`resolv
 
 ## WaitFor Data Flow (Polling Loop)
 
-`WaitFor` is the only tool with internal retry logic — all other tools are single-pass:
+`WaitFor` is the only tool with internal retry logic — all other tools are single-pass. Since B-6
+it waits for one of five conditions, and each poll gathers **only** the evidence its condition
+reads:
 
 ```
-UIAutomationTools.WaitFor(text, timeout_ms, interval_ms, kind, scope, window, include_offscreen)
-        │
+UIAutomationTools.WaitFor(text, timeout_ms, interval_ms, kind, scope, window,
+                          include_offscreen, condition, use_dom)
+        │  parse condition (element_exists|element_enabled|focused_element|text_exists|
+        │   active_window; aliases element|enabled|focused|text|window), validate
+        │   timeout_ms 0..120000, interval_ms 0..5000, non-blank text, ParseTarget(scope, window)
         ▼
-UIAutomationService.WaitForAsync(...)  →  PollAsync(poll, timeout_ms, interval_ms, ct)
+UIAutomationService.WaitForAsync(WaitRequest)  →  WaitLoopAsync(request, gather, ct)
         │
+        │   gather = the evidence that condition reads, and nothing else:
+        │     active_window                → IWindowService.ListAsync(...)      (NO UI walk)
+        │     text_exists|focused_element  → SnapshotAsync(SnapshotRequestFor(request))
+        │                                    (scope mapped, no tree, server budget, UseDom)
+        │     element_exists|_enabled      → FindElementAsync(text, kind, scope, …)
         ▼
   ┌──────────────────────────────────────────────────────────────┐
-  │ deadline = UtcNow + timeout_ms   lastFailure = null           │
-  │ anyCleanPoll = false                                          │
+  │ clock = Stopwatch   attempts = 0   anyCleanPoll = false       │
+  │ lastDetail = ""     lastFailure = null                        │
   │                                                               │
   │  ┌──────────────────────────────────────────┐                 │
-  │  │ FindElementAsync(text, kind, scope, …)   │◄────────────┐   │
-  │  │  (window re-resolved on EVERY poll)      │             │   │
+  │  │ attempts++ ; evidence = await gather(ct) │◄────────────┐   │
   │  └──────────────┬───────────────────────────┘             │   │
   │                 │                                          │   │
   │        threw? ──┤ YES → lastFailure = ex ─────┐            │   │
   │           NO    │                             │            │   │
   │                 ▼                             │            │   │
-  │        anyCleanPoll = true                    │            │   │
-  │           found? ─┬── YES → return element    │            │   │
-  │                   │                           │            │   │
+  │        WaitConditions.Evaluate(condition,     │            │   │
+  │          text, evidence) → (satisfied,        │            │   │
+  │          detail, element?)                    │            │   │
+  │        anyCleanPoll = true ; lastDetail=detail│            │   │
+  │        satisfied? ┬─ YES → WaitForResult(true,│            │   │
+  │                   │   name, elapsed, attempts,│            │   │
+  │                   │   detail, element)        │            │   │
   │                   NO ◄────────────────────────┘            │   │
   │                   ▼                                        │   │
-  │        remaining = deadline − UtcNow                       │   │
+  │        remaining = timeout_ms − clock.Elapsed              │   │
   │           ≤ 0 ? ─┬── NO → await Task.Delay(               │   │
-  │                  │        min(interval_ms, remaining)) ────┘   │
+  │                  │        min(max(10, interval_ms),        │   │
+  │                  │            remaining)) ─────────────────┘   │
   │                 YES                                            │
   │                  ▼                                             │
-  │        anyCleanPoll ? return null                              │
-  │                     : throw TimeoutException(lastFailure)      │
+  │        WaitForResult(false, name, elapsed, attempts,           │
+  │          anyCleanPoll ? lastDetail                             │
+  │                       : "every poll failed: <last message>")   │
   └──────────────────────────────────────────────────────────────┘
 ```
 
 A poll that throws is **retried**, never fatal — absorbing transient UIA failure is the whole
 point of a wait (checklist D-5). The loop polls at least once, so `timeout_ms: 0` means "check
-now". It distinguishes two outcomes the old loop conflated: polls ran and found nothing (`null`),
-versus every poll failed (`TimeoutException` carrying the last error).
+now". Roadmap C4: the call **always** answers with a `WaitForResult` — a timeout is
+`Satisfied:false` carrying the last poll's `Detail`, and the case the old loop threw on (every
+poll failed) is that same result with a detail saying so, not a `TimeoutException`. The tool
+serialises the result, so the `"null"` string it used to return on a miss is gone.
+
+The original `WaitForAsync(text, …)` overload and its `PollAsync` loop — `null` on a clean miss,
+`TimeoutException` when every poll failed — are still on `IUIAutomationService`, but no tool
+calls them any more.
 
 ---
 
@@ -772,9 +799,10 @@ UIAutomationService methods
   catch (Exception ex)
   └─► Return null or empty result (callers check for null)
   
-WaitFor — timeout path:
-  elapsed > timeout_ms → return null
-  Tool returns "null" string (agent detects no match)
+WaitFor — timeout path (B-6):
+  elapsed > timeout_ms → WaitForResult(Satisfied=false, …, Detail=<the last poll's detail>)
+  every poll threw     → the same result, Detail = "every poll failed: <last message>"
+  Tool serialises it — a timeout is an outcome, never an exception and never "null"
 ```
 
 ---
@@ -786,7 +814,7 @@ WaitFor — timeout path:
 All tool methods return `Task<string>` — except `screenshot`, which returns
 `Task<CallToolResult>` so it can carry an image block — where the string is either:
 - **JSON** — from `JsonSerializer.Serialize(result)`
-- **Plain string** — for simple acknowledgements (`"pressed ctrl+c"`, `"PASS"`, `"null"`)
+- **Plain string** — for simple acknowledgements (`"pressed ctrl+c"`, `"PASS"`)
 
 `screenshot`'s `CallToolResult` is a `TextContentBlock` of metadata JSON followed by an
 `ImageContentBlock`; with `output="file"` the image block is omitted and the metadata carries
@@ -834,7 +862,7 @@ Scrollable (1):
 
 | Location | Behavior | Notes |
 |----------|----------|-------|
-| `WaitFor` | Polls every `interval_ms` (default 500ms) up to `timeout_ms` (default 10s); sleep clamped to the remaining budget, minimum 10ms | Only tool with a loop; a failed poll is retried, and every-poll-failed throws rather than reporting `null` |
+| `WaitFor` | Polls immediately, then every `interval_ms` (default 500 ms, range 0-5000, 10 ms floor) up to `timeout_ms` (default 10 s, range 0-120000); the sleep is clamped to the remaining budget | Only tool with a loop; a failed poll is retried, and a timeout — every-poll-failed included — is a `WaitForResult` with `Satisfied:false`, never a throw (roadmap C4) |
 | `InputService` clicks | No delays: clicks are back-to-back `SendInput`; the cursor is placed with `SetCursorPos` and read back before any button event | A clamped (off-monitor) point throws rather than clicking elsewhere |
 | `InputService.TypeAsync` | `TypeOptions.PaceMs` (default 5 ms) between the steps of a typing plan, never after the last one; a paste waits 150 ms after `ctrl+v` before restoring the previous clipboard text | The settle only runs on the real simulator sink, so the unit tests do not pay it. The target reads the clipboard on its own schedule, which is what the settle covers |
 | `InputService.DragAsync(…, durationMs, steps)` | `durationMs / steps` between the interpolated moves (default 300 ms / 20 = 15 ms), including after the last one; `durationMs:0` moves without pausing | A drop target needs real motion, not a teleport; the button is released in a `finally`, so a cancelled drag never leaves it down |

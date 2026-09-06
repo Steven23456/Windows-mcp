@@ -5,7 +5,8 @@ of the parity checklist. This is the implementation plan; each item still gets i
 `docs/design/<ID>-<slug>.md` note when it is picked up (checklist rule 1), and this file is the
 place those notes link back to for the cross-item decisions. ·
 **Status:** planned 2026-09-05 against `main` @ `f96de50` (65 tools, v0.7.3, sections D and A
-closed). Where the code deviates from the plan below, the item carries a **Shipped as** line and
+closed). All four phases have since shipped (2026-09-05 → 2026-09-06): **68 tools**, section B
+closed. Where the code deviates from the plan below, the item carries a **Shipped as** line and
 its design note has the reasoning. ·
 **Baseline facts** used below were read from the code on that commit; the `file:line` anchors
 will drift, the member names will not.
@@ -302,6 +303,10 @@ checklist unless corrected.
   resolves; `wait_for(condition:"text_exists", text:"Probe heading", use_dom:true)` on the Edge
   fixture resolves.
 - **Done when.** `wait_for(condition:"active_window", text:"Notepad")` resolves after `launch`.
+- **Shipped as** ([note](B-6-wait-for-conditions.md)): as planned, with `use_dom` carried by the
+  two snapshot-reading conditions (`text_exists`, `focused_element`) — the element conditions go
+  through the find path, which has no DOM mode. A typed document's body is not `text_exists`
+  evidence (names, values, scrollable regions and page text are); the note records it.
 
 #### B-7 — `multi_select` / `multi_edit` batch tools  `P2 · S–M · ~2 h`
 
@@ -318,6 +323,9 @@ checklist unless corrected.
   two Notepad windows' editors (scope by `element_id` from one `snapshot`) fills both.
 - **Done when.** `multi_edit([{element_id:"el_3", text:"a"}, {element_id:"el_9", text:"b"}])`
   fills both fields in one call.
+- **Shipped as** ([note](B-7-batch-tools.md)): as planned; an empty batch is refused rather
+  than a no-op, and refusals during input are returned with `failedIndex`/`error` while
+  refusals before input throw.
 
 ## 5. Effort and sequencing summary
 

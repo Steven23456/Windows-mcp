@@ -2,7 +2,7 @@
 
 An MCP server for Windows desktop automation, written in C# on the official
 [`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol)
-SDK. See [Tool reference](#tool-reference) for the 66 tools.
+SDK. See [Tool reference](#tool-reference) for the 68 tools.
 
 ## Build
 
@@ -157,11 +157,11 @@ operations. See [`skills/windows/SKILL.md`](skills/windows/SKILL.md).
 
 ## Tool reference
 
-66 tools, grouped:
+68 tools, grouped:
 
 | Category | Tools |
 |---|---|
-| Input | `click`, `drag`, `hover`, `type`, `key`, `shortcut`, `scroll`, `wait`, `clipboard` |
+| Input | `click`, `drag`, `hover`, `type`, `key`, `shortcut`, `scroll`, `wait`, `multi_select`, `multi_edit`, `clipboard` |
 | Screen | `screenshot`, `ocr` |
 | Window | `window`, `switch_to_window`, `launch`, `focus`, `multi_monitor` |
 | UI Automation | `snapshot`, `get_state`, `find_element`, `get_element`, `get_text`, `assert_element`, `interact_element`, `get_table`, `wait_for` |
@@ -191,6 +191,15 @@ Enter. Newlines are typed as Enter and tabs as Tab; text of 200+ characters with
 characters goes through the clipboard as one paste and the previous clipboard text is put back
 (the result's `method` says `keys` or `paste`).
 
+`multi_select(targets_json, ctrl?)` and `multi_edit(entries_json)` do a whole batch in one call.
+`targets_json` is a JSON array of `{x, y}` points or `{element_id}` objects (a JSON string holding
+that array is accepted too); `multi_edit`'s entries add `text` (required) plus optional `clear`
+and `press_enter`, and each entry clicks its target then types through the same path as `type`.
+Every target is resolved before any input is sent, so an off-screen element refuses the whole
+batch with nothing done, and `multi_select` holds Ctrl from before the first click until after the
+last and always releases it. Neither is atomic: they stop at the first failure and return
+`failedIndex` and `error` alongside the per-entry `results` produced so far.
+
 Name a window by `Title` — matched exact, then substring, then fuzzy (score ≥ 70), so
 `switch_to_window("notepad")` finds `Untitled - Notepad` — or by the `Hwnd` from
 `window(action:"list")`, which wins over a title. `switch_to_window`/`focus` return
@@ -217,7 +226,14 @@ and the `After` bounds in `{Window, Before, After, MatchStrategy, Score, Restore
 from the window rather than echoed back from the request.
 
 `wait(seconds)` pauses in-process (more than 0, at most 60) — use it between an action and the
-next `snapshot` instead of a PowerShell sleep; `wait_for` is the conditional wait.
+next `snapshot` instead of a PowerShell sleep. `wait_for(text, …, condition?, use_dom?)` is the
+conditional wait: `element_exists` (default), `element_enabled`, `focused_element`, `text_exists`
+(the text anywhere in a snapshot of the scope, `use_dom: true` reading a browser page instead of
+the window chrome) or `active_window` (the foreground window's title, exact → substring → fuzzy
+70+); the aliases `element`, `enabled`, `focused`, `text` and `window` are accepted. It always
+returns `{Satisfied, Condition, ElapsedMs, Attempts, Detail, Element?}` — a timeout is
+`Satisfied: false` carrying the last `Detail`, not an error and not the string `"null"`.
+`timeout_ms` is 0–120000 and `interval_ms` 0–5000.
 `start_process(command, args_json?, cwd?, use_shell_execute?)` passes a JSON array of arguments
 verbatim (no quoting) and returns `{pid, executable, args, cwd}`. `multi_monitor` reports each
 monitor's `WorkArea`, `Orientation` (0/90/180/270), `EffectiveDpi` and `Scale` alongside its

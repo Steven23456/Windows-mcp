@@ -14,10 +14,10 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Tool Layer                                         │
-│                 (19 [McpServerToolType] classes, 66 tools)                   │
+│                 (19 [McpServerToolType] classes, 68 tools)                   │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐  │
 │  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │  │
-│  │  9 tools   │ │  9 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │  │
+│  │ 11 tools   │ │  9 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │  │
 │  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘  │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐  │
 │  │ProcessTools│ │ScreenTools │ │  WebTools  │ │RegistryTls │ │NetworkTls  │  │
@@ -132,7 +132,7 @@ public sealed class InputTools
 
 | Tool Class | Tools | Services Injected |
 |------------|-------|------------------|
-| `InputTools` | 9 | `IInputService`, `IClipboardService`, `IUIAutomationService` (B-4: resolves `element_id` to a point) |
+| `InputTools` | 11 | `IInputService`, `IClipboardService`, `IUIAutomationService` (B-4: resolves `element_id` to a point) |
 | `UIAutomationTools` | 9 | `IUIAutomationService` |
 | `FileTools` | 9 | `IFileSystemService`, `IInputService`, `IFileStreamService` |
 | `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService` |
@@ -177,6 +177,8 @@ public interface IInputService
     Task PressShortcutAsync(string shortcut);
     Task ScrollAsync(int x, int y, string direction, int amount);
     Task ScrollAsync(int x, int y, string direction, int amount, bool shiftWheel);   // B-3
+    Task KeyDownAsync(string key);                                  // B-7: hold a modifier
+    Task KeyUpAsync(string key);                                    // B-7: release it
     Task<CursorPosition> GetCursorPositionAsync();
 }
 ```
@@ -308,12 +310,14 @@ Windows-mcp.slnx
 │   │   ├── Services/                      (39 service implementations + helpers)
 │   │   │   ├── InputService.cs            (+ TypePlanner, DragPath, IKeyboardSink and
 │   │   │   │                               SimulatorKeyboardSink — B-1's typing plan and
-│   │   │   │                               keystroke seam, B-2's drag path)
+│   │   │   │                               keystroke seam, B-2's drag path, B-7's KeyDown/KeyUp)
+│   │   │   ├── BatchTargets.cs            (B-7: the pure parser behind multi_select/multi_edit)
 │   │   │   ├── UIAutomationService.cs
 │   │   │   ├── ScreenshotService.cs       (+ WgcCaptureBackend, Annotator, FlashOverlay, FlashGlow)
 │   │   │   ├── UiTree/                    (snapshot core: UiNode, UiClassifier, ElementBudget,
 │   │   │   │                               UiTraverser, SnapshotRenderer, DomCorrection,
-│   │   │   │                               ElementTarget — B-4's element_id → point)
+│   │   │   │                               ElementTarget — B-4's element_id → point;
+│   │   │   │                               WaitConditions — B-6's pure condition evaluator)
 │   │   │   ├── WindowService.cs           (+ FuzzyMatch, WindowMatcher, ForegroundLadder and
 │   │   │   │                               Win32ForegroundNative — B-10's matcher and ladder;
 │   │   │   │                               WindowGeometry and Win32WindowGeometryNative —
