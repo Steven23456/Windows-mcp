@@ -211,7 +211,7 @@ public enum WaitCondition { ElementExists, ElementEnabled, FocusedElement, TextE
 /// <param name="IntervalMs">0..5000; clamped to a 10 ms floor and to the remaining budget.</param>
 /// <param name="UseDom">
 /// A-5's browser DOM mode, only meaningful for <see cref="WaitCondition.TextExists"/> and
-/// <see cref="WaitCondition.ElementExists"/>; accepted and ignored for the others.
+/// <see cref="WaitCondition.FocusedElement"/> (the two that read a snapshot); accepted and ignored for the others.
 /// </param>
 public record WaitRequest(
     WaitCondition Condition,
