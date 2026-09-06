@@ -109,7 +109,7 @@ public sealed class StartupReportService : IStartupReportService
 
     private async Task<ProcessEntry[]> BuildProcessesAsync(CancellationToken ct)
     {
-        var procs = await _process.ListAsync(null, ct);
+        var procs = await _process.ListAsync((string?)null, ct);   // the non-sampling overload: no CPU window here
         return procs.Select(p =>
         {
             var (t, s) = Sig(p.Path);
@@ -176,7 +176,9 @@ public sealed class StartupReportService : IStartupReportService
     {
         if (string.IsNullOrEmpty(folder)) return;
         string[] files;
-        try { files = await _fs.ListAsync(folder, ct); }
+        // C-1: the startup folder scan keeps its full reach (every entry, hidden included) by
+        // asking for hidden entries and projecting the FileEntry rows back to paths.
+        try { files = (await _fs.ListAsync(folder, null, false, true, ct)).Select(e => e.Path).ToArray(); }
         catch { return; }
 
         foreach (var file in files)

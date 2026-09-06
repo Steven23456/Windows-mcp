@@ -29,7 +29,9 @@ public sealed class ProcessTools
 
     [McpServerTool(Title = "Processes", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description(
         "List/inspect/kill processes. actions: list|orphans|kill. " +
-        "list: plain (Pid,Name,Path,MemoryMb); with includeLineage:true adds parentPid, parentName, " +
+        "list: plain (Pid,Name,Path,MemoryMb,CpuPercent — CPU is measured over a 250 ms window, " +
+        "normalised across all cores; sort_by memory (default)|cpu|name|pid and limit (0 = all; pass " +
+        "20 for a short answer) apply to the plain list only); with includeLineage:true adds parentPid, parentName, " +
         "commandLine, startTime, ageMinutes, orphaned, runtimeKind, isSystemAdjacent, rootPid, " +
         "memoryMb; with groupByRoot:true returns processes collapsed under their nearest-live root " +
         "ancestor. orphans: lineage rows where the parent is gone (recycle-aware: parent absent, or " +
@@ -44,7 +46,12 @@ public sealed class ProcessTools
         "tree:true and startTime apply to pid-based kills ONLY (an error is raised if given with " +
         "name and no pid). tree:true kills the pid AND its descendants (leaves-first, each " +
         "re-validated against the snapshot before killing). startTime (ISO-8601) guards against PID " +
-        "reuse — the kill aborts unless the live process's start time matches.")]
+        "reuse — the kill aborts unless the live process's start time matches. graceful:true asks the " +
+        "process to close (WM_CLOSE to its visible windows, so an editor can show its save prompt), " +
+        "waits grace_ms (default 3000, at most 60000) and only then forces it; a process with no window " +
+        "is forced at once and the result says so. pid and name kills return " +
+        "{killed:[{pid, name, graceful, exitedGracefully, forced, waitedMs}]}; graceful cannot be " +
+        "combined with tree.")]
     public async Task<string> Process(
         [Description("Action: list, orphans, or kill")] string action,
         [Description("Process name; kill target, or substring filter for list/orphans")] string? name = null,
@@ -54,18 +61,27 @@ public sealed class ProcessTools
         [Description("list: group processes under their root ancestor")] bool groupByRoot = false,
         [Description("kill: also kill the target's descendants")] bool tree = false,
         [Description("kill: ISO-8601 start time guard against PID reuse")] string? startTime = null,
+        [Description("list (plain only): memory (default), cpu, name, or pid")] string? sort_by = null,
+        [Description("list (plain only): at most this many rows after the sort; 0 = all")] int limit = 0,
+        [Description("kill: ask the process to close before forcing it (not with tree)")] bool graceful = false,
+        [Description("kill: how long a graceful close may take before the process is forced, 0-60000 ms")] int grace_ms = 3000,
         CancellationToken ct = default)
     {
         switch (action.ToLowerInvariant())
         {
             case "list":
-                if (groupByRoot)
-                    return JsonSerializer.Serialize(await _process.GroupByRootAsync(name, ct));
-                if (includeLineage)
+                if (groupByRoot || includeLineage)
+                {
+                    RefusePlainListOptions(sort_by, limit, groupByRoot ? "groupByRoot" : "includeLineage");
+                    if (groupByRoot)
+                        return JsonSerializer.Serialize(await _process.GroupByRootAsync(name, ct));
                     return JsonSerializer.Serialize(await _process.ListLineageAsync(false, name, ct));
-                return JsonSerializer.Serialize(await _process.ListAsync(name, ct));
+                }
+                var options = new ProcessListOptions(name, ParseSort(sort_by), ParseLimit(limit));
+                return JsonSerializer.Serialize(await _process.ListAsync(options, ct));
 
             case "orphans":
+                RefusePlainListOptions(sort_by, limit, "orphans");
                 return JsonSerializer.Serialize(await _process.ListLineageAsync(true, name, ct));
 
             case "kill":
@@ -79,6 +95,11 @@ public sealed class ProcessTools
                         throw new ArgumentException($"'startTime' must be ISO-8601, got: '{startTime}'");
                     start = parsed.ToUniversalTime();
                 }
+                if (grace_ms is < 0 or > 60_000)
+                    throw new ArgumentException($"'grace_ms' must be between 0 and 60000 ms, got {grace_ms}", nameof(grace_ms));
+                if (graceful && tree)
+                    throw new ArgumentException("'graceful' cannot be combined with 'tree': descendants are killed leaves-first and forcibly");
+                var killOptions = new KillOptions(graceful, grace_ms, start);
                 if (pid.HasValue)
                 {
                     if (tree)
@@ -86,13 +107,8 @@ public sealed class ProcessTools
                         int n = await _process.KillTreeAsync(pid.Value, start, ct);
                         return $"killed {n} process(es) in tree of pid {pid.Value}";
                     }
-                    if (start is DateTime s)
-                    {
-                        await _process.KillGuardedAsync(pid.Value, s, ct);
-                        return $"killed pid {pid.Value} (start-time verified)";
-                    }
-                    await _process.KillAsync(pid.Value, ct);
-                    return $"killed pid {pid.Value}";
+                    var one = await _process.KillAsync(pid.Value, killOptions, ct);
+                    return JsonSerializer.Serialize(new { killed = new[] { KillRow(one) } });
                 }
                 if (!string.IsNullOrWhiteSpace(name))
                 {
@@ -102,11 +118,13 @@ public sealed class ProcessTools
                         throw new ArgumentException("'tree' and 'startTime' require 'pid' (they do not apply to name-based kills)");
                     // Deliberately unfiltered: a kill matches the name EXACTLY. Reusing the list's
                     // substring filter here would make `kill --name node` also kill `node-inspector`.
-                    var all = await _process.ListAsync(null, ct);
+                    // The old overload: a name kill must not pay the CPU sample window.
+                    var all = await _process.ListAsync((string?)null, ct);
                     var targets = all.Where(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
+                    var killed = new List<object>(targets.Length);
                     foreach (var t in targets)
-                        await _process.KillAsync(t.Pid, ct);
-                    return $"killed {targets.Length} process(es) named '{name}'";
+                        killed.Add(KillRow(await _process.KillAsync(t.Pid, killOptions, ct)));
+                    return JsonSerializer.Serialize(new { killed });
                 }
                 throw new ArgumentException("'kill' requires either name or pid");
 
@@ -114,6 +132,40 @@ public sealed class ProcessTools
                 throw new ArgumentException($"Unknown action '{action}'; expected list|orphans|kill");
         }
     }
+
+    // ---- C-3 helpers -----------------------------------------------------------------------
+
+    private static ProcessSort ParseSort(string? sortBy) => sortBy?.Trim().ToLowerInvariant() switch
+    {
+        null or "" or "memory" => ProcessSort.Memory,
+        "cpu" => ProcessSort.Cpu,
+        "name" => ProcessSort.Name,
+        "pid" => ProcessSort.Pid,
+        _ => throw new ArgumentException($"'sort_by' must be one of memory|cpu|name|pid, got '{sortBy}'", nameof(sortBy)),
+    };
+
+    private static int ParseLimit(int limit) => limit >= 0
+        ? limit
+        : throw new ArgumentException($"'limit' must be 0 (all rows) or more, got {limit}", nameof(limit));
+
+    /// <summary>The lineage, group and orphan shapes have no CPU column and their own order: refuse rather than ignore.</summary>
+    private static void RefusePlainListOptions(string? sortBy, int limit, string shape)
+    {
+        if (sortBy is not null)
+            throw new ArgumentException($"'sort_by' applies to the plain list only, not with {shape}", nameof(sortBy));
+        if (limit != 0)
+            throw new ArgumentException($"'limit' applies to the plain list only, not with {shape}", nameof(limit));
+    }
+
+    private static object KillRow(KillResult r) => new
+    {
+        pid = r.Pid,
+        name = r.Name,
+        graceful = r.Graceful,
+        exitedGracefully = r.ExitedGracefully,
+        forced = r.Forced,
+        waitedMs = r.WaitedMs,
+    };
 
     [McpServerTool(Title = "Inspect process", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Deep-inspect a process by PID: parent PID, command line, start time, and the loaded-module (DLL) inventory. Use to spot injected/sideloaded DLLs or trace a process's lineage. The module list may be unavailable (ModulesError set) for protected or higher-integrity processes.")]
     public async Task<string> ProcessInspect(

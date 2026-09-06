@@ -1,3 +1,4 @@
+using System.Text;
 using FluentAssertions;
 using WindowsMcp.Services;
 using Xunit;
@@ -16,9 +17,44 @@ public class FileSystemServiceTests : IDisposable
     {
         var svc = new FileSystemService();
         var path = Path.Combine(_tmp, "test.txt");
-        await svc.WriteTextAsync(path, "héllo wörld", "utf-8");
+        await svc.WriteTextAsync(path, "héllo wörld", "utf-8", append: false, createParents: true);
         var got = await svc.ReadTextAsync(path, 1024, "utf-8");
         got.Should().Be("héllo wörld");
+    }
+
+    /// <summary>
+    /// The other two encodings the tool advertises. Pre-C-1 behaviour, pinned here because the
+    /// write path grew two parameters around this switch and nothing else reads these arms.
+    /// </summary>
+    [Theory]
+    [InlineData("utf-16", "héllo wörld")]
+    [InlineData("ascii", "hello world")]
+    public async Task WriteText_then_ReadText_roundtrips_the_named_encoding(string encoding, string content)
+    {
+        var svc = new FileSystemService();
+        var path = Path.Combine(_tmp, $"enc-{encoding}.txt");
+
+        await svc.WriteTextAsync(path, content, encoding, append: false, createParents: true);
+
+        (await svc.ReadTextAsync(path, 1024, encoding)).Should().Be(content);
+    }
+
+    /// <summary>
+    /// "auto" is <c>file_read</c>'s DEFAULT encoding and the one a C-1 line window decodes
+    /// through, so the BOM sniff decides what a caller who said nothing at all gets back.
+    /// </summary>
+    [Fact]
+    public async Task ReadText_auto_decodes_by_the_byte_order_mark()
+    {
+        var svc = new FileSystemService();
+        var utf8 = Path.Combine(_tmp, "bom-utf8.txt");
+        var utf16 = Path.Combine(_tmp, "bom-utf16.txt");
+        await File.WriteAllTextAsync(utf8, "héllo wörld", new UTF8Encoding(true));
+        await File.WriteAllTextAsync(utf16, "héllo wörld", new UnicodeEncoding(false, true));
+
+        (await svc.ReadTextAsync(utf8, 1024, "auto")).Should().Be("héllo wörld");
+        (await svc.ReadTextAsync(utf16, 1024, "auto")).Should().Be("héllo wörld",
+            "a UTF-16 file read as UTF-8 would come back as mojibake with a NUL between every letter");
     }
 
     [Fact]
@@ -40,7 +76,7 @@ public class FileSystemServiceTests : IDisposable
         await File.WriteAllTextAsync(path, "original");
 
         // Start a write and verify the original is intact until rename
-        var task = svc.WriteTextAsync(path, "new content", "utf-8");
+        var task = svc.WriteTextAsync(path, "new content", "utf-8", append: false, createParents: true);
         await task;
         (await File.ReadAllTextAsync(path)).Should().Be("new content");
     }

@@ -121,9 +121,9 @@ Windows-MCP exposes **69 MCP tools** across 19 tool classes:
 ### File Tools (`FileTools` — 9 tools)
 | Tool | Purpose |
 |------|---------|
-| `FileRead` | Read a file as text (`max_bytes`, `encoding`) |
-| `FileWrite` | Write text to a file (`confirm:true`) |
-| `FileManage` | Copy, move, delete (`confirm:true`), or list |
+| `FileRead` | Read a file as text (`max_bytes`, `encoding`); `offset_lines`/`limit_lines` return a JSON line window instead (C-1) |
+| `FileWrite` | Write text to a file (`confirm:true`), `append` to it, and create the parent directory unless `create_parents:false` |
+| `FileManage` | Copy, move (`overwrite:true` to replace an existing destination), delete (`confirm:true`, plus `recursive:true` for a non-empty directory), or list `{Path, Name, IsDirectory, Size, Modified, Hidden}` entries (`pattern`, `recursive`, `include_hidden`) |
 | `FileInfo` | Get file/directory metadata |
 | `FileSearch` | Search for files by pattern |
 | `FileHash` | Compute SHA256/SHA1/MD5 hex digest |
@@ -160,7 +160,7 @@ Windows-MCP exposes **69 MCP tools** across 19 tool classes:
 ### Process Tools (`ProcessTools` — 6 tools)
 | Tool | Purpose |
 |------|---------|
-| `Process` | List/inspect/kill processes: plain list, recycle-aware lineage + orphan detection (`orphans`), root-grouping, name/cmdline filtering, and recycle-safe kill by PID/name or whole tree |
+| `Process` | List/inspect/kill processes: plain list with a `CpuPercent` column, `sort_by` and `limit` (C-3), recycle-aware lineage + orphan detection (`orphans`), root-grouping, name/cmdline filtering, and recycle-safe kill by PID/name or whole tree — `graceful:true` asks the pid's windows to close and waits `grace_ms` before forcing |
 | `ProcessInspect` | Deep per-process detail: parent PID, command line, start time, loaded modules |
 | `StartProcess` | Start a detached process from a command line, or an executable plus an `args_json` array passed verbatim, with an optional `cwd` and `use_shell_execute`; returns `{pid, executable, args, cwd}` |
 | `Service` | List/status/start/stop/restart Windows services |

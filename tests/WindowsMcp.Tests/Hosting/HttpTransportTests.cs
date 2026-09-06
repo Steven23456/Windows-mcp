@@ -1387,6 +1387,100 @@ public class HttpTransportTests
         properties.GetProperty("app_id").GetProperty("default").GetString().Should().Be("Windows-MCP");
         required.Should().BeEquivalentTo(new[] { "title", "message" });
     }
+
+    // ---- C-1 / C-3 phase 2: the new parameters on the wire ------------------------------------
+
+    /// <summary>
+    /// C-1 R4: a parameter the model cannot see is a parameter that does not exist. The schema is
+    /// where <c>offset_lines</c>, <c>append</c> and <c>overwrite</c> become real, and the defaults
+    /// in it are the safe ones the design settled on.
+    /// </summary>
+    [Fact]
+    public async Task The_file_tools_expose_their_new_parameters_with_the_safe_defaults()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        var read = tools.Single(t => t.Name == ToolName(tools, "fileread"))
+            .ProtocolTool.InputSchema.GetProperty("properties");
+        var write = tools.Single(t => t.Name == ToolName(tools, "filewrite"))
+            .ProtocolTool.InputSchema.GetProperty("properties");
+        var manage = tools.Single(t => t.Name == ToolName(tools, "filemanage"))
+            .ProtocolTool.InputSchema.GetProperty("properties");
+
+        read.EnumerateObject().Select(p => p.Name).Should().Contain(new[] { "offset_lines", "limit_lines" });
+        read.GetProperty("offset_lines").GetProperty("default").GetInt32().Should().Be(0);
+        read.GetProperty("limit_lines").GetProperty("default").GetInt32().Should().Be(0);
+
+        write.EnumerateObject().Select(p => p.Name).Should().Contain(new[] { "append", "create_parents" });
+        write.GetProperty("append").GetProperty("default").GetBoolean().Should().BeFalse();
+        write.GetProperty("create_parents").GetProperty("default").GetBoolean().Should().BeTrue();
+
+        manage.EnumerateObject().Select(p => p.Name)
+            .Should().Contain(new[] { "overwrite", "recursive", "pattern", "include_hidden" });
+        manage.GetProperty("overwrite").GetProperty("default").GetBoolean().Should().BeFalse(
+            "copy/move refuse an existing destination unless told otherwise");
+        manage.GetProperty("recursive").GetProperty("default").GetBoolean().Should().BeFalse(
+            "confirm never meant 'and the whole tree under it'");
+        manage.GetProperty("include_hidden").GetProperty("default").GetBoolean().Should().BeFalse();
+    }
+
+    /// <summary>C-1 (C-7 row flip): an append is not a repeatable write.</summary>
+    [Fact]
+    public async Task File_write_is_no_longer_advertised_as_idempotent()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        tools.Single(t => t.Name == FileWriteToolName(tools))
+            .ProtocolTool.Annotations?.IdempotentHint.Should().NotBe(true,
+                "file_write can now append, and appending twice is not the state appending once left");
+    }
+
+    /// <summary>
+    /// C-1 R1 over the wire: the absolute-path rule is a tool-layer refusal, so it has to reach the
+    /// client as a message naming the parameter - not as a FileNotFoundException about a path the
+    /// model never wrote.
+    /// </summary>
+    [Fact]
+    public async Task A_relative_path_is_refused_over_the_wire_naming_the_parameter()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        var result = await client.CallToolAsync(ToolName(tools, "fileread"), new Dictionary<string, object?>
+        {
+            ["path"] = "notes.txt",
+        });
+
+        result.IsError.Should().BeTrue();
+        var text = result.Content.OfType<TextContentBlock>().Single().Text;
+        text.Should().Contain("path").And.ContainEquivalentOf("absolute");
+    }
+
+    /// <summary>C-3 R5: the four new process parameters and their defaults, on the wire.</summary>
+    [Fact]
+    public async Task The_process_tool_exposes_sort_by_limit_graceful_and_grace_ms()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        var schema = tools.Single(t => t.Name == ToolName(tools, "process"))
+            .ProtocolTool.InputSchema.GetProperty("properties");
+
+        schema.EnumerateObject().Select(p => p.Name)
+            .Should().Contain(new[] { "sort_by", "limit", "graceful", "grace_ms" });
+        schema.GetProperty("limit").GetProperty("default").GetInt32().Should().Be(0,
+            "0 = all, so no existing caller silently loses rows");
+        schema.GetProperty("graceful").GetProperty("default").GetBoolean().Should().BeFalse(
+            "today's hard kill stays the default");
+        schema.GetProperty("grace_ms").GetProperty("default").GetInt32().Should().Be(3000);
+    }
+
 }
 
 
