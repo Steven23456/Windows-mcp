@@ -84,7 +84,7 @@ all four hints and a title on every tool.
 | power_action | Power action | ✘ | ✔ | ✘ | ✘ | |
 | audio | Audio | ✘ | ✘ | ✔ | ✘ | |
 | file_read | Read file | ✔ | ✘ | ✔ | ✘ | |
-| file_write | Write file | ✘ | ✔ | ✔ | ✘ | C-1's `append` will flip Idempotent to ✘ |
+| file_write | Write file | ✘ | ✔ | ✘ | ✘ | C-1's `append`: twice is not the same state twice |
 | file_manage | Manage files | ✘ | ✔ | ✘ | ✘ | |
 | file_search | Search files | ✔ | ✘ | ✔ | ✘ | |
 | file_info | File info | ✔ | ✘ | ✔ | ✘ | |
@@ -132,6 +132,7 @@ all four hints and a title on every tool.
   reads and cancels a job on this machine, and `powershell` is the call that runs the code.
 - Three tools (`job`, `watch`, `verify_signature`) return a plain `string` rather than a
   `Task`; the sweep and the tests find tools by the attribute, not the return type.
-- `file_write` is `Idempotent` today; C-1's `append` changes that and C-1 updates the row.
+- `file_write` was `Idempotent` when this table was written; C-1's `append` changed that and the
+  row above is the current answer (`Idempotent = false`, pinned in `ToolInventoryTests`).
 - `Name` is not set on any attribute: the SDK's naming is what every client already sees, and
   a test pins the snake_case names through the tool list, not the attribute.

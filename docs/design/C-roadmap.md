@@ -5,7 +5,7 @@ of the parity checklist. This is the implementation plan; each item still gets i
 `docs/design/<ID>-<slug>.md` note when it is picked up (checklist rule 1), and this file is the
 place those notes link back to for the cross-item decisions. ·
 **Status:** planned 2026-09-06 against `main` @ `4bd2122` (68 tools, v0.7.3 with sections D, A
-and B closed; the B release cut is still the owner's `/version-bump`). Phase 1 shipped
+and B closed; the B release cut is still the owner's `/version-bump`). Phases 1 and 2 shipped
 2026-09-06 (**69 tools**). Where the code deviates from the plan below, the item carries a
 **Shipped as** line and its design note the reasoning. ·
 **Baseline facts** used below were read from the code on that commit; the `file:line` anchors
@@ -183,6 +183,10 @@ seed (what `test-agent` should be handed), and the done-when bar.
 - **Done when.** `file_read(path, offset_lines:100, limit_lines:20)` returns lines 100–119 with
   `totalLines`, and `file_manage("delete", dir)` on a non-empty directory is refused naming
   `recursive`.
+- **Shipped as** ([note](C-1-file-flags.md)): as planned, with the service flags required
+  rather than defaulted (`FileTools` is the only caller), the windowed `file_read` result
+  carrying no `encoding` key, and R3's entry fields serialised PascalCase
+  (`{Path, Name, IsDirectory, Size, Modified, Hidden}`) like the other DTO-returning tools.
 
 #### C-3 — Process list CPU %, sort, limit; graceful kill  `P2 · M · ~3 h`
 
@@ -207,6 +211,11 @@ seed (what `test-agent` should be handed), and the done-when bar.
 - **Done when.** `process(list, sort_by:"cpu", limit:5)` returns the five busiest processes
   with a CPU column, and `process(kill, pid, graceful:true)` on Notepad closes it without
   `TerminateProcess`.
+- **Shipped as** ([note](C-3-process-cpu-graceful-kill.md)): as planned, except that the old
+  `ListAsync(nameFilter)` overload does not sample (the name kill goes through it), the CPU
+  readings are timestamped per process (one shared window over-counted by half), and the
+  graceful path posts `WM_CLOSE` to every visible window through the seam instead of
+  `CloseMainWindow()`.
 
 ### Phase 3 — shell and web
 

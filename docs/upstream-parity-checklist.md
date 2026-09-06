@@ -94,9 +94,9 @@ function names are the stable anchor.
 | B-10 | Fuzzy window match + robust bring-to-foreground | P1 | M | A-1 · [B-10](design/B-10-window-matching.md) | ☑ |
 | B-11 | `start_process` with argv list + cwd | P2 | S | [B-11](design/B-11-start-process-argv.md) | ☑ |
 | B-12 | `multi_monitor`: work area, orientation, DPI, scale | P2 | S | [B-12](design/B-12-monitor-detail.md) | ☑ |
-| C-1 | File tools: offset/limit, append, overwrite, recursive, pattern | P2 | M | — | ☐ |
+| C-1 | File tools: offset/limit, append, overwrite, recursive, pattern | P2 | M | [C-1](design/C-1-file-flags.md) | ☑ |
 | C-2 | Registry delete + subkey listing on the tool surface | P2 | S | [C-2](design/C-2-registry-delete.md) | ☑ |
-| C-3 | Process list CPU %, sort, limit; graceful kill | P2 | M | — | ☐ |
+| C-3 | Process list CPU %, sort, limit; graceful kill | P2 | M | [C-3](design/C-3-process-cpu-graceful-kill.md) | ☑ |
 | C-4 | Notification `app_id` (AUMID) | P3 | S | [C-4](design/C-4-notification-app-id.md) | ☑ |
 | C-5 | `scrape`: DOM source, query, MCP sampling summary | P2 | M | A-5 (DOM part) | ☐ |
 | C-6 | `powershell`: per-call timeout; env rebuild from registry | P2 | S–M | — | ☐ |
@@ -1012,7 +1012,7 @@ pixels.
 ## C — Files, registry, processes, notifications, scrape, shell
 
 ### C-1 — File tools: offset/limit, append, overwrite, recursive, pattern  `P2 · M`
-- [ ] Not started
+- [x] Done 2026-09-06 — [design note](design/C-1-file-flags.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `FileSystem` modes (`tools/filesystem.py`, `filesystem/service.py`): `read` with
 line `offset`/`limit`; `write` with `append` and parent creation; `copy`/`move` with `overwrite`
@@ -1020,7 +1020,7 @@ line `offset`/`limit`; `write` with `append` and parent creation; `copy`/`move` 
 otherwise); `list` with `pattern`, `recursive`, `show_hidden`; `search` glob; `info`. Relative
 paths resolve from the user's Desktop.
 
-**Ours.** `file_read(max_bytes, encoding)`, `file_write(confirm)` (no append),
+**Ours (before C-1).** `file_read(max_bytes, encoding)`, `file_write(confirm)` (no append),
 `file_manage(copy|move|delete|list)` with no overwrite/recursive/pattern flags. (We are ahead on
 hashing, ADS, duplicates, archives, and confirm gates.)
 
@@ -1047,14 +1047,14 @@ exposes them; no delete at all.
 `confirm:true` **and** `recursive:true` when it has subkeys. Update the Safety-rails list.
 
 ### C-3 — Process list CPU %, sort, limit; graceful kill  `P2 · M`
-- [ ] Not started
+- [x] Done 2026-09-06 — [design note](design/C-3-process-cpu-graceful-kill.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `Process(list, name?, sort_by=memory|cpu|name, limit=20)` prints PID, name,
 CPU %, memory (psutil, fuzzy name filter > 60); `kill(force)` = `terminate()` (graceful) vs
 `kill()` (`process/service.py`).
 
-**Ours.** `process(list)` has memory, path, lineage, orphan detection (ahead), but no CPU column,
-sort, or limit; kill is always hard.
+**Ours (before C-3).** `process(list)` had memory, path, lineage, orphan detection (ahead), but
+no CPU column, sort, or limit; kill was always hard.
 
 **Sketch.** CPU: two `TotalProcessorTime` samples ~250 ms apart normalised by core count, or
 `Win32_PerfFormattedData_PerfProc_Process` via `IWmiService`; `sort_by`, `limit`; kill:

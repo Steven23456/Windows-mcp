@@ -2,6 +2,46 @@
 
 ### Added
 
+- **`file_read` pages a large file, `file_write` appends, `file_manage` gained the flags that
+  make its defaults safe** (parity C-1, roadmap phase 2). `file_read(path, max_bytes, encoding,
+  offset_lines = 0, limit_lines = 0)` returns the same plain text as before when neither window
+  parameter is given, and a JSON `{path, totalLines, offset, returned, truncated, content}`
+  window when either is — `offset_lines` is 1-based (`0` and `1` both mean the first line),
+  `limit_lines: 0` runs to the end, and `truncated` says lines remain past the window, so a 5 MB
+  log is readable a page at a time instead of by raising `max_bytes`, which still bounds the
+  *file*. `file_write(…, append = false, create_parents = true)` adds to the end instead of
+  replacing (the reply says `appended`) and creates a missing parent directory unless
+  `create_parents: false` refuses it by name. `file_manage(…, overwrite = false,
+  recursive = false, pattern = null, include_hidden = false)`: `copy`/`move` take `overwrite`, a
+  directory `copy` copies the tree and a cross-volume `move` falls back to copy-then-delete;
+  `delete` takes `recursive`; and `list` returns
+  `[{Path, Name, IsDirectory, Size, Modified, Hidden}]` with a case-insensitive name glob
+  (`pattern`), optional recursion, and hidden/system entries skipped unless `include_hidden`
+  (a skipped directory is not descended into, and an inaccessible entry is skipped rather than
+  failing the listing). New pure `Services/LineWindow.cs`, new `FileEntry` and `TextWindow` DTOs,
+  and `IFileSystemService.ReadLinesAsync` beside the flags on `WriteTextAsync` / `CopyAsync` /
+  `MoveAsync` / `DeleteAsync` / `ListAsync`. No new service — the count stays 39. Design note:
+  `docs/design/C-1-file-flags.md`.
+- **`process(list)` has a CPU column, an order and a cap; `process(kill)` can ask first**
+  (parity C-3, roadmap phase 2). Every plain `process(list)` row now carries `CpuPercent`, taken
+  from two `TotalProcessorTime` readings ~250 ms apart and normalised across **all** cores — a
+  process saturating one of eight reads `12.5`, which is what Task Manager shows — with each
+  reading timestamped per process so the box sums to about 100 %. `sort_by`
+  (`memory` default | `cpu` | `name` | `pid`) and `limit` (`0` = all) order and cap that list;
+  both are refused rather than silently ignored with `includeLineage` / `groupByRoot` /
+  `orphans`, which have their own shapes and no CPU column. `process(kill, …, graceful = false,
+  grace_ms = 3000)` posts `WM_CLOSE` to every *visible* top-level window of the pid, waits up to
+  `grace_ms` (0–60000) and only then forces the process, so an editor can show its "save
+  changes?" prompt; a process with no window is forced at once and the result says so, and
+  `graceful` with `tree: true` is refused. New pure `Services/CpuSample.cs` (the normalisation,
+  the sort and the cap), the internal `IProcessWindowNative` / `Win32ProcessWindowNative` seam
+  (`EnumWindows` + `GetWindowThreadProcessId` + `PostMessage`, so the kill path is testable
+  headless), `ProcessSort` / `ProcessListOptions` / `KillOptions` / `KillResult` DTOs,
+  `ProcessDto +CpuPercent`, and `IProcessService.ListAsync(ProcessListOptions)` /
+  `KillAsync(pid, KillOptions)` beside the old overloads — the `ListAsync(nameFilter)` one still
+  does **not** sample, so a name kill and the startup report do not pay the 250 ms window. No new
+  service — the count stays 39. Design note:
+  `docs/design/C-3-process-cpu-graceful-kill.md`.
 - **`registry_delete` — remove a registry value or a whole key, behind `confirm`** (parity C-2;
   68 → 69 tools, roadmap R6). `registry_delete(hive, path, value_name?, recursive = false,
   confirm = false)` removes that one value when `value_name` is given, otherwise the key itself:
@@ -318,6 +358,46 @@
 
 ### Changed
 
+- **`file_manage` no longer overwrites or deletes a tree silently** (parity C-1 — two contract
+  breaks, deliberate). `copy` and `move` used to pass `overwrite: true` to the framework, so an
+  existing destination was replaced without a word; they now refuse it with an
+  `InvalidOperationException` naming the flag. `delete` used to remove a whole directory tree
+  behind nothing but `confirm: true`; it now refuses a **non-empty** directory naming
+  `recursive` (a file and an empty directory still need only `confirm`). **Migration:** pass
+  `overwrite: true` to keep the old copy/move behaviour and `recursive: true` to keep the old
+  delete behaviour — both are opt-in on purpose, since the old defaults destroyed data the
+  caller had not named.
+- **`file_manage(list)` returns file entries, not a string array of paths** (parity C-1 — a
+  contract break). It used to answer with `Directory.EnumerateFileSystemEntries`' bare paths, so
+  telling a directory from a file, or reading a size, cost a `file_info` call per entry. It now
+  returns `[{Path, Name, IsDirectory, Size, Modified, Hidden}]` (`Size` is `0` for a directory,
+  `Modified` is UTC). Hidden and system entries, which used to be listed, are now skipped unless
+  `include_hidden: true`. **Migration:** read `Path` out of each object instead of treating the
+  element as a string, and pass `include_hidden: true` where the old full listing mattered
+  (`startup_report`'s startup-folder scan does exactly that internally, so its reach is
+  unchanged).
+- **Every file tool refuses a relative path** (parity C-1 — a contract break). `file_read`,
+  `file_write`, `file_manage` (`src` **and** `dst`) and `file_search`'s `root` now require a
+  fully qualified path (`Path.IsPathFullyQualified`; UNC passes) and raise an `ArgumentException`
+  naming the parameter **before** the service is touched. A relative path used to resolve against
+  the server's working directory — whatever the MCP host happened to set, and nothing the caller
+  could see. **Migration:** pass absolute paths.
+- **`file_read` returns JSON when it is windowed, and `file_write` is no longer `idempotentHint`**
+  (parity C-1). A call with `offset_lines` and/or `limit_lines` answers with the
+  `{path, totalLines, offset, returned, truncated, content}` object rather than raw text; a call
+  with neither is byte-for-byte what it always was. `file_write`'s MCP annotation flips to
+  `Idempotent = false` because `append: true` twice is not the same state twice — the C-7 table
+  (`docs/design/C-7-tool-annotations.md`) and `ToolInventoryTests` carry the new answer.
+  **Migration:** parse the JSON only on the calls you window; nothing else changes.
+- **`process(kill)` by pid or name returns JSON, not a sentence** (parity C-3 — a contract
+  break). The pid kill used to answer `killed pid N` (or `killed pid N (start-time verified)`)
+  and the name kill `killed N process(es) named 'x'`, so a caller had to parse prose to learn
+  which processes went and had no way to see *how* they went. Both now return
+  `{killed:[{pid, name, graceful, exitedGracefully, forced, waitedMs}]}` — one row per process,
+  the same shape whether one or five matched the name. The **tree** kill is unchanged and keeps
+  its `killed N process(es) in tree of pid M` text. **Migration:** read `killed[].pid` (and
+  `killed.length` for a name kill) instead of matching the sentence; `exitedGracefully` /
+  `forced` are the new evidence of *how* it went.
 - **`registry_get` without a `value_name` returns the key, not a comma-joined string of value
   names** (parity C-2, roadmap R6 — a contract break). The tool used to answer with the value
   names joined by commas and nothing about sub-keys, so walking a key meant falling back to
