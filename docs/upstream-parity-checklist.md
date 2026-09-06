@@ -82,10 +82,10 @@ function names are the stable anchor.
 | A-12 | Virtual desktops (report; optional manage) | P3 | L | A-1 | ☑ (phase 1) |
 | A-13 | Unicode hygiene (PUA strip, surrogate repair) | P2 | S | — | ☑ |
 | A-14 | Post-capture flash overlay + snapshot profiling | P3 | M | — | ☑ |
-| B-1 | `type`: target, clear, caret, press_enter, paste path | P1 | M | D-2 | ☐ |
-| B-2 | `drag`: duration / intermediate motion / from-cursor | P2 | S | D-3 | ☐ |
-| B-3 | `scroll` at current cursor or element | P2 | S | — | ☐ |
-| B-4 | `click` by element id; `clicks=0` hover | P2 | S | D-2 | ☐ |
+| B-1 | `type`: target, clear, caret, press_enter, paste path | P1 | M | D-2 · [B-1](design/B-1-type.md) | ☑ |
+| B-2 | `drag`: duration / intermediate motion / from-cursor | P2 | S | D-3 · [B-2](design/B-2-drag.md) | ☑ |
+| B-3 | `scroll` at current cursor or element | P2 | S | [B-3](design/B-3-scroll.md) | ☑ |
+| B-4 | `click` by element id; `clicks=0` hover | P2 | S | D-2 · [B-4](design/B-4-click-by-element.md) | ☑ |
 | B-5 | Plain `wait` tool | P1 | S | [B-5](design/B-5-wait.md) | ☑ |
 | B-6 | `wait_for` conditions + window filter | P2 | M | A-1, A-2 | ☐ |
 | B-7 | `multi_select` / `multi_edit` batch tools | P2 | S–M | B-1 | ☐ |
@@ -807,7 +807,7 @@ valueless flags, so the sketch's `WINDOWSMCP_DISABLE_FLASH` shipped as `--flash 
 ## B — Input, apps, and window ergonomics
 
 ### B-1 — `type`: target, clear, caret, press_enter, long-text paste  `P1 · M`
-- [ ] Not started
+- [x] Done 2026-09-06 — [design note](design/B-1-type.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `Type(text, loc|label, clear, caret_position=start|idle|end, press_enter)`:
 clicks the target, moves the caret (Home/End), clears with Ctrl+A + Backspace, then either
@@ -815,7 +815,7 @@ per-key `SendKeys` with escaping and 40 ms pacing (short text or text containing
 `{`, `}`) or a **clipboard paste** for long plain text that restores the previous clipboard
 (`desktop/service.py` `type()` ~716, `_paste_text()` ~747, `_escape_text_for_sendkeys()`).
 
-**Ours.** `type(text)` = `Keyboard.TextEntry` into whatever has focus; no targeting, no clear, no
+**Ours (before B-1).** `type(text)` = `Keyboard.TextEntry` into whatever has focus; no targeting, no clear, no
 enter, no long-text strategy (long `TextEntry` bursts drop keys in some apps).
 
 **Sketch.** `TypeOptions(int? X, int? Y, string? ElementId, bool Clear, Caret Caret,
@@ -832,13 +832,13 @@ back via `get_text`).
 content and submits; 5 000 characters arrive intact.
 
 ### B-2 — `drag`: duration, intermediate motion, from current cursor  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-06 — [design note](design/B-2-drag.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `Move(loc, drag=true, from_loc?, duration≤10s)` → `uia.DragDrop(cx,cy,x,y,
 moveSpeed=1, duration)` with interpolated intermediate points; `from_loc` omitted = start at the
 current cursor (`drag()` ~829).
 
-**Ours.** `DragAsync` = button down, one absolute jump, button up (`InputService.cs:74`). Many
+**Ours (before B-2).** `DragAsync` = button down, one absolute jump, button up (`InputService.cs:74`). Many
 targets (file managers, canvases, DnD in browsers) need intermediate `WM_MOUSEMOVE`s to
 recognise a drag.
 
@@ -850,12 +850,12 @@ initial nudge to exceed `SM_CXDRAG`, release. Keep the middle-button rejection.
 works.
 
 ### B-3 — `scroll` at current cursor or at an element  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-06 — [design note](design/B-3-scroll.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `Scroll(loc=None)` scrolls at the current mouse position; `label` targets an
 element; `type=horizontal` uses Shift+wheel for apps without horizontal wheel support.
 
-**Ours.** `scroll(x, y, direction, amount)` — coordinates mandatory.
+**Ours (before B-3).** `scroll(x, y, direction, amount)` — coordinates mandatory.
 
 **Sketch.** Make `x,y` optional; add `element_id` (centre from Bounds / A-3); if horizontal scroll
 has no effect, optional `use_shift_wheel:true`.
@@ -863,11 +863,11 @@ has no effect, optional `use_shift_wheel:true`.
 **Done when.** `scroll(direction="down")` with no coordinates scrolls under the cursor.
 
 ### B-4 — `click` by element id; `clicks=0` hover  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-06 — [design note](design/B-4-click-by-element.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `Click(loc|label, button, clicks 0|1|2)`; `0` = hover only.
 
-**Ours.** `click(x,y,button,clicks)`; separate `hover`. `interact_element` cannot physically
+**Ours (before B-4).** `click(x,y,button,clicks)`; separate `hover`. `interact_element` cannot physically
 click (D-2).
 
 **Sketch.** `element_id` alternative on `click` (resolve centre; refuse if `IsOffscreen`); accept

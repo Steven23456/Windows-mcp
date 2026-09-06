@@ -176,6 +176,21 @@ operations. See [`skills/windows/SKILL.md`](skills/windows/SKILL.md).
 | Web | `scrape`, `http_request` |
 | Monitoring | `integrity` (file-integrity tripwire), `fs_changes` (NTFS USN journal), `watch` (live directory watch) |
 
+`click`, `type`, `scroll` and `drag` take a target the same way: `x` and `y` in virtual-desktop
+pixels, or an `el_N` `element_id` from `snapshot`/`find_element` whose centre they aim at (an
+off-screen element, or one with no bounds, is refused with the reason instead of clicking a
+meaningless point). Giving both, or half a coordinate pair, is an error. `scroll` with no target
+scrolls under the current cursor and `drag`'s origin defaults to it; each response says which of
+`point`/`element`/`cursor` was used and where. `click(clicks: 0)` hovers, `scroll(shift_wheel:
+true)` holds Shift and uses the vertical wheel for `left`/`right`, and `drag(duration_ms, steps)`
+presses, nudges past the system drag threshold, moves through interpolated points and releases —
+which is what file managers, canvases and browser drag-and-drop need to see.
+`type(text, element_id?, clear?, caret?, press_enter?)` does the whole field edit in one call:
+click the target, `clear` (Ctrl+A, Backspace), place the caret (`start`/`end`), type, press
+Enter. Newlines are typed as Enter and tabs as Tab; text of 200+ characters with no other control
+characters goes through the clipboard as one paste and the previous clipboard text is put back
+(the result's `method` says `keys` or `paste`).
+
 Name a window by `Title` — matched exact, then substring, then fuzzy (score ≥ 70), so
 `switch_to_window("notepad")` finds `Untitled - Notepad` — or by the `Hwnd` from
 `window(action:"list")`, which wins over a title. `switch_to_window`/`focus` return

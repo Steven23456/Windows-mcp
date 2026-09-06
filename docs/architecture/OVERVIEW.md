@@ -83,13 +83,13 @@ Windows-MCP exposes **66 MCP tools** across 19 tool classes:
 ### Input Tools (`InputTools` — 9 tools)
 | Tool | Purpose |
 |------|---------|
-| `Click` | Click at screen coordinates (left/right/middle, single/double/triple) |
-| `Drag` | Drag from one point to another |
+| `Click` | Click at coordinates *or* on a snapshot element (`element_id` → its centre): left/right/middle, single/double/triple, `clicks:0` = hover only |
+| `Drag` | Drag from a point, an element, or the current cursor to a point or an element — a nudge past the drag threshold then `steps` interpolated moves over `duration_ms` |
 | `Hover` | Hover cursor at coordinates with optional duration |
-| `Type` | Type a string into the focused input |
+| `Type` | Type into a target (`x`/`y`, `element_id`) or the focused input: optional `clear`, `caret` (start/end), `press_enter`; keys or a clipboard paste for long text |
 | `Key` | Press one key: a character (`a`, `7`, `/`), `f1`-`f24`, or a name (enter, tab, esc, arrows, win, printscreen, …) |
 | `Shortcut` | Press a chord (`ctrl+c`, `ctrl+shift+s`, `win+r`); a single key such as `win` also works |
-| `Scroll` | Scroll the mouse wheel (up/down/left/right) |
+| `Scroll` | Scroll the mouse wheel (up/down/left/right) at a point, an element's centre, or wherever the cursor is; `shift_wheel` for sideways scrolling with the vertical wheel |
 | `Wait` | Pause for `seconds` (more than 0, at most 60) in-process, instead of a PowerShell sleep; returns `{"waited": seconds}` |
 | `Clipboard` | Get or set clipboard text |
 

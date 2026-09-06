@@ -171,6 +171,9 @@ checklist unless corrected.
   descriptions; `UIAutomation`: `snapshot` → `click(element_id: <Notepad's editor>)` focuses it.
 - **Done when.** `click(element_id:"el_12")` clicks the centre of that element and refuses
   `el_N` that is off-screen with a message that says so.
+- **Shipped as** ([note](B-4-click-by-element.md)): as planned; the resolver lives in
+  `InputTools` and takes the parameter names in play so `drag`'s refusals name its own
+  parameters. Optional response fields are emitted as `null` rather than omitted.
 
 #### B-1 — `type`: target, clear, caret, press_enter, long-text paste  `P1 · M · ~3 h`
 
@@ -190,6 +193,14 @@ checklist unless corrected.
   via paste and the clipboard holds what it held before.
 - **Done when.** `type("hello", element_id, clear:true, press_enter:true)` replaces a field's
   content and submits; 5 000 characters arrive intact.
+- **Shipped as** ([note](B-1-type.md)): an id is a physical click at the centre like every
+  verb (no `focus`-first step); the caret moves are chords (`ctrl+home`/`ctrl+end`) because
+  `PressKeyAsync` resolves one token; the response is flattened to `{typed, method,
+  clipboardRestored?, x?, y?, elementId?, name?}`; **`interact_element(type)` did not gain
+  `clear`** — it inherits the newline → Enter split and the paste path through the
+  single-argument `TypeAsync`, and `clear`/`caret`/`press_enter` on it stay open (D-2's
+  follow-up line in the checklist). The simulator sink types one character per call with the
+  pace between them, which the desktop forced (see the note).
 
 #### B-3 — `scroll` at current cursor or at an element  `P2 · S · ~1 h`
 
@@ -202,6 +213,8 @@ checklist unless corrected.
   refused for `up`/`down`; direction table unchanged; `UIAutomation`: Notepad with a long file
   scrolls under the cursor and the snapshot's scroll percent changes.
 - **Done when.** `scroll(direction:"down")` with no coordinates scrolls under the cursor.
+- **Shipped as** ([note](B-3-scroll.md)): as planned; the checklist's `use_shift_wheel` is
+  `shift_wheel`, refused for a vertical direction at the tool before the cursor is read.
 
 #### B-2 — `drag`: duration, intermediate motion, from current cursor  `P2 · S · ~2 h`
 
@@ -216,6 +229,10 @@ checklist unless corrected.
   `ctrl+c` + clipboard).
 - **Done when.** Dragging a file between two Explorer windows works; a Notepad text drag-select
   works.
+- **Shipped as** ([note](B-2-drag.md)): the four coordinates stay the first four parameters
+  (`from_x, from_y, to_x, to_y`), then `element_id`, `from_element_id`; the response names the
+  destination element only. The Explorer file drag is not in the tests (no fixture for it);
+  the Notepad text drag-select is.
 
 ### Phase 3 — apps and windows
 

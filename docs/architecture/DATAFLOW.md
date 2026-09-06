@@ -173,23 +173,35 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
 
 ---
 
-## Click Data Flow
+## Click Data Flow (and the shared target resolver)
+
+`click`, `type`, `scroll` and `drag` all start at `InputTools.ResolveTargetAsync` (roadmap C1),
+so the point is decided — and an unreachable element refused — before any input is injected.
 
 ```
 ┌──────────┐   ┌────────────┐   ┌──────────────────┐   ┌────────────────────┐
 │ AI Agent │   │InputTools  │   │  InputService    │   │ Win32 (user32) +   │
-│          │   │            │   │                  │   │ H.InputSimulator   │
+│          │   │            │   │  UIAutomationSvc │   │ H.InputSimulator   │
 └────┬─────┘   └─────┬──────┘   └────────┬─────────┘   └─────────┬──────────┘
      │               │                   │                        │
-     │ Click(x,y,    │                   │                        │
+     │ Click(x?,y?,  │                   │                        │
+     │  element_id?, │                   │                        │
      │  button,      │                   │                        │
      │  clicks)      │                   │                        │
      ├──────────────►│                   │                        │
      │               │ ParseButton(btn)  │                        │
+     │               │ ResolveTarget:    │                        │
+     │               │  GetElementAsync  │  (element_id only —    │
+     │               ├──────────────────►│   a coordinate call    │
+     │               │  ElementInfo      │   never touches UIA)   │
+     │               │◄──────────────────┤                        │
+     │               │ ElementTarget     │                        │
+     │               │  .CentreOf(info)  │  (off-screen / no      │
+     │               │  → (x, y)         │   bounds → refused)    │
      │               ├──────────────────►│                        │
      │               │  ClickAsync(x,y,  │                        │
-     │               │  MouseButton,     │                        │
-     │               │  clicks)          │                        │
+     │               │  MouseButton,     │  (clicks:0 → HoverAsync│
+     │               │  clicks)          │   and nothing pressed) │
      │               ├──────────────────►│                        │
      │               │                   │ SetCursorPos(x, y)     │
      │               │                   ├───────────────────────►│
@@ -208,16 +220,50 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
 ### Data
 
 ```
-Input:  x=800, y=400, button="right", clicks=1
+Input:  element_id="el_12", button="right", clicks=1
 
 Processing:
   ParseButton("right") → MouseButton.Right
+  ResolveTargetAsync(null, null, "el_12", allowCursor: false):
+    ├─► IUIAutomationService.GetElementAsync("el_12")  // the snapshot/find_element id cache
+    └─► ElementTarget.CentreOf(info) → (800, 400)      // Bounds.X + Width/2, Bounds.Y + Height/2
   InputService.ClickAsync(800, 400, MouseButton.Right, 1):
     ├─► SetCursorPos(800, 400) + GetCursorPos   // physical virtual-desktop pixels; throws if clamped
     └─► IMouseSimulator.RightButtonClick()      // SendInput(MOUSE_RIGHT_DOWN + MOUSE_RIGHT_UP) at the cursor
 
-Output: ClickResult { X=800, Y=400, Button="Right", Clicks=1 }
-        → JSON: {"X":800,"Y":400,"Button":"Right","Clicks":1}
+Output: {"action":"click","x":800,"y":400,"button":"right","clicks":1,
+         "elementId":"el_12","name":"Save"}
+```
+
+With `x`/`y` instead of the id the resolver returns the point unchanged and `elementId`/`name`
+are `null`; `scroll` and `drag`'s origin allow no target at all, which reads
+`IInputService.GetCursorPositionAsync()` and reports `cursor`.
+
+---
+
+## Type Data Flow (keys or paste)
+
+`type` resolves its target the same way, clicks it when one was given, and then hands the text to
+the pure `TypePlanner` (roadmap C8); `InputService` executes the plan against its `IKeyboardSink`.
+
+```
+Input:  text="report.txt", element_id="el_7", clear=true, press_enter=true, pace_ms=5
+
+Processing:
+  ResolveTargetAsync(…, "el_7") → (420, 260)   → ClickAsync(420, 260, Left, 1)
+  TypePlanner.Plan("report.txt", TypeOptions(Clear:true, Idle, PressEnter:true, 5)):
+    ├─► shortcut "ctrl+a"      (Clear)
+    ├─► key      "backspace"   (Clear)
+    ├─► text     "report.txt"  (< 200 chars → keys; a "\n" here would be key "enter")
+    └─► key      "enter"       (PressEnter)
+  InputService.TypeAsync: each step on the sink, Task.Delay(PaceMs) between steps
+
+  A ≥ 200-character step with no control characters other than \n/\t becomes ONE paste step:
+    GetTextAsync() → previous  ·  SetTextAsync(text)  ·  shortcut "ctrl+v"
+    · 150 ms settle · SetTextAsync(previous)          → clipboardRestored: true
+
+Output: {"typed":10,"method":"keys","clipboardRestored":null,
+         "x":420,"y":260,"elementId":"el_7","name":"File name"}
 ```
 
 ---
@@ -526,6 +572,7 @@ builder.Build()
   │                                                 │
   │  InputTools ← IInputService (InputService)      │
   │            ← IClipboardService (ClipboardSvc)  │
+  │            ← IUIAutomationService (element_id) │
   │                                                 │
   │  UIAutomationTools ← IUIAutomationService       │
   │                      (UIAutomationService)      │
@@ -718,7 +765,9 @@ Scrollable (1):
 | Location | Behavior | Notes |
 |----------|----------|-------|
 | `WaitFor` | Polls every `interval_ms` (default 500ms) up to `timeout_ms` (default 10s); sleep clamped to the remaining budget, minimum 10ms | Only tool with a loop; a failed poll is retried, and every-poll-failed throws rather than reporting `null` |
-| `InputService` | No delays: clicks are back-to-back `SendInput`; the cursor is placed with `SetCursorPos` and read back before any button event | A clamped (off-monitor) point throws rather than clicking elsewhere |
+| `InputService` clicks | No delays: clicks are back-to-back `SendInput`; the cursor is placed with `SetCursorPos` and read back before any button event | A clamped (off-monitor) point throws rather than clicking elsewhere |
+| `InputService.TypeAsync` | `TypeOptions.PaceMs` (default 5 ms) between the steps of a typing plan, never after the last one; a paste waits 150 ms after `ctrl+v` before restoring the previous clipboard text | The settle only runs on the real simulator sink, so the unit tests do not pay it. The target reads the clipboard on its own schedule, which is what the settle covers |
+| `InputService.DragAsync(…, durationMs, steps)` | `durationMs / steps` between the interpolated moves (default 300 ms / 20 = 15 ms), including after the last one; `durationMs:0` moves without pausing | A drop target needs real motion, not a teleport; the button is released in a `finally`, so a cancelled drag never leaves it down |
 | `wait` (`InputTools`) | The only tool whose *job* is a delay: one `Task.Delay(seconds)` on the request's cancellation token, `seconds` in (0, 60] | Validated in the tool before the delay; outside the range is an `ArgumentException` naming it and pointing at `wait_for`. No process is spawned — it replaces `powershell("Start-Sleep")`, which paid a cold start and took the serialization gate |
 | `PowerShellService` | Async wait on process exit | 15-min execution backstop (armed after the serialization gate); caller cancellation kills the process tree |
 | `ShellTools` heartbeat | Progress notification every 10s during a foreground `powershell` call | Lets spec-compliant clients reset their request timeout |

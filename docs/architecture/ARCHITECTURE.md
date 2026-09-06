@@ -109,16 +109,22 @@ public sealed class InputTools
 {
     private readonly IInputService _input;
     private readonly IClipboardService _clipboard;
+    private IUIAutomationService Uia { get; }        // B-4: turns element_id into a point
 
-    public InputTools(IInputService input, IClipboardService clipboard)
+    public InputTools(IInputService input, IClipboardService clipboard, IUIAutomationService uia)
     {
         _input = input;
         _clipboard = clipboard;
+        Uia = uia;
     }
 
-    [McpServerTool, Description("Click at screen coordinates. Coordinates are physical pixels on the virtual desktop: origin = top-left of the primary monitor, so monitors left of / above it have negative values (see multi_monitor for each monitor's bounds).")]
-    public async Task<string> Click(int x, int y, string button = "left", int clicks = 1)
-        => JsonSerializer.Serialize(await _input.ClickAsync(x, y, ParseButton(button), clicks));
+    [McpServerTool, Description("Click at a point or on a snapshot element. Give x and y (physical virtual-desktop pixels …) or element_id (an el_N id from snapshot/find_element …). clicks: 1 single, 2 double, 3 triple, 0 = hover only. Returns {action: click|hover, x, y, button, clicks, elementId?, name?}.")]
+    public async Task<string> Click(int? x = null, int? y = null, string? element_id = null,
+                                    string button = "left", int clicks = 1)
+    {
+        var target = await ResolveTargetAsync(x, y, element_id, allowCursor: false);
+        // … HoverAsync when clicks == 0, else ClickAsync at target.X/target.Y
+    }
 }
 ```
 
@@ -126,7 +132,7 @@ public sealed class InputTools
 
 | Tool Class | Tools | Services Injected |
 |------------|-------|------------------|
-| `InputTools` | 9 | `IInputService`, `IClipboardService` |
+| `InputTools` | 9 | `IInputService`, `IClipboardService`, `IUIAutomationService` (B-4: resolves `element_id` to a point) |
 | `UIAutomationTools` | 9 | `IUIAutomationService` |
 | `FileTools` | 9 | `IFileSystemService`, `IInputService`, `IFileStreamService` |
 | `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService` |
@@ -162,11 +168,15 @@ public interface IInputService
 {
     Task<ClickResult> ClickAsync(int x, int y, MouseButton button, int clicks);
     Task<DragResult> DragAsync(int fromX, int fromY, int toX, int toY, MouseButton button);
+    Task<DragResult> DragAsync(int fromX, int fromY, int toX, int toY, MouseButton button,
+                               int durationMs, int steps);          // B-2: nudge + interpolated moves
     Task HoverAsync(int x, int y, int durationMs);
     Task<TypeResult> TypeAsync(string text);
+    Task<TypeResult> TypeAsync(string text, TypeOptions options);   // B-1: clear/caret/enter, keys or paste
     Task PressKeyAsync(string key);
     Task PressShortcutAsync(string shortcut);
     Task ScrollAsync(int x, int y, string direction, int amount);
+    Task ScrollAsync(int x, int y, string direction, int amount, bool shiftWheel);   // B-3
     Task<CursorPosition> GetCursorPositionAsync();
 }
 ```
@@ -242,8 +252,8 @@ app.MapMcp("/mcp");
 Each service interface covers exactly one domain. Tool classes declare only the interfaces they actually use:
 
 ```csharp
-// InputTools only needs input + clipboard — not screenshot, not filesystem
-public InputTools(IInputService input, IClipboardService clipboard)
+// InputTools only needs input + clipboard + the element lookup — not screenshot, not filesystem
+public InputTools(IInputService input, IClipboardService clipboard, IUIAutomationService uia)
 ```
 
 ### 3. Source-Generated Tool Discovery
@@ -256,7 +266,7 @@ Model types in `WindowsMcp.Abstractions.Models` use C# records for immutability:
 
 ```csharp
 public record AudioState(int Level, bool Muted);
-public record ClickResult(int X, int Y, string Button, int Clicks);
+public record ClickResult(int X, int Y, MouseButton Button, int Clicks);
 ```
 
 ### 5. Async-First API Surface
@@ -295,11 +305,14 @@ Windows-mcp.slnx
 │   │   │   ├── UsnTools.cs
 │   │   │   └── WatchTools.cs
 │   │   ├── Services/                      (38 service implementations + helpers)
-│   │   │   ├── InputService.cs
+│   │   │   ├── InputService.cs            (+ TypePlanner, DragPath, IKeyboardSink and
+│   │   │   │                               SimulatorKeyboardSink — B-1's typing plan and
+│   │   │   │                               keystroke seam, B-2's drag path)
 │   │   │   ├── UIAutomationService.cs
 │   │   │   ├── ScreenshotService.cs       (+ WgcCaptureBackend, Annotator, FlashOverlay, FlashGlow)
 │   │   │   ├── UiTree/                    (snapshot core: UiNode, UiClassifier, ElementBudget,
-│   │   │   │                               UiTraverser, SnapshotRenderer, DomCorrection)
+│   │   │   │                               UiTraverser, SnapshotRenderer, DomCorrection,
+│   │   │   │                               ElementTarget — B-4's element_id → point)
 │   │   │   ├── WindowService.cs           (+ FuzzyMatch, WindowMatcher, ForegroundLadder and
 │   │   │   │                               Win32ForegroundNative — B-10's matcher and ladder)
 │   │   │   ├── ProcessService.cs          (+ ArgvJson — B-11's args_json parser)

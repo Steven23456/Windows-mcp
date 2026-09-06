@@ -15,6 +15,35 @@ public sealed class InputService : IInputService
     private readonly InputSimulator _sim = new();
 
     /// <summary>
+    /// B-1: the clipboard the paste path borrows and puts back. DI supplies the real one; the
+    /// parameterless construction (tests, D-2's fallback) has none, so a paste is impossible
+    /// there and long text is typed instead.
+    /// </summary>
+    internal IClipboardService? Clipboard { get; }
+
+    /// <summary>B-1: where typing plans are executed; null = the real simulator, a recorder in the unit tests.</summary>
+    internal IKeyboardSink? Keyboard { get; }
+
+    private SimulatorKeyboardSink? _simulatorSink;
+    private IKeyboardSink Sink
+    {
+        get
+        {
+            if (Keyboard is not null) return Keyboard;
+            return _simulatorSink ??= new SimulatorKeyboardSink(_sim);
+        }
+    }
+
+    /// <summary>After Ctrl+V the target reads the clipboard on its own schedule; the previous text is put back after this.</summary>
+    private static readonly TimeSpan PasteSettle = TimeSpan.FromMilliseconds(150);
+
+    public InputService(IClipboardService? clipboard = null) => Clipboard = clipboard;
+
+    /// <summary>Test seam (B-1): record the keystrokes a type plan produces without injecting any.</summary>
+    internal InputService(IClipboardService? clipboard, IKeyboardSink keyboard) : this(clipboard)
+        => Keyboard = keyboard;
+
+    /// <summary>
     /// Places the cursor at (<paramref name="x"/>, <paramref name="y"/>): physical pixels on the
     /// virtual desktop, origin at the primary monitor's top-left, so monitors left of / above it
     /// have negative coordinates. The button and wheel events sent afterwards carry no position of
@@ -93,6 +122,41 @@ public sealed class InputService : IInputService
         return Task.FromResult(new DragResult(fromX, fromY, toX, toY, button));
     }
 
+    /// <summary>
+    /// B-2: press at the origin, then a short nudge past the system drag threshold and
+    /// <paramref name="steps"/> interpolated moves spread over <paramref name="durationMs"/>, then
+    /// release exactly on the destination. The button is released even when the drag is cancelled.
+    /// </summary>
+    public async Task<DragResult> DragAsync(int fromX, int fromY, int toX, int toY, MouseButton button, int durationMs, int steps, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (button == MouseButton.Middle)
+            throw new NotSupportedException("Middle-button drag is not supported by H.InputSimulator");
+        if (durationMs < 0) throw new ArgumentOutOfRangeException(nameof(durationMs), durationMs, "durationMs cannot be negative");
+        if (steps < 1) throw new ArgumentOutOfRangeException(nameof(steps), steps, "steps must be at least 1");
+
+        int nudge = PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CXDRAG) + 1;
+        var points = DragPath.Points((fromX, fromY), (toX, toY), steps, nudge);
+        var pause = TimeSpan.FromMilliseconds((double)durationMs / steps);
+
+        MoveCursor(fromX, fromY);
+        if (button == MouseButton.Left) _sim.Mouse.LeftButtonDown(); else _sim.Mouse.RightButtonDown();
+        try
+        {
+            foreach (var (x, y) in points)
+            {
+                ct.ThrowIfCancellationRequested();
+                MoveCursor(x, y);
+                if (pause > TimeSpan.Zero) await Task.Delay(pause, ct).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            if (button == MouseButton.Left) _sim.Mouse.LeftButtonUp(); else _sim.Mouse.RightButtonUp();
+        }
+        return new DragResult(fromX, fromY, toX, toY, button);
+    }
+
     public Task HoverAsync(int x, int y, int durationMs = 0, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -102,45 +166,132 @@ public sealed class InputService : IInputService
     }
 
     public Task<TypeResult> TypeAsync(string text, CancellationToken ct = default)
+        => TypeAsync(text, new TypeOptions(), ct);
+
+    /// <summary>
+    /// B-1 (roadmap C8): runs the <see cref="TypePlanner"/> plan — clear, caret, then the text by
+    /// keys (newlines and tabs as Enter and Tab, <c>PaceMs</c> between steps) or by one clipboard
+    /// paste that restores the previous clipboard text afterwards — and reports which path ran.
+    /// A paste that cannot borrow the clipboard falls back to keys and says so.
+    /// </summary>
+    public async Task<TypeResult> TypeAsync(string text, TypeOptions options, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        _sim.Keyboard.TextEntry(text);
-        return Task.FromResult(new TypeResult(text.Length));
+        var plan = TypePlanner.Plan(text, options);   // a negative pace is refused before any keystroke
+        var sink = Sink;
+        if (sink is SimulatorKeyboardSink simulator) simulator.PaceMs = options.PaceMs;
+        string method = plan.Method;
+        bool? restored = null;
+
+        for (int i = 0; i < plan.Steps.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var step = plan.Steps[i];
+            switch (step.Kind)
+            {
+                case "shortcut": sink.Shortcut(step.Value); break;
+                case "key": sink.Key(step.Value); break;
+                case "text": sink.Text(step.Value); break;
+                case "paste":
+                    {
+                        var outcome = await PasteAsync(step.Value, sink, ct).ConfigureAwait(false);
+                        if (outcome is null) method = "keys";   // typed instead: the clipboard was not available
+                        else restored = outcome;
+                        break;
+                    }
+            }
+            if (options.PaceMs > 0 && i < plan.Steps.Count - 1)
+                await Task.Delay(options.PaceMs, ct).ConfigureAwait(false);
+        }
+
+        return new TypeResult(text.Length, method, restored);
+    }
+
+    /// <summary>
+    /// Borrows the clipboard for one Ctrl+V. Null when there was no clipboard to borrow (the text
+    /// was typed instead); otherwise whether the previous text was put back.
+    /// </summary>
+    private async Task<bool?> PasteAsync(string text, IKeyboardSink sink, CancellationToken ct)
+    {
+        if (Clipboard is null)
+        {
+            sink.Text(text);
+            return null;
+        }
+
+        string? previous;
+        try
+        {
+            previous = await Clipboard.GetTextAsync(ct).ConfigureAwait(false);
+            await Clipboard.SetTextAsync(text, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            sink.Text(text);   // another app holds the clipboard: type it, slowly but surely
+            return null;
+        }
+
+        sink.Shortcut("ctrl+v");
+        if (previous is null) return false;   // nothing to restore: the clipboard held no text
+
+        try
+        {
+            if (Keyboard is null) await Task.Delay(PasteSettle, ct).ConfigureAwait(false);   // real desktop only
+            await Clipboard.SetTextAsync(previous, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return false;
+        }
     }
 
     public Task PressKeyAsync(string key, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var token = ShortcutParser.ResolveKey(key);
-        if (token.ImpliedModifiers.Length == 0)
-            _sim.Keyboard.KeyPress(token.Key);
-        else
-            _sim.Keyboard.ModifiedKeyStroke(token.ImpliedModifiers, token.Key);   // e.g. key("+") on a US layout = Shift + OEM_PLUS
+        Sink.Key(key);
         return Task.CompletedTask;
     }
 
     public Task PressShortcutAsync(string shortcut, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var chord = ShortcutParser.Parse(shortcut);
-        if (chord.Modifiers.Length == 0)
-            _sim.Keyboard.KeyPress(chord.Key);                                     // bare key: "win" opens Start, "esc" dismisses
-        else
-            _sim.Keyboard.ModifiedKeyStroke(chord.Modifiers, chord.Key);
+        Sink.Shortcut(shortcut);
         return Task.CompletedTask;
     }
 
-    public async Task ScrollAsync(int x, int y, string direction, int amount = 3, CancellationToken ct = default)
+    public Task ScrollAsync(int x, int y, string direction, int amount = 3, CancellationToken ct = default)
+        => ScrollAsync(x, y, direction, amount, shiftWheel: false, ct);
+
+    /// <summary>
+    /// B-3: the wheel at a point. <paramref name="shiftWheel"/> sends Shift + the vertical wheel
+    /// for <c>left</c>/<c>right</c> — the horizontal scroll for apps that ignore the horizontal
+    /// wheel — and is refused for a vertical direction.
+    /// </summary>
+    public async Task ScrollAsync(int x, int y, string direction, int amount, bool shiftWheel, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        var dir = direction.ToLowerInvariant();
+        if (dir is not ("up" or "down" or "left" or "right"))
+            throw new ArgumentException($"Invalid direction: '{direction}'", nameof(direction));
+        if (shiftWheel && dir is "up" or "down")
+            throw new ArgumentException("shiftWheel is the horizontal scroll: use it with left or right only.", nameof(shiftWheel));
+
         await HoverAsync(x, y, 0, ct);
-        switch (direction.ToLowerInvariant())
+        if (shiftWheel)
+        {
+            // Shift + wheel up scrolls left, Shift + wheel down scrolls right, by convention.
+            _sim.Keyboard.KeyDown(VirtualKeyCode.SHIFT);
+            try { _sim.Mouse.VerticalScroll(dir == "left" ? amount : -amount); }
+            finally { _sim.Keyboard.KeyUp(VirtualKeyCode.SHIFT); }
+            return;
+        }
+        switch (dir)
         {
             case "up":    _sim.Mouse.VerticalScroll(amount);    break;
             case "down":  _sim.Mouse.VerticalScroll(-amount);   break;
             case "left":  _sim.Mouse.HorizontalScroll(-amount); break;
             case "right": _sim.Mouse.HorizontalScroll(amount);  break;
-            default: throw new ArgumentException($"Invalid direction: '{direction}'", nameof(direction));
         }
     }
 
@@ -151,5 +302,48 @@ public sealed class InputService : IInputService
         if (!PInvoke.GetCursorPos(out var p))
             throw new InvalidOperationException($"GetCursorPos failed (Win32 error {Marshal.GetLastPInvokeError()}).");
         return Task.FromResult(new CursorPosition(p.X, p.Y));
+    }
+}
+
+/// <summary>
+/// B-1: the production <see cref="IKeyboardSink"/> — H.InputSimulator's keyboard. Text goes in
+/// one character per SendInput call with <see cref="PaceMs"/> between them: a whole chunk in one
+/// call is exactly what a target that falls behind its input queue garbles (it reads the last
+/// injected character for every queued key, so "abc" arrives as "c"), which is why upstream
+/// paces per key too.
+/// </summary>
+internal sealed class SimulatorKeyboardSink(InputSimulator sim) : IKeyboardSink
+{
+    /// <summary>Milliseconds between characters and after every step; set by the executor from <c>TypeOptions.PaceMs</c>.</summary>
+    public int PaceMs { get; set; } = 5;
+
+    public void Shortcut(string chord)
+    {
+        var parsed = ShortcutParser.Parse(chord);
+        if (parsed.Modifiers.Length == 0)
+            sim.Keyboard.KeyPress(parsed.Key);                                    // bare key: "win" opens Start, "esc" dismisses
+        else
+            sim.Keyboard.ModifiedKeyStroke(parsed.Modifiers, parsed.Key);
+    }
+
+    public void Key(string key)
+    {
+        var token = ShortcutParser.ResolveKey(key);
+        if (token.ImpliedModifiers.Length == 0)
+            sim.Keyboard.KeyPress(token.Key);
+        else
+            sim.Keyboard.ModifiedKeyStroke(token.ImpliedModifiers, token.Key);    // e.g. key("+") on a US layout = Shift + OEM_PLUS
+    }
+
+    public void Text(string text)
+    {
+        // One character per call, so a surrogate pair stays together and nothing is batched.
+        for (int i = 0; i < text.Length; i++)
+        {
+            bool pair = char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]);
+            sim.Keyboard.TextEntry(pair ? text.Substring(i, 2) : text[i].ToString());
+            if (pair) i++;
+            if (PaceMs > 0 && i < text.Length - 1) Thread.Sleep(PaceMs);
+        }
     }
 }
