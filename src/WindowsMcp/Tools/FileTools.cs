@@ -19,7 +19,7 @@ public sealed class FileTools
         _streams = streams;
     }
 
-    [McpServerTool, Description("Search for files. root: starting directory. pattern: glob (e.g. '*.txt'). min_size: bytes. modified_since: ISO 8601 datetime. find_duplicates: group identical files.")]
+    [McpServerTool(Title = "Search files", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Search for files. root: starting directory. pattern: glob (e.g. '*.txt'). min_size: bytes. modified_since: ISO 8601 datetime. find_duplicates: group identical files.")]
     public async Task<string> FileSearch(
         [Description("Root directory to search from")] string root,
         [Description("Glob pattern, e.g. '*.txt'")] string? pattern = null,
@@ -40,7 +40,7 @@ public sealed class FileTools
         return JsonSerializer.Serialize(hits);
     }
 
-    [McpServerTool, Description("File operations: copy, move, delete, list. 'delete' requires confirm:true.")]
+    [McpServerTool(Title = "Manage files", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("File operations: copy, move, delete, list. 'delete' requires confirm:true.")]
     public async Task<string> FileManage(
         [Description("Action: copy, move, delete, list")] string action,
         [Description("Source path")] string src,
@@ -77,7 +77,7 @@ public sealed class FileTools
         }
     }
 
-    [McpServerTool, Description("Type a file path into a focused open/save dialog.")]
+    [McpServerTool(Title = "Type into file dialog", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Type a file path into a focused open/save dialog.")]
     public async Task<string> FileDialog(
         [Description("File path to type into the active open/save dialog")] string path)
     {
@@ -85,7 +85,7 @@ public sealed class FileTools
         return "typed path into focused dialog";
     }
 
-    [McpServerTool, Description("Read a file as text.")]
+    [McpServerTool(Title = "Read file", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Read a file as text.")]
     public async Task<string> FileRead(
         [Description("File path to read")] string path,
         [Description("Maximum bytes to read")] long max_bytes = 1048576,
@@ -95,7 +95,7 @@ public sealed class FileTools
         return await _fs.ReadTextAsync(path, max_bytes, encoding, ct);
     }
 
-    [McpServerTool, Description("Write text content to a file. Requires confirm:true.")]
+    [McpServerTool(Title = "Write file", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false), Description("Write text content to a file. Requires confirm:true.")]
     public async Task<string> FileWrite(
         [Description("File path to write")] string path,
         [Description("Text content to write")] string content,
@@ -109,7 +109,7 @@ public sealed class FileTools
         return $"wrote {content.Length} chars to '{path}'";
     }
 
-    [McpServerTool, Description("Compute a file's hash digest for integrity checks or IOC lookups (e.g. VirusTotal). algorithm: sha256 (default), sha1, or md5. Returns the lowercase hex digest.")]
+    [McpServerTool(Title = "Hash file", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Compute a file's hash digest for integrity checks or IOC lookups (e.g. VirusTotal). algorithm: sha256 (default), sha1, or md5. Returns the lowercase hex digest.")]
     public async Task<string> FileHash(
         [Description("File path to hash")] string path,
         [Description("Hash algorithm: sha256, sha1, or md5")] string algorithm = "sha256",
@@ -118,7 +118,7 @@ public sealed class FileTools
         return await _fs.HashFileAsync(path, algorithm, ct);
     }
 
-    [McpServerTool, Description("List NTFS alternate data streams (e.g. Zone.Identifier or hidden payloads) on a file, and the reparse target if the path is a symlink/junction. Forensic checks that file_info doesn't surface.")]
+    [McpServerTool(Title = "File streams", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("List NTFS alternate data streams (e.g. Zone.Identifier or hidden payloads) on a file, and the reparse target if the path is a symlink/junction. Forensic checks that file_info doesn't surface.")]
     public async Task<string> FileStreams(
         [Description("File or directory path to inspect")] string path,
         CancellationToken ct = default)
@@ -127,7 +127,7 @@ public sealed class FileTools
         return JsonSerializer.Serialize(streams);
     }
 
-    [McpServerTool, Description("Get metadata for a file or directory.")]
+    [McpServerTool(Title = "File info", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Get metadata for a file or directory.")]
     public async Task<string> FileInfo(
         [Description("Path to inspect")] string path,
         CancellationToken ct = default)
@@ -136,7 +136,7 @@ public sealed class FileTools
         return JsonSerializer.Serialize(info);
     }
 
-    [McpServerTool, Description("Zip or unzip an archive. action: zip|unzip.")]
+    [McpServerTool(Title = "Zip or unzip", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false), Description("Zip or unzip an archive. action: zip|unzip.")]
     public async Task<string> Archive(
         [Description("Action: zip or unzip")] string action,
         [Description("Source path (directory to zip, or zip file to unzip)")] string src,

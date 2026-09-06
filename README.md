@@ -2,7 +2,7 @@
 
 An MCP server for Windows desktop automation, written in C# on the official
 [`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol)
-SDK. See [Tool reference](#tool-reference) for the 68 tools.
+SDK. See [Tool reference](#tool-reference) for the 69 tools.
 
 ## Build
 
@@ -157,7 +157,7 @@ operations. See [`skills/windows/SKILL.md`](skills/windows/SKILL.md).
 
 ## Tool reference
 
-68 tools, grouped:
+69 tools, grouped:
 
 | Category | Tools |
 |---|---|
@@ -172,7 +172,7 @@ operations. See [`skills/windows/SKILL.md`](skills/windows/SKILL.md).
 | Security | `verify_signature`, `defender_status`, `cert_store` |
 | Startup | `startup_report` |
 | Network | `network`, `firewall` |
-| Registry | `registry_get`, `registry_set` |
+| Registry | `registry_get`, `registry_set`, `registry_delete` |
 | Web | `scrape`, `http_request` |
 | Monitoring | `integrity` (file-integrity tripwire), `fs_changes` (NTFS USN journal), `watch` (live directory watch) |
 
@@ -239,6 +239,27 @@ verbatim (no quoting) and returns `{pid, executable, args, cwd}`. `multi_monitor
 monitor's `WorkArea`, `Orientation` (0/90/180/270), `EffectiveDpi` and `Scale` alongside its
 bounds and primary flag.
 
+`registry_get(hive, path)` without `value_name` returns the whole key —
+`{Path, Values: [{Path, Name, Data, Kind}], SubKeys: [...]}`, an empty path listing the hive
+root — instead of the value names joined with commas; with a `value_name` it is unchanged.
+`registry_delete(hive, path, value_name?, recursive?, confirm)` removes that one value, or the
+key itself when no `value_name` is given: a key with sub-keys also needs `recursive: true`, the
+hive root and the profile/OS roots (`Software`, `Software\Microsoft`, `System`,
+`SYSTEM\CurrentControlSet`, `Environment`, …) are refused outright, and deleting what is not
+there is `existed: false` rather than an error. It returns
+`{hive, path, valueName?, deleted, existed, subKeysRemoved?}`.
+
+`notification(title, message, app_id?)` shows the toast in-process through WinRT — no PowerShell
+— under an AppUserModelId. The default `Windows-MCP` is registered under
+`HKCU\Software\Classes\AppUserModelId` by the server on first use; a packaged app's AUMID (the
+`Package_hash!App` form) shows the toast under that app, and any other id must already be
+registered or Windows drops the toast. Returns `{shown, appId, registered, note?}`, where a
+dropped toast is `shown: false` with the reason in `note`.
+
+Every tool also carries MCP annotations — a title plus `readOnlyHint`, `destructiveHint`,
+`idempotentHint` and `openWorldHint` — so a client can auto-approve reads and confirm the
+destructive ones without a per-tool allowlist.
+
 ## Safety rails
 
 Destructive tools require `confirm: true` as an argument and throw
@@ -247,7 +268,7 @@ Destructive tools require `confirm: true` as an argument and throw
 - `file_write`, `file_manage(action="delete")`
 - `process(action="kill")`, `service(action="stop"|"restart")`,
   `scheduled_task(action="delete")`
-- `registry_set`
+- `registry_set`, `registry_delete`
 - `power_action`
 - `firewall(action="add"|"remove")`
 - `env(action="set")`

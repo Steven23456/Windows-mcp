@@ -12,7 +12,7 @@ public sealed class UsnTools
 
     public UsnTools(IUsnService usn) => _usn = usn;
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "File system changes", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "NTFS USN change journal — whole-volume file-change tracking straight from the OS journal " +
         "(every create/delete/rename/write, far more complete than a directory scan). " +
         "mode: status (journal id + FirstUsn/NextUsn/LowestValidUsn range — record NextUsn now, query 'since' it later), " +

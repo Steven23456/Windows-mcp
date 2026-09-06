@@ -57,7 +57,7 @@ public sealed class UIAutomationTools
         _ => throw new ArgumentException($"Unknown scope '{scope}'; expected desktop|foreground|window")
     };
 
-    [McpServerTool, Description("One call for the whole desktop (parity A-2): every open window, the foreground one, the cursor, and every interactive element with its centre coordinates and an action hint (click/fill/toggle/select/slide/scroll), plus scrollable regions with their scroll percentages. Default format is compact text; format:'json' returns the same as JSON (with the element tree when include_tree is set). Element ids (el_N) are valid until the next snapshot and work with click (use the centre coordinates), interact_element and get_element. scope: desktop (default, every non-minimised window, topmost first) | foreground | window (with 'window' = a title, exact then substring). max_elements caps the walk (0 = the server default, --max-tree-elements, 500); when the cap is hit the result says it was truncated (the text form adds how to narrow the view; json carries Truncated and ElementLimit). use_dom (browser DOM mode, Chromium: chrome/msedge/brave/opera/vivaldi): for every browser window in scope walk only the web page — the RootWebArea document — instead of the whole window, so the address bar and tab strip are left out, and add a Pages section per browser window: the page document's id, title, URL, vertical scroll percent and the visible page text in document order (below-the-fold text appears after scrolling). The page document itself is scrollable, never interactive. A browser window with no page document (still loading, or Firefox, which is not supported yet) is walked whole and its Pages entry says so.")]
+    [McpServerTool(Title = "Desktop snapshot", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("One call for the whole desktop (parity A-2): every open window, the foreground one, the cursor, and every interactive element with its centre coordinates and an action hint (click/fill/toggle/select/slide/scroll), plus scrollable regions with their scroll percentages. Default format is compact text; format:'json' returns the same as JSON (with the element tree when include_tree is set). Element ids (el_N) are valid until the next snapshot and work with click (use the centre coordinates), interact_element and get_element. scope: desktop (default, every non-minimised window, topmost first) | foreground | window (with 'window' = a title, exact then substring). max_elements caps the walk (0 = the server default, --max-tree-elements, 500); when the cap is hit the result says it was truncated (the text form adds how to narrow the view; json carries Truncated and ElementLimit). use_dom (browser DOM mode, Chromium: chrome/msedge/brave/opera/vivaldi): for every browser window in scope walk only the web page — the RootWebArea document — instead of the whole window, so the address bar and tab strip are left out, and add a Pages section per browser window: the page document's id, title, URL, vertical scroll percent and the visible page text in document order (below-the-fold text appears after scrolling). The page document itself is scrollable, never interactive. A browser window with no page document (still loading, or Firefox, which is not supported yet) is walked whole and its Pages entry says so.")]
     public async Task<string> Snapshot(
         [Description("desktop | foreground | window")] string scope = "desktop",
         [Description("Window title, exact or substring, case-insensitive; only with scope=window")] string? window = null,
@@ -84,14 +84,14 @@ public sealed class UIAutomationTools
         return json ? JsonSerializer.Serialize(result) : SnapshotRenderer.Render(result);
     }
 
-    [McpServerTool, Description("Return the UI element tree of the foreground application (three levels deep, bounded by --max-tree-elements; the root reports Truncated/ElementLimit when the budget stopped the walk). For the whole desktop with centre coordinates and action hints, use snapshot.")]
+    [McpServerTool(Title = "Get UI state", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Return the UI element tree of the foreground application (three levels deep, bounded by --max-tree-elements; the root reports Truncated/ElementLimit when the budget stopped the walk). For the whole desktop with centre coordinates and action hints, use snapshot.")]
     public async Task<string> GetState()
     {
         var tree = await _uia.GetStateAsync();
         return JsonSerializer.Serialize(tree);
     }
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "Find element", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Find UI elements whose name contains text (empty text = every element the filters allow). " +
         "Searches the FOREGROUND window by default, resolved at call time — for a multi-step " +
         "workflow pass scope:\"window\" with window:<title> so a notification or another app " +
@@ -110,7 +110,7 @@ public sealed class UIAutomationTools
         return JsonSerializer.Serialize(result);
     }
 
-    [McpServerTool, Description("Get detailed information about a UI element by its ID.")]
+    [McpServerTool(Title = "Get element", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Get detailed information about a UI element by its ID.")]
     public async Task<string> GetElement(
         [Description("Element ID returned by find_element or get_state")] string element_id)
     {
@@ -118,14 +118,14 @@ public sealed class UIAutomationTools
         return JsonSerializer.Serialize(info);
     }
 
-    [McpServerTool, Description("Extract text content from a UI element (faster than OCR).")]
+    [McpServerTool(Title = "Get text", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Extract text content from a UI element (faster than OCR).")]
     public async Task<string> GetText(
         [Description("Element ID to read text from")] string element_id)
     {
         return await _uia.GetTextAsync(element_id);
     }
 
-    [McpServerTool, Description("Assert a UI element state: exists, enabled, checked, visible, focused, or value (needs expected: an exact match against the element's ValuePattern value, else its Name). Returns 'PASS' or 'FAIL: <state> — observed <what was found>', e.g. 'focus is on Button 'Save'', 'value is 'x' (from ValuePattern)', 'toggle state Off', 'element no longer available' (its window closed since the id was issued). An unknown state, 'value' without expected, or expected with another state is an error.")]
+    [McpServerTool(Title = "Assert element", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Assert a UI element state: exists, enabled, checked, visible, focused, or value (needs expected: an exact match against the element's ValuePattern value, else its Name). Returns 'PASS' or 'FAIL: <state> — observed <what was found>', e.g. 'focus is on Button 'Save'', 'value is 'x' (from ValuePattern)', 'toggle state Off', 'element no longer available' (its window closed since the id was issued). An unknown state, 'value' without expected, or expected with another state is an error.")]
     public async Task<string> AssertElement(
         [Description("Element ID to check")] string element_id,
         [Description("State to assert: exists, enabled, checked, value, visible, focused")] string state,
@@ -135,7 +135,7 @@ public sealed class UIAutomationTools
         return result.Pass ? "PASS" : $"FAIL: {result.State} — observed {result.Observed}";
     }
 
-    [McpServerTool, Description("Act on a UI element by id. action: click (InvokePattern, else SelectionItem, else Toggle, else a physical click at the element's centre), invoke, toggle, select (no value: select this item; value: pick the child item with that name in a combo/list), focus, type (value = text; a writable ValuePattern replaces the whole value, otherwise it is typed at the caret). Returns {ElementId, Action, Method, Detail} saying which pattern or fallback fired; an unsupported pattern errors naming the control type.")]
+    [McpServerTool(Title = "Interact with element", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Act on a UI element by id. action: click (InvokePattern, else SelectionItem, else Toggle, else a physical click at the element's centre), invoke, toggle, select (no value: select this item; value: pick the child item with that name in a combo/list), focus, type (value = text; a writable ValuePattern replaces the whole value, otherwise it is typed at the caret). Returns {ElementId, Action, Method, Detail} saying which pattern or fallback fired; an unsupported pattern errors naming the control type.")]
     public async Task<string> InteractElement(
         [Description("Element ID from find_element or get_state")] string element_id,
         [Description("click | invoke | toggle | select | focus | type")] string action,
@@ -145,7 +145,7 @@ public sealed class UIAutomationTools
         return JsonSerializer.Serialize(result);
     }
 
-    [McpServerTool, Description("Extract tabular data from a UI element via GridPattern.")]
+    [McpServerTool(Title = "Get table", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Extract tabular data from a UI element via GridPattern.")]
     public async Task<string> GetTable(
         [Description("Element ID of a grid/table control")] string element_id)
     {
@@ -153,7 +153,7 @@ public sealed class UIAutomationTools
         return JsonSerializer.Serialize(table);
     }
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "Wait for condition", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Wait until something is true on screen, polling until it is or the timeout passes. condition: " +
         "element_exists (default; an element whose name contains text — the same kind/scope/window/include_offscreen " +
         "filters as find_element, and scope:\"window\" is re-resolved on every poll so it also serves as 'wait for that app " +

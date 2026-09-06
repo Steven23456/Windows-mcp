@@ -13,7 +13,7 @@ public sealed class DiskTools
 
     public DiskTools(IDiskService disk) => _disk = disk;
 
-    [McpServerTool, Description("Inspect disk usage. mode: usage (top dirs by size), reclaimable (temp/cache/recyclebin), file_types (group by extension), stale (files older than 365 days). path: root to analyse.")]
+    [McpServerTool(Title = "Inspect disk", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Inspect disk usage. mode: usage (top dirs by size), reclaimable (temp/cache/recyclebin), file_types (group by extension), stale (files older than 365 days). path: root to analyse.")]
     public async Task<string> DiskInspect(
         [Description("Mode: usage, reclaimable, file_types, stale")] string mode,
         [Description("Root path to inspect (not required for reclaimable)")] string? path = null,

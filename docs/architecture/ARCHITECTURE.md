@@ -14,7 +14,7 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Tool Layer                                         │
-│                 (19 [McpServerToolType] classes, 68 tools)                   │
+│                 (19 [McpServerToolType] classes, 69 tools)                   │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐  │
 │  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │  │
 │  │ 11 tools   │ │  9 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │  │
@@ -118,7 +118,9 @@ public sealed class InputTools
         Uia = uia;
     }
 
-    [McpServerTool, Description("Click at a point or on a snapshot element. Give x and y (physical virtual-desktop pixels …) or element_id (an el_N id from snapshot/find_element …). clicks: 1 single, 2 double, 3 triple, 0 = hover only. Returns {action: click|hover, x, y, button, clicks, elementId?, name?}.")]
+    // C-7: every tool names all five annotation arguments, even where the value is the SDK default
+    [McpServerTool(Title = "Click", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false),
+     Description("Click at a point or on a snapshot element. Give x and y (physical virtual-desktop pixels …) or element_id (an el_N id from snapshot/find_element …). clicks: 1 single, 2 double, 3 triple, 0 = hover only. Returns {action: click|hover, x, y, button, clicks, elementId?, name?}.")]
     public async Task<string> Click(int? x = null, int? y = null, string? element_id = null,
                                     string button = "left", int clicks = 1)
     {
@@ -140,7 +142,7 @@ public sealed class InputTools
 | `ProcessTools` | 6 | `IProcessService`, `IServiceControlService`, `ITaskSchedulerService`, `IEventLogService` |
 | `ScreenTools` | 2 | `IScreenshotService`, `IOcrService`, `IWindowService`, `IInputService`, `IUIAutomationService`, `IFlashOverlay` (+ the `ScreenshotOptions` record) |
 | `WebTools` | 2 | `IWebService` |
-| `RegistryTools` | 2 | `IRegistryService` |
+| `RegistryTools` | 3 | `IRegistryService` |
 | `NetworkTools` | 2 | `INetworkService`, `IFirewallService` |
 | `ShellTools` | 1 | `IPowerShellService`, `IJobService` |
 | `JobTools` | 1 | `IJobService` |
@@ -326,6 +328,9 @@ Windows-mcp.slnx
 │   │   │   │                               Win32AppActivator — B-8's catalog, window wait
 │   │   │   │                               and activation)
 │   │   │   ├── ProcessService.cs          (+ ArgvJson — B-11's args_json parser)
+│   │   │   ├── RegistryService.cs         (+ RegistryGuard — C-2's pure root denylist)
+│   │   │   ├── NotificationService.cs     (+ IToastSink and WinRtToastSink — C-4's
+│   │   │   │                               in-process WinRT toast seam)
 │   │   │   └── ...
 │   │   └── Startup/                       (startup-report renderer + approval decoding)
 │   └── WindowsMcp.Abstractions/           ← Contracts assembly
@@ -333,7 +338,7 @@ Windows-mcp.slnx
 │       ├── IInputService.cs
 │       ├── IUIAutomationService.cs
 │       ├── ... (39 interfaces)
-│       └── Models/                        (22 DTO files)
+│       └── Models/                        (23 DTO files)
 │           ├── InputDtos.cs
 │           └── ...
 ├── tests/WindowsMcp.Tests/                (xUnit + Moq + FluentAssertions)

@@ -19,7 +19,7 @@ public sealed class SecurityTools
         _certStore = certStore;
     }
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "Verify signature", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Verify a file's Authenticode code-signing trust. Catalog-aware: Windows system files and " +
         "drivers signed via security catalogs (not embedded certificates) are correctly reported as " +
         "trusted. Returns {trusted, signer}; signer is the embedded certificate subject and is null " +
@@ -32,7 +32,7 @@ public sealed class SecurityTools
         return JsonSerializer.Serialize(info);
     }
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "Defender status", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Get Microsoft Defender posture: real-time protection, tamper protection, behavior monitoring, " +
         "signature version + last-updated, and last quick/full scan times. Null fields (with a Note) mean " +
         "Defender is disabled or replaced by a third-party AV.")]
@@ -42,7 +42,7 @@ public sealed class SecurityTools
         return JsonSerializer.Serialize(status);
     }
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "Certificate store", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Enumerate certificates in a Windows certificate store. location: LocalMachine (default) or " +
         "CurrentUser; store_name: Root (default), CA, My, etc. Each cert reports subject, issuer, " +
         "thumbprint, expiry, and self-signed/expired flags. A self-signed cert in the Root store is " +

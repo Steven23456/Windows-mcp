@@ -873,5 +873,6 @@ Scrollable (1):
 | `ShellTools` heartbeat | Progress notification every 10s during a foreground `powershell` call | Lets spec-compliant clients reset their request timeout |
 | `JobService` | Background jobs poll-based; per-job 60-min backstop | Runs outside the PowerShell serialization gate |
 | `FlashOverlay` | The post-capture glow is up for 3.5 s, then taken down by its own timer — and unconditionally at the start of the next capture | `Show`/`Hide` marshal to the overlay thread and wait for it, bounded by a 2 s call timeout; both are silent no-ops with no interactive window station |
+| `NotificationService` | One retry, 1 s later, when the toast fails with `COMException 0x80070490` (element not found) — the platform has not picked a freshly written AppUserModelId registration up yet | The delay is injected, so the unit tests do not pay it; a second failure is `shown:false` with the reason in `note`, never a throw |
 | `UIAutomationService.FindPageDocument` | `use_dom` only: up to 3 attempts for the `RootWebArea` document, 150 ms apart, no pause after the last | Chromium builds its accessibility tree lazily on the first query, so attempt 1 can miss a page that is there |
 | MCP SDK transport (stdio or HTTP) | No artificial pauses — reads JSON-RPC frames continuously | Contrast: Python `pg.PAUSE = 1.0` |

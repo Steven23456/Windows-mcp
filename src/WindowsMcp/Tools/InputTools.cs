@@ -35,7 +35,7 @@ public sealed class InputTools
         _ => throw new ArgumentException($"Unknown button '{s}'; expected left|right|middle")
     };
 
-    [McpServerTool, Description("Click at a point or on a snapshot element. Give x and y (physical virtual-desktop pixels: origin = top-left of the primary monitor, so monitors left of / above it have negative values; see multi_monitor) or element_id (an el_N id from snapshot/find_element; the click lands on the element's centre, and an off-screen element is refused with the reason). clicks: 1 single, 2 double, 3 triple, 0 = hover only (move the pointer there, press nothing). Returns {action: click|hover, x, y, button, clicks, elementId?, name?}.")]
+    [McpServerTool(Title = "Click", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Click at a point or on a snapshot element. Give x and y (physical virtual-desktop pixels: origin = top-left of the primary monitor, so monitors left of / above it have negative values; see multi_monitor) or element_id (an el_N id from snapshot/find_element; the click lands on the element's centre, and an off-screen element is refused with the reason). clicks: 1 single, 2 double, 3 triple, 0 = hover only (move the pointer there, press nothing). Returns {action: click|hover, x, y, button, clicks, elementId?, name?}.")]
     public async Task<string> Click(
         [Description("X coordinate in physical pixels (virtual desktop); give with y, or use element_id")] int? x = null,
         [Description("Y coordinate in physical pixels (virtual desktop); give with x, or use element_id")] int? y = null,
@@ -57,7 +57,7 @@ public sealed class InputTools
         return JsonSerializer.Serialize(new { action = "click", x = target.X, y = target.Y, button = parsedButton.ToString().ToLowerInvariant(), clicks, elementId = target.ElementId, name = target.Name });
     }
 
-    [McpServerTool, Description("Drag with the button held: press at the origin, move through intermediate points (a first nudge past the system drag threshold, then 'steps' interpolated moves spread over duration_ms, so file managers, canvases and browser drag-and-drop recognise it), release on the destination. Destination: to_x/to_y or element_id (the element's centre). Origin: from_x/from_y, from_element_id, or nothing = the current cursor position. Coordinates are physical virtual-desktop pixels like click. duration_ms 0-10000 (default 300), steps 2-200 (default 20). Returns {fromX, fromY, toX, toY, button, durationMs, steps, fromTarget: point|element|cursor, elementId?, name?}.")]
+    [McpServerTool(Title = "Drag", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Drag with the button held: press at the origin, move through intermediate points (a first nudge past the system drag threshold, then 'steps' interpolated moves spread over duration_ms, so file managers, canvases and browser drag-and-drop recognise it), release on the destination. Destination: to_x/to_y or element_id (the element's centre). Origin: from_x/from_y, from_element_id, or nothing = the current cursor position. Coordinates are physical virtual-desktop pixels like click. duration_ms 0-10000 (default 300), steps 2-200 (default 20). Returns {fromX, fromY, toX, toY, button, durationMs, steps, fromTarget: point|element|cursor, elementId?, name?}.")]
     public async Task<string> Drag(
         [Description("Origin x; give with from_y, or use from_element_id, or omit both to start at the cursor")] int? from_x = null,
         [Description("Origin y; give with from_x")] int? from_y = null,
@@ -89,14 +89,14 @@ public sealed class InputTools
         });
     }
 
-    [McpServerTool, Description("Move the cursor to coordinates and optionally hold it there (duration_ms). Same coordinate space as click: physical virtual-desktop pixels.")]
+    [McpServerTool(Title = "Hover", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false), Description("Move the cursor to coordinates and optionally hold it there (duration_ms). Same coordinate space as click: physical virtual-desktop pixels.")]
     public async Task<string> Hover(int x, int y, int duration_ms = 0)
     {
         await _input.HoverAsync(x, y, duration_ms);
         return $"hovered at ({x},{y}) for {duration_ms}ms";
     }
 
-    [McpServerTool, Description("Type text. With no target it types at the current keyboard focus; with x/y or element_id (an el_N id from snapshot) it clicks that point or the element's centre first. clear:true selects all and deletes before typing (replace a field's content); caret: idle (default, type where the caret is) | start | end (move to the start/end of the text first); press_enter:true presses Enter last. Short text is typed key by key with newlines as Enter and tabs as Tab, paced by pace_ms; text of 200+ characters with no other control characters is pasted through the clipboard in one keystroke and the previous clipboard text is put back. Returns {typed, method: keys|paste, clipboardRestored?, x?, y?, elementId?, name?}.")]
+    [McpServerTool(Title = "Type text", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Type text. With no target it types at the current keyboard focus; with x/y or element_id (an el_N id from snapshot) it clicks that point or the element's centre first. clear:true selects all and deletes before typing (replace a field's content); caret: idle (default, type where the caret is) | start | end (move to the start/end of the text first); press_enter:true presses Enter last. Short text is typed key by key with newlines as Enter and tabs as Tab, paced by pace_ms; text of 200+ characters with no other control characters is pasted through the clipboard in one keystroke and the previous clipboard text is put back. Returns {typed, method: keys|paste, clipboardRestored?, x?, y?, elementId?, name?}.")]
     public async Task<string> Type(
         [Description("Text to type")] string text,
         [Description("X of a point to click first; give with y, or use element_id; omit both to type at the focus")] int? x = null,
@@ -132,21 +132,21 @@ public sealed class InputTools
         });
     }
 
-    [McpServerTool, Description("Press one key: a character (a, 7, /), f1-f24, or a name (enter, tab, esc, backspace, delete, up/down/left/right, home, end, pageup, pagedown, insert, win, printscreen). For chords use shortcut.")]
+    [McpServerTool(Title = "Press key", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Press one key: a character (a, 7, /), f1-f24, or a name (enter, tab, esc, backspace, delete, up/down/left/right, home, end, pageup, pagedown, insert, win, printscreen). For chords use shortcut.")]
     public async Task<string> Key([Description("Key: a character, f1-f24, or a key name")] string key)
     {
         await _input.PressKeyAsync(key);
         return $"pressed {key}";
     }
 
-    [McpServerTool, Description("Press a chord: ctrl+c, ctrl+shift+s, win+r, alt+f4, ctrl+1. A single key such as win (opens Start) also works. Join parts with '+'; write plus for the + key.")]
+    [McpServerTool(Title = "Press shortcut", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Press a chord: ctrl+c, ctrl+shift+s, win+r, alt+f4, ctrl+1. A single key such as win (opens Start) also works. Join parts with '+'; write plus for the + key.")]
     public async Task<string> Shortcut([Description("Chord, e.g. 'ctrl+c' or 'win+r'; a bare key like 'win' is allowed")] string shortcut)
     {
         await _input.PressShortcutAsync(shortcut);
         return $"pressed {shortcut}";
     }
 
-    [McpServerTool, Description("Scroll the mouse wheel. Coordinates are optional: give x and y (physical virtual-desktop pixels like click) to scroll at a point, element_id (an el_N id from snapshot; its centre) to scroll a specific region, or neither to scroll whatever is under the current cursor. amount is wheel notches. shift_wheel:true with left/right holds Shift and uses the vertical wheel, the horizontal scroll for apps that ignore the horizontal wheel. Returns {direction, amount, x, y, target: point|element|cursor, shiftWheel, elementId?, name?}.")]
+    [McpServerTool(Title = "Scroll", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Scroll the mouse wheel. Coordinates are optional: give x and y (physical virtual-desktop pixels like click) to scroll at a point, element_id (an el_N id from snapshot; its centre) to scroll a specific region, or neither to scroll whatever is under the current cursor. amount is wheel notches. shift_wheel:true with left/right holds Shift and uses the vertical wheel, the horizontal scroll for apps that ignore the horizontal wheel. Returns {direction, amount, x, y, target: point|element|cursor, shiftWheel, elementId?, name?}.")]
     public async Task<string> Scroll(
         [Description("up|down|left|right")] string direction,
         [Description("Wheel notches (default 3)")] int amount = 3,
@@ -198,7 +198,7 @@ public sealed class InputTools
         return new Target(cursor.X, cursor.Y, "cursor", null, null);
     }
 
-    [McpServerTool(ReadOnly = true, Idempotent = true), Description("Pause for a number of seconds (more than 0, at most 60) and return; use it between an action and the next snapshot instead of a PowerShell sleep. Returns {\"waited\": seconds}. For a longer pause, or to wait until something is on screen, use wait_for.")]
+    [McpServerTool(Title = "Wait", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Pause for a number of seconds (more than 0, at most 60) and return; use it between an action and the next snapshot instead of a PowerShell sleep. Returns {\"waited\": seconds}. For a longer pause, or to wait until something is on screen, use wait_for.")]
     public async Task<string> Wait(
         [Description("Seconds to pause: more than 0 and at most 60 (fractions allowed)")] double seconds,
         CancellationToken ct = default)
@@ -211,7 +211,7 @@ public sealed class InputTools
         return JsonSerializer.Serialize(new { waited = seconds });
     }
 
-    [McpServerTool, Description("Click several targets in one call, holding Ctrl for the whole batch (multi-select in lists, file managers, canvases). targets_json is a JSON array of {x,y} points (virtual-desktop pixels) or {element_id} objects (el_N ids from snapshot); a JSON string holding that array is accepted too. Every target is resolved before anything is clicked, so an off-screen element refuses the whole batch with nothing done. The clicks run in order and stop at the first failure: the result then carries failedIndex and error with the results so far, so the batch is not atomic. ctrl:false clicks without the modifier. Returns {count, ctrl, results:[{index, x, y, elementId?, name?, ok}], failedIndex?, error?}.")]
+    [McpServerTool(Title = "Multi-select", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Click several targets in one call, holding Ctrl for the whole batch (multi-select in lists, file managers, canvases). targets_json is a JSON array of {x,y} points (virtual-desktop pixels) or {element_id} objects (el_N ids from snapshot); a JSON string holding that array is accepted too. Every target is resolved before anything is clicked, so an off-screen element refuses the whole batch with nothing done. The clicks run in order and stop at the first failure: the result then carries failedIndex and error with the results so far, so the batch is not atomic. ctrl:false clicks without the modifier. Returns {count, ctrl, results:[{index, x, y, elementId?, name?, ok}], failedIndex?, error?}.")]
     public async Task<string> MultiSelect(
         [Description("JSON array of targets: {\"x\":..,\"y\":..} or {\"element_id\":\"el_N\"} objects, at least one")] string targets_json,
         [Description("Hold Ctrl from before the first click until after the last (default true)")] bool ctrl = true)
@@ -248,7 +248,7 @@ public sealed class InputTools
         return JsonSerializer.Serialize(new { count = targets.Count, ctrl, results, failedIndex, error });
     }
 
-    [McpServerTool, Description("Fill several fields in one call: for each entry, click its target then type its text. entries_json is a JSON array of objects with a target ({x,y} in virtual-desktop pixels, or element_id = an el_N id from snapshot), text (required), and optionally clear (select all and delete first) and press_enter; a JSON string holding that array is accepted too. Every entry is resolved before anything is typed, so an off-screen element refuses the whole batch with nothing done. Entries run in order and stop at the first failure: the result then carries failedIndex and error with the results so far, so the batch is not atomic. Returns {count, results:[{index, x, y, elementId?, name?, typed, method, ok}], failedIndex?, error?}.")]
+    [McpServerTool(Title = "Multi-edit", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Fill several fields in one call: for each entry, click its target then type its text. entries_json is a JSON array of objects with a target ({x,y} in virtual-desktop pixels, or element_id = an el_N id from snapshot), text (required), and optionally clear (select all and delete first) and press_enter; a JSON string holding that array is accepted too. Every entry is resolved before anything is typed, so an off-screen element refuses the whole batch with nothing done. Entries run in order and stop at the first failure: the result then carries failedIndex and error with the results so far, so the batch is not atomic. Returns {count, results:[{index, x, y, elementId?, name?, typed, method, ok}], failedIndex?, error?}.")]
     public async Task<string> MultiEdit(
         [Description("JSON array of entries: {\"x\":..,\"y\":..} or {\"element_id\":\"el_N\"} plus \"text\" (required), \"clear\" and \"press_enter\" (optional)")] string entries_json)
     {
@@ -278,7 +278,7 @@ public sealed class InputTools
         return JsonSerializer.Serialize(new { count = entries.Count, results, failedIndex, error });
     }
 
-    [McpServerTool, Description("Clipboard get/set.")]
+    [McpServerTool(Title = "Clipboard", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false), Description("Clipboard get/set.")]
     public async Task<string> Clipboard(
         [Description("Action: get or set")] string action,
         [Description("Text to set; ignored for 'get'")] string? text = null)

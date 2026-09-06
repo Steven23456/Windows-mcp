@@ -27,7 +27,8 @@ internal static class Program
         if (repaired.Count > 0)
             Console.Error.WriteLine($"Windows-mcp: repaired environment ({string.Join(", ", repaired)})");
 
-        // Register AppUserModelID first so WinRT ToastNotification works.
+        // The process AppUserModelID groups our windows on the taskbar. Toasts do not depend on
+        // it since C-4: NotificationService names its own id (registered under HKCU) per call.
         try { PInvoke.SetCurrentProcessExplicitAppUserModelID("org.windows-mcp.server"); }
         catch { /* best effort */ }
 

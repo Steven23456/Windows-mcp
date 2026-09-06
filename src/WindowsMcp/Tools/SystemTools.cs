@@ -46,7 +46,7 @@ public sealed class SystemTools
         ["battery"] = "Win32_Battery",
     };
 
-    [McpServerTool, Description("Query system information via WMI. category: os|memory|disk|gpu|battery.")]
+    [McpServerTool(Title = "System info", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Query system information via WMI. category: os|memory|disk|gpu|battery.")]
     public async Task<string> SystemInfo(
         [Description("Category of system info: os, memory, disk, gpu, battery")] string category,
         CancellationToken ct = default)
@@ -58,7 +58,7 @@ public sealed class SystemTools
         return JsonSerializer.Serialize(rows);
     }
 
-    [McpServerTool, Description("Control audio. action: get|set|mute|unmute. 'set' requires level (0-100).")]
+    [McpServerTool(Title = "Audio", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false), Description("Control audio. action: get|set|mute|unmute. 'set' requires level (0-100).")]
     public async Task<string> Audio(
         [Description("Action: get, set, mute, unmute")] string action,
         [Description("Volume level 0-100 (required for set)")] int? level = null,
@@ -89,24 +89,43 @@ public sealed class SystemTools
         }
     }
 
-    [McpServerTool, Description("Show a Windows toast notification.")]
+    [McpServerTool(Title = "Show notification", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false),
+     Description("Show a Windows toast notification, in-process (no PowerShell). app_id is the AppUserModelId the " +
+                 "toast is shown under: the default 'Windows-MCP' is registered under HKCU by the server on first " +
+                 "use; a packaged app's AUMID (the form 'Package_hash!App') shows the toast under that app; any " +
+                 "other id must already be registered or Windows drops the toast, reported as shown:false with a " +
+                 "note. Returns {shown, appId, registered, note?}.")]
     public async Task<string> Notification(
         [Description("Notification title")] string title,
         [Description("Notification message body")] string message,
+        [Description("AppUserModelId the toast is shown under (default: the server's own, registered on first use)")] string app_id = "Windows-MCP",
         CancellationToken ct = default)
     {
-        await _notification.ShowAsync(title, message, ct);
-        return "notification shown";
+        if (string.IsNullOrWhiteSpace(app_id))
+            throw new ArgumentException("'app_id' must not be blank; omit it for the server's own id", nameof(app_id));
+        var result = await _notification.ShowAsync(title, message, app_id, ct);
+        return JsonSerializer.Serialize(new
+        {
+            shown = result.Shown,
+            appId = result.AppId,
+            registered = result.Registered,
+            note = result.Note,
+        }, OmitNulls);
     }
 
-    [McpServerTool, Description("Run a Windows security audit and return firewall, Defender, UAC, and BitLocker status. Probes that require admin (Get-BitLockerVolume, some firewall profiles) return null when run unelevated; non-null fields are still useful.")]
+    private static readonly JsonSerializerOptions OmitNulls = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
+
+    [McpServerTool(Title = "Security audit", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Run a Windows security audit and return firewall, Defender, UAC, and BitLocker status. Probes that require admin (Get-BitLockerVolume, some firewall profiles) return null when run unelevated; non-null fields are still useful.")]
     public async Task<string> SecurityAudit(CancellationToken ct = default)
     {
         var audit = await _security.AuditAsync(ct);
         return JsonSerializer.Serialize(audit);
     }
 
-    [McpServerTool, Description("Report system stability: crash minidumps in C:\\Windows\\Minidump (name, size, time) plus recent reliability failure records (app/OS/hardware failures). Useful for investigating BSODs and instability.")]
+    [McpServerTool(Title = "Reliability report", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Report system stability: crash minidumps in C:\\Windows\\Minidump (name, size, time) plus recent reliability failure records (app/OS/hardware failures). Useful for investigating BSODs and instability.")]
     public async Task<string> Reliability(
         [Description("Max reliability failure records to return (default 50)")] int max_records = 50,
         CancellationToken ct = default)
@@ -115,14 +134,14 @@ public sealed class SystemTools
         return JsonSerializer.Serialize(report);
     }
 
-    [McpServerTool, Description("List installed PnP device drivers with version, date, manufacturer, signed-state, and INF name. Old or unsigned drivers are a real attack surface (BYOVD - bring-your-own-vulnerable-driver).")]
+    [McpServerTool(Title = "Driver list", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("List installed PnP device drivers with version, date, manufacturer, signed-state, and INF name. Old or unsigned drivers are a real attack surface (BYOVD - bring-your-own-vulnerable-driver).")]
     public async Task<string> DriverList(CancellationToken ct = default)
     {
         var drivers = await _drivers.ListAsync(ct);
         return JsonSerializer.Serialize(drivers);
     }
 
-    [McpServerTool, Description("Run a raw WMI query. class_name: WMI class, e.g. Win32_OperatingSystem.")]
+    [McpServerTool(Title = "WMI query", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Run a raw WMI query. class_name: WMI class, e.g. Win32_OperatingSystem.")]
     public async Task<string> WmiQuery(
         [Description("WMI class name, e.g. Win32_Process")] string class_name,
         [Description("WMI namespace (default: root\\cimv2)")] string? @namespace = null,
@@ -153,7 +172,7 @@ public sealed class SystemTools
         return false;
     }
 
-    [McpServerTool, Description("Get, set, or list environment variables. action: get|set|list. scope: Process|User|Machine. 'set' requires confirm:true. By default values for variables whose name contains KEY/TOKEN/SECRET/PASSWORD/AUTH/CREDENTIAL/PRIVATE/PAT are redacted; pass include_secrets:true to return them raw.")]
+    [McpServerTool(Title = "Environment variables", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false), Description("Get, set, or list environment variables. action: get|set|list. scope: Process|User|Machine. 'set' requires confirm:true. By default values for variables whose name contains KEY/TOKEN/SECRET/PASSWORD/AUTH/CREDENTIAL/PRIVATE/PAT are redacted; pass include_secrets:true to return them raw.")]
     public async Task<string> Env(
         [Description("Action: get, set, list")] string action,
         [Description("Variable name (required for get/set)")] string? name = null,
@@ -205,7 +224,7 @@ public sealed class SystemTools
         }
     }
 
-    [McpServerTool, Description("Execute a system power action. action: shutdown|reboot|logoff|lock|sleep|hibernate. Requires confirm:true.")]
+    [McpServerTool(Title = "Power action", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Execute a system power action. action: shutdown|reboot|logoff|lock|sleep|hibernate. Requires confirm:true.")]
     public async Task<string> PowerAction(
         [Description("Power action: shutdown, reboot, logoff, lock, sleep, hibernate")] string action,
         [Description("Must be true to confirm the power action")] bool confirm = false,

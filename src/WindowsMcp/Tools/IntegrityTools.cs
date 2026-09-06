@@ -12,7 +12,7 @@ public sealed class IntegrityTools
 
     public IntegrityTools(IIntegrityService integrity) => _integrity = integrity;
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "File integrity", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "File-integrity tripwire over a curated watch-list (hosts file, user+machine Startup folders, " +
         "~/.claude/settings.json, ~/.gitconfig, and the C:\\ governance files). " +
         "mode: baseline (snapshot SHA-256 of the watch-list to %LOCALAPPDATA%\\windows-mcp\\integrity, survives plugin upgrades), " +

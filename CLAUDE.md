@@ -5,7 +5,7 @@ Guidance for Claude Code when working in this repository.
 ## Overview
 
 Windows-mcp is a **C# / .NET 10** Model Context Protocol (MCP) server for Windows desktop
-automation and system inspection. It exposes 68 tools over MCP — **stdio** by default, or
+automation and system inspection. It exposes 69 tools over MCP — **stdio** by default, or
 **Streamable HTTP/HTTPS** with `--transport http` for clients on other machines (README: "Run
 over HTTP/HTTPS") — covering UI automation, input, screen/OCR, windows, files, disk,
 processes/shell, services, scheduled tasks, registry, network, web, system, and a
@@ -148,7 +148,10 @@ behaviour, a one-line typo).
   JSON (and/or text) — or `async Task<CallToolResult>` when the result carries non-text content,
   as `screenshot` does (a text metadata block plus an image block; three blocks with
   `annotate:true`, the element list in between) — and carry a
-  `[McpServerTool, Description(...)]` attribute.
+  `[McpServerTool(Title = …, ReadOnly = …, Destructive = …, Idempotent = …, OpenWorld = …),
+  Description(...)]` attribute. All five annotation arguments are named explicitly, even at the
+  SDK default (`ToolInventoryTests` fails otherwise); the classification table is
+  `docs/design/C-7-tool-annotations.md`.
 
 ## Adding a tool
 
@@ -156,7 +159,9 @@ behaviour, a one-line typo).
    writes the failing `Tools/<X>ToolsTests.cs` / `Services/<X>ServiceTests.cs` and stubs the
    `IXxxService` members and DTO records the tests need.
 2. Add a `sealed [McpServerToolType]` class in `Tools/`, constructor-inject the service
-   interfaces, add `[McpServerTool, Description("…")]` methods.
+   interfaces, add `[McpServerTool(Title = "…", ReadOnly = …, Destructive = …, Idempotent = …,
+   OpenWorld = …), Description("…")]` methods (all five arguments are required — see
+   `docs/design/C-7-tool-annotations.md`).
 3. Put real logic behind an `IXxxService` in `Abstractions` + impl in `Services/` (keeps the
    tool thin and the logic unit-testable with Moq).
 4. Register any **new** service singleton in `Hosting/WindowsMcpHost.AddWindowsMcp` (tools

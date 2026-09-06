@@ -40,3 +40,15 @@ public record ScheduledTaskDetailDto(
     string? ActionPath,
     string? ActionArguments,
     string[] Triggers);
+
+/// <summary>
+/// One registry key as <c>registry_get</c> returns it without a value name: the key's own values
+/// and the names of its immediate sub-keys.
+/// </summary>
+public record RegistryKeyDto(string Path, RegistryValueDto[] Values, string[] SubKeys);
+
+/// <summary>
+/// The outcome of a key delete: whether the key was there at all, and how many descendant keys
+/// went with it (counted before the delete; the key itself is not counted).
+/// </summary>
+public record RegistryKeyDeleteResult(bool Existed, int SubKeysRemoved);
