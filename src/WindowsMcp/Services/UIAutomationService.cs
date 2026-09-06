@@ -1027,6 +1027,103 @@ public sealed class UIAutomationService : IUIAutomationService
         return null;
     }
 
+    /// <summary>
+    /// B-6 (roadmap C4): the conditional wait. Gathers only the evidence the condition needs per
+    /// poll, judges it with <see cref="WaitConditions.Evaluate"/>, and always answers with a
+    /// <see cref="WaitForResult"/>.
+    /// </summary>
+    public Task<WaitForResult> WaitForAsync(WaitRequest request, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (request.TimeoutMs is < 0 or > 120_000)
+            throw new ArgumentException($"timeoutMs must be between 0 and 120000, got {request.TimeoutMs}", nameof(request));
+        if (request.IntervalMs is < 0 or > 5_000)
+            throw new ArgumentException($"intervalMs must be between 0 and 5000, got {request.IntervalMs}", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.Text))
+            throw new ArgumentException($"{WaitConditions.NameOf(request.Condition)} needs text: what to look for.", nameof(request));
+
+        // Each condition gathers only the evidence it reads: active_window never walks a tree.
+        Func<CancellationToken, Task<WaitEvidence>> gather = request.Condition switch
+        {
+            WaitCondition.ActiveWindow => async token =>
+                new WaitEvidence(Windows: await _windows.ListAsync(true, false, token).ConfigureAwait(false)),
+            WaitCondition.TextExists or WaitCondition.FocusedElement => async token =>
+                new WaitEvidence(Snapshot: await SnapshotAsync(SnapshotRequestFor(request), token).ConfigureAwait(false)),
+            _ => async token =>
+                new WaitEvidence(Matches: (await FindElementAsync(request.Text!, request.Kind, request.Scope,
+                    request.WindowTitle, request.IncludeOffscreen, token).ConfigureAwait(false)).Matches),
+        };
+        return WaitLoopAsync(request, gather, ct);
+    }
+
+    /// <summary>
+    /// B-6: the poll loop behind <see cref="WaitForAsync(WaitRequest, CancellationToken)"/>,
+    /// separated from UIA so it is unit-testable with a fake evidence gatherer — the same seam
+    /// <see cref="PollAsync"/> is. Polls immediately, then every <c>IntervalMs</c> (10 ms floor,
+    /// clamped to the remaining budget) until satisfied or the deadline; counts every poll in
+    /// <c>Attempts</c>; a poll that throws is recorded and retried; when EVERY poll threw the
+    /// detail is <c>"every poll failed: &lt;last message&gt;"</c> — a result, never a
+    /// <see cref="TimeoutException"/> (C4 outranks D-5's throw, and the detail carries D-5's point).
+    /// </summary>
+    internal static async Task<WaitForResult> WaitLoopAsync(
+        WaitRequest request, Func<CancellationToken, Task<WaitEvidence>> gather, CancellationToken ct)
+    {
+        var name = WaitConditions.NameOf(request.Condition);
+        var text = request.Text ?? "";
+        var clock = Stopwatch.StartNew();
+        var deadline = TimeSpan.FromMilliseconds(request.TimeoutMs);
+        int attempts = 0;
+        bool anyCleanPoll = false;
+        string lastDetail = "";
+        Exception? lastFailure = null;
+
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            attempts++;
+            try
+            {
+                var evidence = await gather(ct).ConfigureAwait(false);
+                var (satisfied, detail, element) = WaitConditions.Evaluate(request.Condition, text, evidence);
+                anyCleanPoll = true;
+                lastDetail = detail;
+                if (satisfied)
+                    return new WaitForResult(true, name, clock.ElapsedMilliseconds, attempts, detail, element);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { lastFailure = ex; }   // D-5: a poll that throws is retried
+
+            var remaining = deadline - clock.Elapsed;
+            if (remaining <= TimeSpan.Zero) break;
+            var delay = TimeSpan.FromMilliseconds(Math.Max(10, request.IntervalMs));
+            if (delay > remaining) delay = remaining;
+            await Task.Delay(delay, ct).ConfigureAwait(false);
+        }
+
+        // C4: a timeout is a result. When we never managed to look, the detail says so (D-5).
+        var final = anyCleanPoll || lastFailure is null
+            ? lastDetail
+            : $"every poll failed: {lastFailure.Message}";
+        return new WaitForResult(false, name, clock.ElapsedMilliseconds, attempts, final, null);
+    }
+
+    /// <summary>
+    /// B-6: the snapshot one poll of a <c>text_exists</c> / <c>focused_element</c> wait takes —
+    /// the find scope mapped onto the snapshot scope, the window title carried, A-5's DOM mode
+    /// carried, no tree and the server's element budget.
+    /// </summary>
+    internal static SnapshotRequest SnapshotRequestFor(WaitRequest request)
+    {
+        var scope = request.Scope switch
+        {
+            FindScope.Window => SnapshotScope.Window,
+            FindScope.Desktop => SnapshotScope.Desktop,
+            _ => SnapshotScope.Foreground,
+        };
+        // No tree (the expensive half), the server's budget, the page when asked (A-5).
+        return new SnapshotRequest(scope, scope == SnapshotScope.Window ? request.WindowTitle : null, false, 0, request.UseDom);
+    }
+
     public Task FocusAsync(string elementId, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();

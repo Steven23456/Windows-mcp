@@ -858,6 +858,125 @@ public class HttpTransportTests
             .Should().Contain("60").And.Contain("wait_for");
     }
 
+    // ---- B-6 / B-7: the phase-4 surface over the wire ------------------------------------------
+
+    /// <summary>
+    /// B-6 (R71): <c>wait_for</c> gained two parameters and the seven it had must keep their
+    /// names and defaults — a model that learned the old schema keeps calling it that way.
+    /// </summary>
+    [Fact]
+    public async Task Wait_for_tool_is_discovered_with_the_B6_parameter_set()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        var waitFor = tools.Single(t => t.Name == ToolName(tools, "waitfor"));
+        var schema = waitFor.ProtocolTool.InputSchema.GetProperty("properties");
+
+        schema.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
+            ["text", "timeout_ms", "interval_ms", "kind", "scope", "window", "include_offscreen",
+             "condition", "use_dom"]);
+        schema.GetProperty("condition").GetProperty("default").GetString().Should().Be("element_exists",
+            "the default is exactly what the tool did before B-6");
+        schema.GetProperty("use_dom").GetProperty("default").GetBoolean().Should().BeFalse();
+        schema.GetProperty("timeout_ms").GetProperty("default").GetInt32().Should().Be(10_000);
+        schema.GetProperty("interval_ms").GetProperty("default").GetInt32().Should().Be(500);
+        waitFor.ProtocolTool.Description.Should().Contain("active_window").And.Contain("text_exists");
+    }
+
+    /// <summary>
+    /// B-6 (R72) end to end with <see cref="IUIAutomationService"/> swapped at the
+    /// <c>BuildHttpApp</c> seam: the structured result has to survive DI, the tool invoker and the
+    /// JSON-RPC round trip, and a timeout must not come back as an error or as "null". Nothing on
+    /// this desktop is waited on — the service is a mock.
+    /// </summary>
+    [Fact]
+    public async Task Wait_for_over_http_returns_a_structured_result_on_timeout()
+    {
+        var uia = new Mock<IUIAutomationService>();
+        WaitRequest? seen = null;
+        uia.Setup(s => s.WaitForAsync(It.IsAny<WaitRequest>(), It.IsAny<CancellationToken>()))
+            .Callback((WaitRequest r, CancellationToken _) => seen = r)
+            .ReturnsAsync(new WaitForResult(false, "active_window", 2000, 4, "active window is 'Calculator', wanted 'Notepad'"));
+
+        await using var server = await Harness.StartAsync(
+            configureServices: services => services.AddSingleton(uia.Object));
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var waitFor = ToolName(await client.ListToolsAsync(), "waitfor");
+
+        var result = await client.CallToolAsync(waitFor, new Dictionary<string, object?>
+        {
+            ["text"] = "Notepad",
+            ["condition"] = "window",
+            ["timeout_ms"] = 2000,
+        });
+
+        result.IsError.Should().NotBe(true, "a timeout is an outcome, not a tool error (roadmap C4)");
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject.Text;
+        text.Should().NotBe("null");
+        using var doc = JsonDocument.Parse(text);
+        doc.RootElement.GetProperty("Satisfied").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("Attempts").GetInt32().Should().Be(4);
+        doc.RootElement.GetProperty("Detail").GetString().Should().Contain("wanted 'Notepad'");
+        seen.Should().NotBeNull();
+        seen!.Condition.Should().Be(WaitCondition.ActiveWindow, "the alias 'window' survived the wire");
+        seen.TimeoutMs.Should().Be(2000);
+    }
+
+    /// <summary>
+    /// B-7 (R111): the two new tools exist on the wire with upstream's names, their parameter sets
+    /// and no read-only/idempotent hints — they inject input.
+    /// </summary>
+    [Fact]
+    public async Task The_batch_tools_are_discovered_with_their_parameter_sets_and_no_safe_hints()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        var select = tools.Single(t => t.Name == ToolName(tools, "multiselect"));
+        var edit = tools.Single(t => t.Name == ToolName(tools, "multiedit"));
+
+        select.ProtocolTool.InputSchema.GetProperty("properties").EnumerateObject().Select(p => p.Name)
+            .Should().BeEquivalentTo(["targets_json", "ctrl"]);
+        select.ProtocolTool.InputSchema.GetProperty("properties")
+            .GetProperty("ctrl").GetProperty("default").GetBoolean().Should().BeTrue();
+        edit.ProtocolTool.InputSchema.GetProperty("properties").EnumerateObject().Select(p => p.Name)
+            .Should().BeEquivalentTo(["entries_json"]);
+
+        foreach (var tool in new[] { select, edit })
+        {
+            tool.ProtocolTool.Annotations?.ReadOnlyHint.Should().NotBe(true, $"{tool.Name} clicks and types");
+            tool.ProtocolTool.Annotations?.IdempotentHint.Should().NotBe(true);
+            tool.ProtocolTool.Description.Should().NotContainEquivalentOf("not implemented");
+        }
+    }
+
+    /// <summary>
+    /// B-7 (R112): a batch refusal has to reach the client as a tool error naming the parameter,
+    /// not as a JSON parser exception. The input service is a mock, so nothing is clicked.
+    /// </summary>
+    [Fact]
+    public async Task Multi_select_over_http_refuses_a_malformed_batch_by_name()
+    {
+        var input = new Mock<IInputService>();
+        await using var server = await Harness.StartAsync(
+            configureServices: services => services.AddSingleton(input.Object));
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var select = ToolName(await client.ListToolsAsync(), "multiselect");
+
+        var refused = await client.CallToolAsync(select, new Dictionary<string, object?>
+        {
+            ["targets_json"] = "[{\"x\":1}]",
+        });
+
+        refused.IsError.Should().BeTrue();
+        refused.Content.OfType<TextContentBlock>().Single().Text.Should().Contain("targets_json");
+        input.Verify(s => s.ClickAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<MouseButton>(),
+            It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     // ---- B-12: multi_monitor detail over the wire ---------------------------------------------
 
     /// <summary>

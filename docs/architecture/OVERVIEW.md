@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 66 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 68 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
 
 ## Purpose
 
@@ -78,9 +78,9 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 ## Available Tools
 
-Windows-MCP exposes **66 MCP tools** across 19 tool classes:
+Windows-MCP exposes **68 MCP tools** across 19 tool classes:
 
-### Input Tools (`InputTools` — 9 tools)
+### Input Tools (`InputTools` — 11 tools)
 | Tool | Purpose |
 |------|---------|
 | `Click` | Click at coordinates *or* on a snapshot element (`element_id` → its centre): left/right/middle, single/double/triple, `clicks:0` = hover only |
@@ -91,6 +91,8 @@ Windows-MCP exposes **66 MCP tools** across 19 tool classes:
 | `Shortcut` | Press a chord (`ctrl+c`, `ctrl+shift+s`, `win+r`); a single key such as `win` also works |
 | `Scroll` | Scroll the mouse wheel (up/down/left/right) at a point, an element's centre, or wherever the cursor is; `shift_wheel` for sideways scrolling with the vertical wheel |
 | `Wait` | Pause for `seconds` (more than 0, at most 60) in-process, instead of a PowerShell sleep; returns `{"waited": seconds}` |
+| `MultiSelect` | Click a JSON array of `{x,y}` / `{element_id}` targets in one call with Ctrl held for the whole batch (`ctrl:false` to click without it); every target is resolved before the first click, and the batch stops at the first failure reporting `failedIndex`/`error` with the results so far |
+| `MultiEdit` | Click and type a JSON array of entries — a target plus `text` and the optional `clear`/`press_enter` — through the same path as `type`; same resolve-first and stop-at-first-failure rules, `method` per entry |
 | `Clipboard` | Get or set clipboard text |
 
 ### UI Automation Tools (`UIAutomationTools` — 9 tools)
@@ -104,7 +106,7 @@ Windows-MCP exposes **66 MCP tools** across 19 tool classes:
 | `GetText` | Extract text content from a UI element |
 | `GetTable` | Extract tabular data from a grid/table element |
 | `AssertElement` | Assert element state (exists / enabled / checked / visible / focused / value with `expected`); `PASS` or `FAIL: <state> — observed <what was found>` |
-| `WaitFor` | Poll until an element whose name/value contains text appears |
+| `WaitFor` | Poll until a condition holds: `element_exists` (default) / `element_enabled` (the same `find_element` filters) / `focused_element` / `text_exists` (anywhere in a snapshot of the scope, `use_dom:true` reading the browser page) / `active_window` (the foreground title, exact → substring → fuzzy 70+, no element walk); aliases `element\|enabled\|focused\|text\|window`. Always returns `{Satisfied, Condition, ElapsedMs, Attempts, Detail, Element?}` — a timeout is `Satisfied:false` with the last `Detail`, never an exception |
 
 ### Window Tools (`WindowTools` — 5 tools)
 | Tool | Purpose |

@@ -154,22 +154,45 @@ public sealed class UIAutomationTools
     }
 
     [McpServerTool, Description(
-        "Wait for a UI element whose name contains text to appear, polling find_element. Returns " +
-        "element info, or 'null' if it never appeared. Takes the same kind/scope/window/" +
-        "include_offscreen filters as find_element — scope:\"window\" is re-resolved on every poll, " +
-        "so it also serves as 'wait for that app to open'. A poll that fails is retried; if EVERY " +
-        "poll failed the call errors rather than reporting a misleading 'null'.")]
+        "Wait until something is true on screen, polling until it is or the timeout passes. condition: " +
+        "element_exists (default; an element whose name contains text — the same kind/scope/window/include_offscreen " +
+        "filters as find_element, and scope:\"window\" is re-resolved on every poll so it also serves as 'wait for that app " +
+        "to open') | element_enabled (that element, and enabled) | focused_element (the element with keyboard focus has " +
+        "that name) | text_exists (the text is anywhere in a snapshot of the scope: element names and values, scrollable " +
+        "regions, and with use_dom:true the browser page's words) | active_window (the foreground window's title matches " +
+        "text: exact, substring or fuzzy 70+). Aliases: element, enabled, focused, text, window. Always returns " +
+        "{Satisfied, Condition, ElapsedMs, Attempts, Detail, Element?}: a timeout is Satisfied:false with the last Detail, " +
+        "not an error; a poll that fails is retried, and when every poll failed Detail says so.")]
     public async Task<string> WaitFor(
-        [Description("Text to wait for in element names (substring, case-insensitive)")] string text,
+        [Description("What to look for: an element name for the element conditions, a window title for active_window, on-screen text for text_exists (substring, case-insensitive)")] string text,
         [Description("Timeout in milliseconds")] int timeout_ms = 10000,
         [Description("Poll interval in milliseconds")] int interval_ms = 500,
         [Description("Element kind: any | interactive | text | scrollable")] string kind = "any",
         [Description("Search scope: foreground (default) | window (needs 'window') | desktop")] string scope = "foreground",
         [Description("Window title to search; only with scope=window")] string? window = null,
-        [Description("Include off-screen elements. Default false — otherwise the wait can succeed on an element that is not visible yet")] bool include_offscreen = false)
+        [Description("Include off-screen elements. Default false — otherwise the wait can succeed on an element that is not visible yet")] bool include_offscreen = false,
+        [Description("What to wait for: element_exists (default) | element_enabled | focused_element | text_exists | active_window (aliases: element, enabled, focused, text, window)")] string condition = "element_exists",
+        [Description("For text_exists/focused_element in a browser: read the web page (the RootWebArea document, A-5) instead of the window chrome")] bool use_dom = false)
     {
+        if (timeout_ms is < 0 or > 120000)
+            throw new ArgumentException($"timeout_ms must be between 0 and 120000, got {timeout_ms}", nameof(timeout_ms));
+        if (interval_ms is < 0 or > 5000)
+            throw new ArgumentException($"interval_ms must be between 0 and 5000, got {interval_ms}", nameof(interval_ms));
+        var parsedCondition = condition.ToLowerInvariant() switch
+        {
+            "element_exists" or "element" => WaitCondition.ElementExists,
+            "element_enabled" or "enabled" => WaitCondition.ElementEnabled,
+            "focused_element" or "focused" => WaitCondition.FocusedElement,
+            "text_exists" or "text" => WaitCondition.TextExists,
+            "active_window" or "window" => WaitCondition.ActiveWindow,
+            _ => throw new ArgumentException(
+                $"Unknown condition '{condition}'; wait_for returns when one of these appears or holds: element_exists|element_enabled|focused_element|text_exists|active_window (aliases element|enabled|focused|text|window)", nameof(condition)),
+        };
+        if (string.IsNullOrWhiteSpace(text))
+            throw new ArgumentException($"{WaitConditions.NameOf(parsedCondition)} needs text: what to look for.", nameof(text));
+
         var (parsedScope, windowTitle) = ParseTarget(scope, window);
-        var info = await _uia.WaitForAsync(text, timeout_ms, interval_ms, ParseKind(kind), parsedScope, windowTitle, include_offscreen);
-        return info is null ? "null" : JsonSerializer.Serialize(info);
+        var request = new WaitRequest(parsedCondition, text, timeout_ms, interval_ms, ParseKind(kind), parsedScope, windowTitle, include_offscreen, use_dom);
+        return JsonSerializer.Serialize(await _uia.WaitForAsync(request));
     }
 }

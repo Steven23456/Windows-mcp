@@ -39,17 +39,27 @@ public class ToolInventoryTests
     private static string Skill() => File.ReadAllText(Path.Combine(RepoRoot(), "skills", "windows", "SKILL.md"));
 
     [Fact]
-    public void The_assembly_advertises_sixty_six_tools()
+    public void The_assembly_advertises_sixty_eight_tools()
     {
-        // B-5 takes the count from 65 to 66 (roadmap C3: wait, then multi_select and multi_edit
-        // in phase 4). Every number quoted in a document is checked against this one below.
-        ToolMethods().Should().HaveCount(66);
+        // B-5 took the count from 65 to 66; B-7's multi_select and multi_edit take it to 68, which
+        // is where roadmap C3 stops ("65 -> 68"). Every number quoted in a document is checked
+        // against this one below.
+        ToolMethods().Should().HaveCount(68);
     }
 
     [Fact]
     public void Wait_is_one_of_them()
     {
         ToolMethods().Select(m => m.Name).Should().Contain(nameof(InputTools.Wait));
+    }
+
+    [Fact]
+    public void The_two_batch_tools_are_the_sixty_seventh_and_sixty_eighth()
+    {
+        // Named, not just counted: C3's whole argument for spending two tool slots is that the
+        // model reaches for upstream's names by habit.
+        ToolMethods().Select(m => m.Name).Should()
+            .Contain(nameof(InputTools.MultiSelect)).And.Contain(nameof(InputTools.MultiEdit));
     }
 
     [Fact]

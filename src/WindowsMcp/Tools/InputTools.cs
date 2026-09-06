@@ -3,6 +3,7 @@ using System.Text.Json;
 using ModelContextProtocol.Server;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
+using WindowsMcp.Services;
 using WindowsMcp.Services.UiTree;
 
 namespace WindowsMcp.Tools;
@@ -208,6 +209,73 @@ public sealed class InputTools
 
         await Task.Delay(TimeSpan.FromSeconds(seconds), ct);
         return JsonSerializer.Serialize(new { waited = seconds });
+    }
+
+    [McpServerTool, Description("Click several targets in one call, holding Ctrl for the whole batch (multi-select in lists, file managers, canvases). targets_json is a JSON array of {x,y} points (virtual-desktop pixels) or {element_id} objects (el_N ids from snapshot); a JSON string holding that array is accepted too. Every target is resolved before anything is clicked, so an off-screen element refuses the whole batch with nothing done. The clicks run in order and stop at the first failure: the result then carries failedIndex and error with the results so far, so the batch is not atomic. ctrl:false clicks without the modifier. Returns {count, ctrl, results:[{index, x, y, elementId?, name?, ok}], failedIndex?, error?}.")]
+    public async Task<string> MultiSelect(
+        [Description("JSON array of targets: {\"x\":..,\"y\":..} or {\"element_id\":\"el_N\"} objects, at least one")] string targets_json,
+        [Description("Hold Ctrl from before the first click until after the last (default true)")] bool ctrl = true)
+    {
+        var targets = BatchTargets.ParseTargets(targets_json);
+        var resolved = new List<Target>(targets.Count);
+        foreach (var t in targets)
+            resolved.Add(await ResolveTargetAsync(t.X, t.Y, t.ElementId, allowCursor: false));   // all refusals before any input
+
+        var results = new List<object>();
+        int? failedIndex = null; string? error = null;
+        if (ctrl) await _input.KeyDownAsync("ctrl");
+        try
+        {
+            for (int i = 0; i < resolved.Count; i++)
+            {
+                var r = resolved[i];
+                try
+                {
+                    await _input.ClickAsync(r.X, r.Y, MouseButton.Left, 1);
+                    results.Add(new { index = i, x = r.X, y = r.Y, elementId = r.ElementId, name = r.Name, ok = true });
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    failedIndex = i; error = ex.Message;
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            if (ctrl) await _input.KeyUpAsync("ctrl");   // never leave the modifier down
+        }
+        return JsonSerializer.Serialize(new { count = targets.Count, ctrl, results, failedIndex, error });
+    }
+
+    [McpServerTool, Description("Fill several fields in one call: for each entry, click its target then type its text. entries_json is a JSON array of objects with a target ({x,y} in virtual-desktop pixels, or element_id = an el_N id from snapshot), text (required), and optionally clear (select all and delete first) and press_enter; a JSON string holding that array is accepted too. Every entry is resolved before anything is typed, so an off-screen element refuses the whole batch with nothing done. Entries run in order and stop at the first failure: the result then carries failedIndex and error with the results so far, so the batch is not atomic. Returns {count, results:[{index, x, y, elementId?, name?, typed, method, ok}], failedIndex?, error?}.")]
+    public async Task<string> MultiEdit(
+        [Description("JSON array of entries: {\"x\":..,\"y\":..} or {\"element_id\":\"el_N\"} plus \"text\" (required), \"clear\" and \"press_enter\" (optional)")] string entries_json)
+    {
+        var entries = BatchTargets.ParseEntries(entries_json);
+        var resolved = new List<Target>(entries.Count);
+        foreach (var e in entries)
+            resolved.Add(await ResolveTargetAsync(e.X, e.Y, e.ElementId, allowCursor: false));   // all refusals before any input
+
+        var results = new List<object>();
+        int? failedIndex = null; string? error = null;
+        for (int i = 0; i < resolved.Count; i++)
+        {
+            var r = resolved[i];
+            var e = entries[i];
+            try
+            {
+                await _input.ClickAsync(r.X, r.Y, MouseButton.Left, 1);
+                var typed = await _input.TypeAsync(e.Text!, new TypeOptions(e.Clear, CaretPosition.Idle, e.PressEnter, 5));
+                results.Add(new { index = i, x = r.X, y = r.Y, elementId = r.ElementId, name = r.Name, typed = typed.CharsTyped, method = typed.Method, ok = true });
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failedIndex = i; error = ex.Message;
+                break;
+            }
+        }
+        return JsonSerializer.Serialize(new { count = entries.Count, results, failedIndex, error });
     }
 
     [McpServerTool, Description("Clipboard get/set.")]

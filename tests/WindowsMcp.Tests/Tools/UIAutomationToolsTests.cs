@@ -172,32 +172,12 @@ public class UIAutomationToolsTests
         await act.Should().ThrowAsync<ArgumentException>().WithMessage("*only used with scope=window*");
     }
 
-    [Fact]
-    public async Task WaitFor_forwards_kind_scope_window_and_offscreen()
-    {
-        var element = new ElementInfo("el-9", "Ready", "Text", true, false, new Bounds(0, 0, 5, 5), null, null, null);
-        var mock = new Mock<IUIAutomationService>();
-        mock.Setup(s => s.WaitForAsync("Ready", 2000, 100, FindKind.Text, FindScope.Window, "Notepad", false, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(element);
-        var tools = new UIAutomationTools(mock.Object);
-
-        var result = await tools.WaitFor("Ready", 2000, 100, "text", "window", "Notepad");
-
-        result.Should().Contain("el-9");
-        mock.VerifyAll();
-    }
-
-    [Fact]
-    public async Task WaitFor_renders_null_on_timeout()
-    {
-        var mock = new Mock<IUIAutomationService>();
-        mock.Setup(s => s.WaitForAsync("Ready", 10000, 500, FindKind.Any, FindScope.Foreground, null, false, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ElementInfo?)null);
-        var tools = new UIAutomationTools(mock.Object);
-
-        (await tools.WaitFor("Ready")).Should().Be("null");
-        mock.VerifyAll();
-    }
+    // B-6 (roadmap C4) moved the wait_for tool rows to UIAutomationToolsWaitForTests: the tool now
+    // takes a condition, calls the WaitRequest overload, and ALWAYS returns a WaitForResult. The
+    // two rows that used to live here pinned the pre-B-6 contract - forwarding to
+    // WaitForAsync(text, ...) and rendering the string "null" on timeout - which is exactly what
+    // C4 replaces. The old service overload itself is unchanged and still pinned, by
+    // UIAutomationServiceTests (PollAsync) and WaitForFindPathIntegrationTests.
 
     // ---- A-2 (R5): the snapshot tool ---------------------------------------------------------
     // The tool is the whole contract the model sees: what it may pass, what comes back, and what

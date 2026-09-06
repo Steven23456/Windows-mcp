@@ -191,3 +191,50 @@ public record SnapshotResult(
     long CaptureMs,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StageTiming[]? Stages = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SnapshotPage[]? Pages = null);
+
+// ---- B-6 wait_for conditions --------------------------------------------------------------
+
+/// <summary>
+/// B-6: what <c>wait_for</c> is waiting for. The canonical names on the wire are the snake_case
+/// forms (<c>element_exists</c>, <c>element_enabled</c>, <c>focused_element</c>,
+/// <c>text_exists</c>, <c>active_window</c>); the tool also accepts upstream's short aliases
+/// (<c>element|enabled|focused|text|window</c>).
+/// </summary>
+public enum WaitCondition { ElementExists, ElementEnabled, FocusedElement, TextExists, ActiveWindow }
+
+/// <summary>
+/// B-6: one wait. <paramref name="Text"/> is required (non-blank) by every condition — it is the
+/// element name for the element conditions, the window title for <see cref="WaitCondition.ActiveWindow"/>
+/// and the on-screen text for <see cref="WaitCondition.TextExists"/>.
+/// </summary>
+/// <param name="TimeoutMs">0..120000; 0 means "check once, now".</param>
+/// <param name="IntervalMs">0..5000; clamped to a 10 ms floor and to the remaining budget.</param>
+/// <param name="UseDom">
+/// A-5's browser DOM mode, only meaningful for <see cref="WaitCondition.TextExists"/> and
+/// <see cref="WaitCondition.FocusedElement"/> (the two that read a snapshot); accepted and ignored for the others.
+/// </param>
+public record WaitRequest(
+    WaitCondition Condition,
+    string? Text,
+    int TimeoutMs = 10000,
+    int IntervalMs = 500,
+    FindKind Kind = FindKind.Any,
+    FindScope Scope = FindScope.Foreground,
+    string? WindowTitle = null,
+    bool IncludeOffscreen = false,
+    bool UseDom = false);
+
+/// <summary>
+/// B-6 (roadmap C4): the answer a wait always gives. A timeout is
+/// <see cref="Satisfied"/> false with the last <see cref="Detail"/>, never an exception and never
+/// the string "null".
+/// </summary>
+/// <param name="Condition">The canonical snake_case condition name.</param>
+/// <param name="Element">The element that satisfied the wait; omitted from JSON when there is none.</param>
+public record WaitForResult(
+    bool Satisfied,
+    string Condition,
+    long ElapsedMs,
+    int Attempts,
+    string Detail,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ElementInfo? Element = null);

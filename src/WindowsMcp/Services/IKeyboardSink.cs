@@ -15,4 +15,10 @@ internal interface IKeyboardSink
 
     /// <summary>A literal chunk of text.</summary>
     void Text(string text);
+
+    /// <summary>B-7: press <paramref name="key"/> and hold it (the Ctrl of a multi-select).</summary>
+    void KeyDown(string key);
+
+    /// <summary>B-7: release a held <paramref name="key"/>.</summary>
+    void KeyUp(string key);
 }
