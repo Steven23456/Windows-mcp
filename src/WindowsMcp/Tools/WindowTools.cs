@@ -19,13 +19,18 @@ public sealed class WindowTools
         _desktops = desktops;
     }
 
-    [McpServerTool, Description("Inspect or act on top-level windows (parity A-1). actions: list (every user-visible window, z-order topmost first: ZOrder 0 = frontmost), active (the foreground window, or {\"found\":false}), desktops (the virtual desktops: {\"current\":{Id,Name,Index,IsCurrent}|null,\"all\":[...]}; Index is the registry's order, Name is the user's name or 'Desktop N'), minimize|maximize|restore|close (need 'title' — matched exact, then substring, then fuzzy — or 'hwnd', which wins; the result carries the matched Title, Hwnd, MatchStrategy and Score; no match lists the open windows). list/active/desktops ignore 'title' and 'hwnd'. Fields: Title (sanitised), Hwnd (the window handle; pass it as 'hwnd' to this tool's acting actions, switch_to_window and focus for a precise target), Pid/ProcessName, State (Normal|Minimized|Maximized), Bounds in virtual-desktop pixels, IsActive (the foreground window), IsBrowser (chrome/msedge/firefox/brave/opera/vivaldi), MonitorIndex into multi_monitor's list (-1 = on no monitor, e.g. minimized), DesktopId (the virtual desktop the window is on, lower-case GUID; null when unknown).")]
+    [McpServerTool, Description("Inspect or act on top-level windows (parity A-1). actions: list (every user-visible window, z-order topmost first: ZOrder 0 = frontmost), active (the foreground window, or {\"found\":false}), desktops (the virtual desktops: {\"current\":{Id,Name,Index,IsCurrent}|null,\"all\":[...]}; Index is the registry's order, Name is the user's name or 'Desktop N'), minimize|maximize|restore|close (need 'title' — matched exact, then substring, then fuzzy — or 'hwnd', which wins; the result carries the matched Title, Hwnd, MatchStrategy and Score; no match lists the open windows). move|resize|set_bounds (parity B-9: move needs x,y; resize needs width,height; set_bounds needs all four; same title/hwnd targeting, or the foreground window when neither is given; a minimized or maximized window is refused unless restore_first:true; returns {Window, Before, After (the rect it actually ended up with), MatchStrategy, Score, Restored}). list/active/desktops ignore 'title' and 'hwnd'. Fields: Title (sanitised), Hwnd (the window handle; pass it as 'hwnd' to this tool's acting actions, switch_to_window and focus for a precise target), Pid/ProcessName, State (Normal|Minimized|Maximized), Bounds in virtual-desktop pixels, IsActive (the foreground window), IsBrowser (chrome/msedge/firefox/brave/opera/vivaldi), MonitorIndex into multi_monitor's list (-1 = on no monitor, e.g. minimized), DesktopId (the virtual desktop the window is on, lower-case GUID; null when unknown).")]
     public async Task<string> Window(
-        [Description("list | active | desktops | minimize | maximize | restore | close")] string action,
-        [Description("Window title to act on, matched exact then substring then fuzzy; minimize/maximize/restore/close need it or hwnd; ignored by list/active/desktops")] string? title = null,
+        [Description("list | active | desktops | minimize | maximize | restore | close | move | resize | set_bounds")] string action,
+        [Description("Window title to act on, matched exact then substring then fuzzy; minimize/maximize/restore/close need it or hwnd; move/resize/set_bounds use it too, or act on the foreground window when neither is given; ignored by list/active/desktops")] string? title = null,
         [Description("list: include minimized windows (default true)")] bool include_minimized = true,
         [Description("list: include windows with no title (default false)")] bool include_hidden = false,
-        [Description("Window handle to act on, as reported by action:list; an alternative to 'title'")] long? hwnd = null)
+        [Description("Window handle to act on, as reported by action:list; an alternative to 'title'")] long? hwnd = null,
+        [Description("move|set_bounds: new left edge in virtual-desktop pixels")] int? x = null,
+        [Description("move|set_bounds: new top edge in virtual-desktop pixels")] int? y = null,
+        [Description("resize|set_bounds: new width in pixels")] int? width = null,
+        [Description("resize|set_bounds: new height in pixels")] int? height = null,
+        [Description("move|resize|set_bounds: restore a minimized or maximized window first instead of refusing it (default false)")] bool restore_first = false)
     {
         switch (action.ToLowerInvariant())
         {
@@ -38,13 +43,25 @@ public sealed class WindowTools
                 // One read, one truth: 'current' is the flagged entry of the same list.
                 var all = await _desktops.ListAsync();
                 return JsonSerializer.Serialize(new { current = all.FirstOrDefault(d => d.IsCurrent), all });
+            case "move":
+                if (x is null || y is null)
+                    throw new ArgumentException("'move' needs x and y (the new top-left, in virtual-desktop pixels); use resize for a size or set_bounds for both.");
+                return JsonSerializer.Serialize(await _window.SetBoundsAsync(title, hwnd, x, y, null, null, restore_first));
+            case "resize":
+                if (width is null || height is null)
+                    throw new ArgumentException("'resize' needs width and height; use move for a position or set_bounds for both.");
+                return JsonSerializer.Serialize(await _window.SetBoundsAsync(title, hwnd, null, null, width, height, restore_first));
+            case "set_bounds":
+                if (x is null || y is null || width is null || height is null)
+                    throw new ArgumentException("'set_bounds' needs all four of x, y, width and height; use move or resize for one pair.");
+                return JsonSerializer.Serialize(await _window.SetBoundsAsync(title, hwnd, x, y, width, height, restore_first));
             case "minimize" or "maximize" or "restore" or "close":
                 // Validated here, before the service, so a bad call never touches a window.
                 if (hwnd is null && string.IsNullOrWhiteSpace(title))
                     throw new ArgumentException($"'{action}' needs a title or an hwnd; only list, active and desktops work without one");
                 return JsonSerializer.Serialize(await _window.ExecuteAsync(action, title, hwnd));
             default:
-                throw new ArgumentException($"Unknown action '{action}'; expected list|active|desktops|minimize|maximize|restore|close");
+                throw new ArgumentException($"Unknown action '{action}'; expected list|active|desktops|minimize|maximize|restore|close|move|resize|set_bounds");
         }
     }
 
@@ -55,12 +72,18 @@ public sealed class WindowTools
         CancellationToken ct = default)
         => JsonSerializer.Serialize(await BringToFrontAsync(title, hwnd, ct));
 
-    [McpServerTool, Description("Launch an application by name or path. Uses ShellExecute so Start Menu shortcuts and PATH are resolved.")]
+    [McpServerTool, Description("Launch an application by its Start Menu name, its AUMID's display name, or a path. A path, or an explicit .exe name found on PATH, is started outright; anything else is resolved against an in-process catalog of Start Menu shortcuts and packaged (Store/MSIX) apps, matched exact, then by prefix, then fuzzy (score 70+), so launch('calc') opens Calculator and launch('vs code') opens Visual Studio Code. With wait_for_window the window inventory is polled up to timeout_ms for a window of the launched process, or a new window whose title matches the app; a timeout is reported as windowDetected:false with the pid, not as an error. Returns {MatchedName, Kind (shortcut|packaged|path), Score, Strategy (path|exact|prefix|fuzzy), Pid, Hwnd, Title, WindowDetected}. A name that matches nothing lists the five nearest apps with their scores.")]
     public async Task<string> Launch(
-        [Description("Application name or executable path to launch")] string app_name)
+        [Description("Application name (Start Menu or Store display name), or an executable path")] string app_name,
+        [Description("Wait for the app's window to appear and report its Hwnd/Title (default true)")] bool wait_for_window = true,
+        [Description("How long to wait for the window, in milliseconds: 1..60000 (default 10000)")] int timeout_ms = 10000,
+        CancellationToken ct = default)
     {
-        int pid = await _window.LaunchAsync(app_name);
-        return $"launched (pid={pid})";
+        if (string.IsNullOrWhiteSpace(app_name))
+            throw new ArgumentException("app_name is required: a Start Menu name, a Store app's display name, or a path.", nameof(app_name));
+        if (timeout_ms is < 1 or > 60000)
+            throw new ArgumentException($"timeout_ms must be between 1 and 60000, got {timeout_ms}", nameof(timeout_ms));
+        return JsonSerializer.Serialize(await _window.LaunchAsync(app_name, wait_for_window, timeout_ms, ct));
     }
 
     [McpServerTool, Description("Set keyboard focus to a window (alias for switch_to_window): title matched exact, then substring, then fuzzy, or hwnd from window list; restores a minimised window; climbs the same SetForegroundWindow/AttachThreadInput/ALT-nudge ladder and returns the same {Window, MatchStrategy, Score, Restored, Strategy, Success} result.")]

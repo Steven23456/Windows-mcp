@@ -664,15 +664,8 @@ public class WindowToolsTests
         second.GetProperty("Scale").GetDouble().Should().Be(1.0);
     }
 
-    [Fact]
-    public async Task Launch_returns_the_pid_the_service_reports()
-    {
-        var mock = new Mock<IWindowService>();
-        mock.Setup(s => s.LaunchAsync("notepad.exe", It.IsAny<CancellationToken>())).ReturnsAsync(4242);
-
-        var text = await NewTools(mock.Object).Launch("notepad.exe");
-
-        text.Should().Be("launched (pid=4242)");
-        mock.Verify(s => s.LaunchAsync("notepad.exe", It.IsAny<CancellationToken>()), Times.Once);
-    }
+    // ---- B-8: launch --------------------------------------------------------------------------
+    // The pre-B-8 test pinned `launch` returning the string "launched (pid=4242)". B-8 replaces
+    // that string with a serialised LaunchResult (CHANGELOG Changed), so the whole tool now lives
+    // in WindowToolsLaunchTests - catalog matching, the window wait, and the refusals it gained.
 }

@@ -186,11 +186,20 @@ public class WindowServiceTests
     {
         var service = new WindowService();
 
-        var visible = await service.ListAsync(includeHidden: false);
+        var before = await service.ListAsync(includeHidden: false);
         var withHidden = await service.ListAsync(includeHidden: true);
+        var after = await service.ListAsync(includeHidden: false);
 
-        withHidden.Length.Should().BeGreaterThanOrEqualTo(visible.Length,
-            "include_hidden only ever adds untitled windows");
+        // Three reads, because a window that opens or closes between two of them is churn and not
+        // a filter bug (a parallel Integration class owns real windows of this process:
+        // WindowServiceExecuteTests, B-9's WindowServiceBoundsTests, B-8's
+        // WindowServiceLaunchWaitTests). Only the windows that were there BOTH before and after
+        // can be demanded of the middle read - and demanding them by handle is stronger than
+        // comparing counts, which two cancelling changes would hide.
+        var stable = before.Select(w => w.Hwnd).Intersect(after.Select(w => w.Hwnd)).ToArray();
+        stable.Should().NotBeEmpty("this session has windows that stayed open across three reads");
+        withHidden.Select(w => w.Hwnd).Should().Contain(stable,
+            "include_hidden only ever ADDS untitled windows - it can never drop one");
     }
 
     // ---- the acting path, through the real service ------------------------------------------

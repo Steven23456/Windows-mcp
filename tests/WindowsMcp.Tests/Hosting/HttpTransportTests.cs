@@ -722,6 +722,93 @@ public class HttpTransportTests
         }
     }
 
+    // ---- B-8 / B-9: the launch and window schemas ---------------------------------------------
+    // The schema is the whole spec the model reads before its first call: a parameter that is not
+    // advertised does not exist, and a default that disagrees with the description is a trap.
+
+    /// <summary>
+    /// B-8 (R7): <c>launch</c> gained two parameters and lost its "just a name" shape. Discovery
+    /// through the real host is where a source-generated signature goes missing.
+    /// </summary>
+    [Fact]
+    public async Task Launch_tool_is_discovered_with_the_B8_parameter_set()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        var launch = tools.Single(t => t.Name == ToolName(tools, "launch"));
+        var schema = launch.ProtocolTool.InputSchema.GetProperty("properties");
+
+        schema.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
+            ["app_name", "wait_for_window", "timeout_ms"],
+            "no more and no fewer: the catalog and the poll interval are the server's business");
+        schema.GetProperty("wait_for_window").GetProperty("default").GetBoolean().Should().BeTrue();
+        schema.GetProperty("timeout_ms").GetProperty("default").GetInt32().Should().Be(10_000);
+        launch.ProtocolTool.Description.Should().ContainEquivalentOf("Start Menu");
+    }
+
+    /// <summary>
+    /// B-9 (R7): <c>window</c> gained five parameters, and the A-1/B-10 five have to stay exactly
+    /// where they were - callers pass <c>action</c> and <c>title</c> positionally.
+    /// </summary>
+    [Fact]
+    public async Task Window_tool_is_discovered_with_the_B9_parameter_set()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        var window = tools.Single(t => t.Name == WindowToolName(tools));
+        var schema = window.ProtocolTool.InputSchema.GetProperty("properties");
+
+        schema.EnumerateObject().Select(p => p.Name).Should().BeEquivalentTo(
+            ["action", "title", "include_minimized", "include_hidden", "hwnd",
+             "x", "y", "width", "height", "restore_first"]);
+        schema.GetProperty("restore_first").GetProperty("default").GetBoolean().Should().BeFalse();
+        window.ProtocolTool.Description.Should().Contain("set_bounds");
+    }
+
+    /// <summary>
+    /// B-9 end to end with <see cref="IWindowService"/> swapped at the <c>BuildHttpApp</c> seam:
+    /// the nested Before/After rectangles have to survive DI, the tool invoker and the JSON-RPC
+    /// round trip. Nothing on this desktop moves - the service is a mock.
+    /// </summary>
+    [Fact]
+    public async Task Window_set_bounds_over_http_returns_both_rectangles()
+    {
+        var windowService = new Mock<IWindowService>();
+        windowService.Setup(w => w.SetBoundsAsync("notepad", null, 100, 100, 800, 600, false, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WindowBoundsResult(
+                new WindowInfo("Untitled - Notepad", 0x1234, 4242, "notepad", WindowState.Normal,
+                    new Bounds(100, 100, 800, 600), 0, true, false, 0),
+                new Bounds(10, 20, 300, 200), new Bounds(100, 100, 800, 600), "substring", 100, false));
+
+        await using var server = await Harness.StartAsync(
+            configureServices: services => services.AddSingleton(windowService.Object));
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var window = WindowToolName(await client.ListToolsAsync());
+
+        var result = await client.CallToolAsync(window, new Dictionary<string, object?>
+        {
+            ["action"] = "set_bounds",
+            ["title"] = "notepad",
+            ["x"] = 100,
+            ["y"] = 100,
+            ["width"] = 800,
+            ["height"] = 600,
+        });
+
+        result.IsError.Should().NotBe(true);
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject.Text;
+        using var doc = JsonDocument.Parse(text);
+        doc.RootElement.GetProperty("Before").GetProperty("Width").GetInt32().Should().Be(300);
+        doc.RootElement.GetProperty("After").GetProperty("Width").GetInt32().Should().Be(800);
+        doc.RootElement.GetProperty("Window").GetProperty("Hwnd").GetInt64().Should().Be(0x1234);
+        windowService.Verify(w => w.SetBoundsAsync("notepad", null, 100, 100, 800, 600, false, It.IsAny<CancellationToken>()),
+            Times.Once, "the numbers the caller sent are the numbers the service is given");
+    }
+
     // ---- B-5: wait ---------------------------------------------------------------------------
 
     private static string ToolName(IEnumerable<McpClientTool> tools, string name) =>

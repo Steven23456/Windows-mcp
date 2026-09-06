@@ -89,8 +89,8 @@ function names are the stable anchor.
 | B-5 | Plain `wait` tool | P1 | S | [B-5](design/B-5-wait.md) | ☑ |
 | B-6 | `wait_for` conditions + window filter | P2 | M | A-1, A-2 | ☐ |
 | B-7 | `multi_select` / `multi_edit` batch tools | P2 | S–M | B-1 | ☐ |
-| B-8 | Launch by Start Menu name (fuzzy) + wait for window | P1 | M | A-1 | ☐ |
-| B-9 | Window resize / move | P2 | S | — | ☐ |
+| B-8 | Launch by Start Menu name (fuzzy) + wait for window | P1 | M | A-1 · [B-8](design/B-8-launch-catalog.md) | ☑ |
+| B-9 | Window resize / move | P2 | S | [B-9](design/B-9-window-bounds.md) | ☑ |
 | B-10 | Fuzzy window match + robust bring-to-foreground | P1 | M | A-1 · [B-10](design/B-10-window-matching.md) | ☑ |
 | B-11 | `start_process` with argv list + cwd | P2 | S | [B-11](design/B-11-start-process-argv.md) | ☑ |
 | B-12 | `multi_monitor`: work area, orientation, DPI, scale | P2 | S | [B-12](design/B-12-monitor-detail.md) | ☑ |
@@ -921,7 +921,7 @@ each field (`multi_edit()` ~880). Both tolerate JSON-stringified lists (Claude D
 typing path; return per-entry results; stop on first failure and report the index.
 
 ### B-8 — Launch by Start Menu name with fuzzy match and window wait  `P1 · M`
-- [ ] Not started
+- [x] Done 2026-09-06 — [design note](design/B-8-launch-catalog.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `App(mode=launch, name)`: builds a name→AppID map from `Get-StartApps`
 (CSV), falls back to scanning Start Menu `.lnk` folders, adds locale display names from
@@ -931,7 +931,7 @@ path via `Start-Process -PassThru` (captures PID) or an AUMID via
 window by PID, else by regex title; reports "launched" vs "sent, window not detected"
 (`launch_app()` ~528, `get_apps_from_start_menu()` ~327, `app()` ~475).
 
-**Ours.** `launch(app_name)` = ShellExecute, returns a PID, no matching, no wait
+**Ours (before B-8).** `launch(app_name)` = ShellExecute, returns a PID, no matching, no wait
 (`WindowService.cs:63`). `ShortcutResolver` (IShellLink) already exists for the startup report.
 
 **Sketch.** `IAppCatalogService` building the map from `Get-StartApps` (or the
@@ -946,12 +946,12 @@ accepting a path.
 return the window handle.
 
 ### B-9 — Window resize / move  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-06 — [design note](design/B-9-window-bounds.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `App(mode=resize, name?, window_loc=[x,y], window_size=[w,h])` on a named or the
 active window via `MoveWindow`; refuses minimized/maximized windows (`resize_app()` ~441).
 
-**Ours.** `window` has minimize/maximize/restore/close only.
+**Ours (before B-9).** `window` has minimize/maximize/restore/close only.
 
 **Sketch.** `window(action="move"|"resize"|"set_bounds", title?/hwnd?, x,y,w,h, restore_first)`
 → `SetWindowPos`; default target = foreground; error on minimized/maximized unless

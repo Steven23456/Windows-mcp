@@ -169,7 +169,14 @@ public class FlashOverlayTests
             after = await service.ListAsync();
             // Something else opening or closing a window mid-test makes the count comparison
             // meaningless; retry for a quiet moment rather than fail on it.
-            if (before.Length == after.Length || ++attempt >= 5) break;
+            // A parallel Integration class that owns a real window of THIS process
+            // (WindowServiceExecuteTests, B-9 WindowServiceBoundsTests, B-8 WindowServiceLaunchWaitTests)
+            // is the common case, so "no new window of ours" is part of what has to settle too -
+            // not just the counts, which a window that comes AND goes leaves undisturbed.
+            var oursNow = before.Where(w => w.Pid == Environment.ProcessId).Select(w => w.Hwnd).ToHashSet();
+            bool settled = before.Length == after.Length && during.Length == before.Length
+                && during.Where(w => w.Pid == Environment.ProcessId).All(w => oursNow.Contains(w.Hwnd));
+            if (settled || ++attempt >= 5) break;
             await Task.Delay(150);
         }
 

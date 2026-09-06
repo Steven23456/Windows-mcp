@@ -80,6 +80,7 @@ internal static class WindowsMcpHost
         services.AddSingleton<ITaskSchedulerService, TaskSchedulerService>();
         services.AddSingleton<IProcessService, ProcessService>();
         services.AddSingleton<IVirtualDesktopService, VirtualDesktopService>();
+        services.AddSingleton<IAppCatalogService, AppCatalogService>();   // B-8: the launch catalog
         services.AddSingleton<IWindowService, WindowService>();
         services.AddSingleton<IWmiService, WmiService>();
         services.AddSingleton<IStorageService, StorageService>();
