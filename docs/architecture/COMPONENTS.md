@@ -23,7 +23,7 @@ public static async Task<int> Main(string[] args)
     //    child; repaired names are logged to stderr once. Host-set values are never overwritten
     EnvironmentRepair.Apply();
 
-    // 2. Register AppUserModelID for WinRT toast notifications
+    // 2. Process AppUserModelID (taskbar grouping; toasts name their own id since C-4)
     PInvoke.SetCurrentProcessExplicitAppUserModelID("org.windows-mcp.server");
 
     // 3. Per-Monitor DPI Awareness V2 — physical pixel coordinates on HiDPI
@@ -105,7 +105,7 @@ static async Task<int> RunHttpAsync(ServerOptions options)
 
 ## Tool Classes
 
-Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except for injected service references). All tool methods are `async Task<string>` and return JSON-serialized results or plain strings — except `screenshot`, which returns `async Task<CallToolResult>` so it can carry an image content block.
+Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except for injected service references). All tool methods are `async Task<string>` and return JSON-serialized results or plain strings — except `screenshot`, which returns `async Task<CallToolResult>` so it can carry an image content block. Every `[McpServerTool]` names all five annotation arguments explicitly (C-7) — `Title`, `ReadOnly`, `Destructive`, `Idempotent`, `OpenWorld` — even where the value equals the SDK default, so clients see a title and all four hints on every tool; the reviewed classification table is `docs/design/C-7-tool-annotations.md` and `ToolInventoryTests` pins each column.
 
 ---
 
@@ -207,7 +207,7 @@ Every target-taking verb — `click`, `type`, `scroll`, `drag` and B-7's two bat
 |--------|-------------|
 | `SystemInfo` | WMI system info by category (os/memory/disk/gpu/battery) |
 | `Audio` | Get/set volume or mute/unmute |
-| `Notification` | Show a Windows toast notification |
+| `Notification` | Show a Windows toast in-process through WinRT under `app_id` (default `Windows-MCP`, registered under HKCU on first use); returns `{shown, appId, registered, note?}` |
 | `SecurityAudit` | Firewall/Defender/UAC/BitLocker posture snapshot |
 | `Reliability` | Crash minidumps + recent reliability failure records |
 | `DriverList` | Installed PnP drivers with version/date/signer/signed-state (BYOVD surface) |
@@ -267,15 +267,16 @@ Every target-taking verb — `click`, `type`, `scroll`, `drag` and B-7's two bat
 
 ---
 
-### `RegistryTools` — 2 tools
+### `RegistryTools` — 3 tools
 `src/WindowsMcp/Tools/RegistryTools.cs`
 
-**Injected:** `IRegistryService`
+**Injected:** `IRegistryService` (+ the pure `RegistryGuard`, C-2's root denylist)
 
 | Method | Description |
 |--------|-------------|
-| `RegistryGet` | Read a named value, or list the key's value names when `value_name` is omitted |
+| `RegistryGet` | Read a named value, or the whole key when `value_name` is omitted — `{Path, Values:[{Path, Name, Data, Kind}], SubKeys:[…]}`; an empty path lists the hive root, a missing key is an error naming it |
 | `RegistrySet` | Write a value (String / DWord / QWord / Binary / MultiString / ExpandString); `confirm:true` |
+| `RegistryDelete` | Delete a value, or the key itself when `value_name` is omitted (`recursive:true` when it has sub-keys); `confirm:true`, and `RegistryGuard` refuses the hive root and the profile/OS roots. Absent target is `existed:false`, not an error. Returns `{hive, path, valueName?, deleted, existed, subKeysRemoved?}` |
 
 ---
 
@@ -386,7 +387,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IUIAutomationService` | `GetStateAsync`, `FindElementAsync(text, kind, scope, windowTitle, includeOffscreen)`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync` → `AssertResult`, `InteractAsync` → `InteractResult`, `GetTableAsync`, `WaitForAsync(text, timeoutMs, intervalMs, kind, scope, windowTitle, includeOffscreen)` → `ElementInfo?` and the B-6 overload `WaitForAsync(WaitRequest)` → `WaitForResult`, `FocusAsync`, `SnapshotAsync(SnapshotRequest)` → `SnapshotResult` |
 | `IFileSystemService` | `ReadTextAsync`, `ReadBytesAsync`, `WriteTextAsync`, `CopyAsync`, `MoveAsync`, `DeleteAsync`, `ListAsync`, `SearchAsync`, `GetInfoAsync`, `HashFileAsync`, `ZipAsync`, `UnzipAsync` |
 | `IFileStreamService` | `GetStreamsAsync(path)` → `FileStreamsDto` (alternate data streams + reparse target) |
-| `IRegistryService` | `GetAsync`, `SetAsync`, `EnumerateValuesAsync`, `EnumerateSubKeysAsync` |
+| `IRegistryService` | `GetAsync`, `SetAsync`, `EnumerateValuesAsync`, `EnumerateSubKeysAsync`, `ListAsync(hive, path)` → `RegistryKeyDto` (C-2: values + immediate sub-keys; an absent key is a `KeyNotFoundException`, unlike the enumerators' empty arrays), `DeleteValueAsync` → `bool` (whether it existed), `DeleteKeyAsync(hive, path, recursive)` → `RegistryKeyDeleteResult` |
 | `IServiceControlService` | `ListAsync`, `GetStatusAsync`, `StartAsync`, `StopAsync`, `RestartAsync` |
 | `IEventLogService` | `QueryAsync` |
 | `ITaskSchedulerService` | `ListAsync`, `ListDetailedAsync`, `GetAsync`, `CreateAsync`, `DeleteAsync`, `RunAsync` |
@@ -404,7 +405,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IFirewallService` | `ListAsync`, `AddAsync`, `RemoveAsync` |
 | `IEnvService` | `GetAsync`, `SetAsync`, `ListAsync` |
 | `IPowerService` | `ExecuteAsync(action)` — shutdown / reboot / logoff / lock / sleep / hibernate |
-| `INotificationService` | `ShowAsync(title, message)` |
+| `INotificationService` | `ShowAsync(title, message, appId?)` → `NotificationResult` (C-4: in-process WinRT toast; `appId` null = the server's own id) |
 | `INetworkService` | `ListAdaptersAsync`, `ListPortsAsync`, `GetWifiAsync`, `DnsLookupAsync`, `PingAsync` |
 | `IWebService` | `ScrapeAsync(url)`, `RequestAsync(url, method, headers, body)` → `HttpResponseDto` |
 | `IIntegrityService` | `BaselineAsync`, `CheckAsync`, `GetBaseline`, `DefaultWatchList` |
@@ -419,7 +420,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 
 ## Data Models (`WindowsMcp.Abstractions.Models`)
 
-Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 22 files):
+Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 23 files):
 
 | File | Key Types |
 |------|-----------|
@@ -431,7 +432,8 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 22 f
 | `ProcessDtos.cs` | `ProcessDto`, `ProcessStart`, `ProcessDetailDto`, `ModuleInfo`, `ProcessLineageDto`, `ProcessGroupDto` |
 | `PowerShellDtos.cs` | `PSResult` (success, stdout, stderr, exit code, parsed errors) |
 | `JobDtos.cs` | `JobInfo`, `JobOutput` |
-| `FileSystemDtos.cs` | `FileInfoDto`, `FileSearchHit`, `AlternateStreamInfo`, `FileStreamsDto`, `RegistryValueDto`, `ServiceDto`, `ScheduledTaskDto`, `ScheduledTaskDetailDto`, `EventLogEntryDto` |
+| `FileSystemDtos.cs` | `FileInfoDto`, `FileSearchHit`, `AlternateStreamInfo`, `FileStreamsDto`, `RegistryValueDto`, `RegistryKeyDto` (C-2: `Path`, `Values`, `SubKeys`), `RegistryKeyDeleteResult` (`Existed`, `SubKeysRemoved`), `ServiceDto`, `ScheduledTaskDto`, `ScheduledTaskDetailDto`, `EventLogEntryDto` |
+| `NotificationDtos.cs` | `NotificationResult` (C-4: `Shown`, `AppId`, `Registered`, `Note`) |
 | `SystemDtos.cs` | `WmiResultDto` |
 | `NetworkDtos.cs` | `NetworkAdapterDto`, `PortInfoDto`, `WifiInfoDto`, `PingResult` |
 | `FirewallDtos.cs` | `FirewallRuleDto` |
@@ -571,7 +573,7 @@ A-14 — the post-capture glow, and the only signal a person at the target machi
 - `Show(rect, duration)` hides any glow already up and replaces it; `Hide()` is idempotent and is called before **every** capture, whatever `--flash` says, so the glow can never be in a picture. The thread only starts on the first `Show`, so an off switch costs nothing
 - Nothing here throws: with no interactive window station (Task Scheduler, session 0) every member is a silent no-op and `IsVisible` stays false — which is why the tool reports `flash` from `IsVisible` rather than from the switch
 
-### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `Annotator`, `FlashGlow`, `UiText`, `WindowFilter`, `VirtualDesktopRegistry`, `FuzzyMatch`, `WindowMatcher`, `ForegroundLadder`, `AppCatalog`, `LaunchWait`, `WindowGeometry`, `ArgvJson`, `TypePlanner`, `DragPath`, `BatchTargets`)
+### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `Annotator`, `FlashGlow`, `UiText`, `WindowFilter`, `VirtualDesktopRegistry`, `FuzzyMatch`, `WindowMatcher`, `ForegroundLadder`, `AppCatalog`, `LaunchWait`, `WindowGeometry`, `ArgvJson`, `TypePlanner`, `DragPath`, `BatchTargets`, `RegistryGuard`)
 
 `internal static` classes in `Services/` with no Win32, no screen and no UIA dependency, so every
 rule is unit-tested headless:
@@ -592,6 +594,7 @@ rule is unit-tested headless:
 - `DragPath.Points(from, to, steps, nudge)` — B-2's pointer path: the first point is a `nudge`-long step along the travel direction (skipped when `nudge` is 0 or the drag is shorter than the nudge, in which case the origin is emitted instead), then `steps` interpolated points, the last exactly `to`, so the list is always `steps + 1` long and never doubles back on either axis. A zero-distance drag is just the destination; `steps < 1` or a negative `nudge` is an `ArgumentOutOfRangeException`
 - `BatchTargets.ParseTargets(json)` / `ParseEntries(json)` — B-7's one parser for `multi_select`'s `targets_json` and `multi_edit`'s `entries_json`: a JSON array of objects, or a JSON *string* holding that array (unwrapped once, the Claude Desktop quirk). Each entry is `{x,y}` **or** `{element_id}` — both, half a pair, or neither is an `ArgumentException`; `multi_edit` additionally requires `text` and reads the optional `clear` / `press_enter`. Every refusal names the parameter and the offending entry's index, and an empty array is refused too
 - `ArgvJson.Parse(args_json)` — B-11: null or blank → null (the command keeps its whole-command-line meaning); a JSON array of strings → its items verbatim (an empty array still means argv mode); anything else — an object, a bare string, an array holding a non-string, unparseable text — is an `ArgumentException` naming `args_json` and the offending item
+- `RegistryGuard.Refusal(path)` — C-2's guard on `registry_delete`'s key branch: the reason a key delete is refused, or null. An empty path (the hive root) and a short denylist of roots the profile or Windows itself depends on (`Software`, `Software\Classes`, `Software\Microsoft`, `Software\Microsoft\Windows[ NT][\CurrentVersion]`, `Software\Policies`, `Software\WOW6432Node`, `System`, `SYSTEM\CurrentControlSet`, `SAM`, `SECURITY`, `Environment`, `Control Panel`, `Volatile Environment`), compared after `Normalise` (trim, `/` → `\`, doubled separators collapsed, leading/trailing separators dropped) ordinal-ignore-case. Value deletes are not guarded, and the list guards the catastrophic roots only — `confirm` and the client's `destructiveHint` do the rest
 - `UiText.Sanitize` — strips Private Use Area code points, replaces lone UTF-16 surrogates with U+FFFD, drops C0/C1 controls except tab/LF/CR, trims; returns the same instance when nothing needed changing
 - `WindowFilter` — A-1's judgement over the `WindowProbe` records `WindowService` gathers, so every rule is provable on hand-written probes with no desktop attached. `Keep` drops a window that is not visible, a `WS_EX_TOOLWINDOW` without `WS_EX_APPWINDOW`, a DWM-cloaked one (UWP ghosts, other virtual desktops), a zero-area one, the shell chrome classes (`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`, `Progman`, `WorkerW`, `IME`, `MSCTFIME UI`), an untitled one unless `includeHidden` (the title is judged **after** `UiText.Sanitize`) and a minimized one unless `includeMinimized`; `StateOf` reads `Minimized` before `Maximized` (a minimized window keeps `WS_MAXIMIZE`); `IsBrowser` matches `chrome, msedge, firefox, brave, opera, vivaldi` with or without `.exe`; `Build` projects the survivors onto `WindowInfo`, renumbering `ZOrder` from 0 and taking `MonitorIndex` from the window's centre via `CursorMath.MonitorIndexOf`; `ActiveOf` picks the entry flagged `IsActive`, so `active` reports the list's real `ZOrder`
 
@@ -624,6 +627,23 @@ v0.2.0 limitation — uses PowerShell + `SendKeys` as a backend:
 - `SetVolumeAsync()` — sends `VK_VOLUME_UP`/`VK_VOLUME_DOWN` key presses
 - `SetMutedAsync()` — sends `VK_VOLUME_MUTE` toggle (cannot set absolute mute state)
 - Tracked for v0.3.0 to switch to NAudio/CoreAudio COM for accurate read/write
+
+### `NotificationService`
+
+C-4 — toasts in-process, no PowerShell cold start and no serialization gate:
+- The one WinRT call sits behind the internal `IToastSink.Show(appId, toastXml)` seam
+  (`WinRtToastSink` in production — `ToastNotificationManager.CreateToastNotifier(appId).Show(...)`
+  through the `net10.0-windows10.0.19041.0` projection — a fake in the unit tests)
+- Windows treats the AppUserModelId as the toast's identity. Before the first show the service
+  checks `HKCU\Software\Classes\AppUserModelId\<id>` through `IRegistryService.ListAsync` and, for
+  **its own default id only**, writes `DisplayName` there when it is absent — once per process. A
+  caller-supplied id is never written
+- `Registered` in the result is what the platform will accept: a packaged AUMID (contains `!`), or
+  an `AppUserModelId\<id>` key under HKCU or HKLM. It is reported, not enforced — the show is
+  attempted either way
+- A `COMException` of `0x80070490` (element not found — the platform has not picked the fresh
+  registration up) is retried once after 1 s; a second failure returns `Shown:false` with a `Note`
+  naming the id, the HResult and the registration requirement. Any other exception propagates
 
 ---
 

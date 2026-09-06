@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 68 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 69 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
 
 ## Purpose
 
@@ -22,6 +22,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 | **Native Windows Integration** | Direct access to Windows UI Automation API via `FlaUI.UIA3` |
 | **Dependency Injection** | All 39 services are singleton-scoped, registered in `Hosting/WindowsMcpHost.AddWindowsMcp` via `Microsoft.Extensions.Hosting` |
 | **Source-Generated Tool Discovery** | `[McpServerTool]` attributes are discovered at compile time by the MCP SDK source generator |
+| **Annotated Tools** | Every tool declares a title and all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) so clients can auto-approve reads and confirm destructive calls |
 | **Interface-Driven Architecture** | Every service backed by an `IXxxService` interface in a separate Abstractions assembly |
 | **DPI-Aware** | Per-Monitor DPI Awareness V2 enabled at startup for correct multi-monitor coordinate handling |
 | **UTF-8 Stdio** | Output encoding forced to UTF-8 before host starts — prevents buffering bugs on Windows |
@@ -78,7 +79,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 ## Available Tools
 
-Windows-MCP exposes **68 MCP tools** across 19 tool classes:
+Windows-MCP exposes **69 MCP tools** across 19 tool classes:
 
 ### Input Tools (`InputTools` — 11 tools)
 | Tool | Purpose |
@@ -135,7 +136,7 @@ Windows-MCP exposes **68 MCP tools** across 19 tool classes:
 |------|---------|
 | `SystemInfo` | WMI system info by category (os/memory/disk/gpu/battery) |
 | `Audio` | Get/set volume or mute/unmute |
-| `Notification` | Show a Windows toast notification |
+| `Notification` | Show a Windows toast in-process (WinRT) under an `app_id` AUMID; the default id is registered under HKCU on first use |
 | `SecurityAudit` | Firewall/Defender/UAC/BitLocker posture snapshot |
 | `Reliability` | Crash minidumps + recent reliability failure records |
 | `DriverList` | Installed PnP drivers with version/date/signer/signed-state (BYOVD surface) |
@@ -176,11 +177,12 @@ Windows-MCP exposes **68 MCP tools** across 19 tool classes:
 |------|---------|
 | `Job` | Manage background PowerShell jobs (`status`/`output`/`cancel`/`list`): jobs run concurrently outside the foreground PowerShell gate, with bounded output capture and a per-job backstop |
 
-### Registry Tools (`RegistryTools` — 2 tools)
+### Registry Tools (`RegistryTools` — 3 tools)
 | Tool | Purpose |
 |------|---------|
-| `RegistryGet` | Read a named value, or list value names when no name is given |
+| `RegistryGet` | Read a named value, or the whole key when no name is given — `{Path, Values, SubKeys}` |
 | `RegistrySet` | Write a value (String / DWord / QWord / Binary / MultiString / ExpandString); `confirm:true` |
+| `RegistryDelete` | Delete a value, or the key itself (`recursive:true` when it has sub-keys); `confirm:true`, and the hive root and the profile/OS roots are refused |
 
 ### Network Tools (`NetworkTools` — 2 tools)
 | Tool | Purpose |

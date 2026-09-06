@@ -1258,6 +1258,135 @@ public class HttpTransportTests
         required.Should().BeEmpty(
             "B-2: the origin defaults to the cursor and the destination may be an element id");
     }
+
+    // ---- C-7: the annotations as a client sees them -------------------------------------------
+
+    /// <summary>
+    /// C-7 (R4): the reflection test in <c>ToolInventoryTests</c> proves the attributes are
+    /// written; this proves the SDK turns all five into the protocol's <c>annotations</c> block.
+    /// A client auto-approves on <c>readOnlyHint</c> and confirms on <c>destructiveHint</c>, so a
+    /// missing hint is a tool the client cannot classify at all.
+    /// </summary>
+    [Fact]
+    public async Task Every_tool_is_advertised_with_a_title_and_all_four_hints()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var tools = await client.ListToolsAsync();
+
+        var unannotated = tools
+            .Where(t => t.ProtocolTool.Annotations is null
+                        || string.IsNullOrWhiteSpace(t.ProtocolTool.Annotations.Title)
+                        || t.ProtocolTool.Annotations.ReadOnlyHint is null
+                        || t.ProtocolTool.Annotations.DestructiveHint is null
+                        || t.ProtocolTool.Annotations.IdempotentHint is null
+                        || t.ProtocolTool.Annotations.OpenWorldHint is null)
+            .Select(t => t.Name)
+            .ToArray();
+
+        unannotated.Should().BeEmpty("every tool carries a title and all four hints over the wire");
+    }
+
+    /// <summary>C-7 (R4): the three rows of the table a reviewer would check first.</summary>
+    [Fact]
+    public async Task Screenshot_is_read_only_file_manage_destructive_and_scrape_open_world()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        ToolAnnotations Hints(string name)
+        {
+            var tool = tools.Single(t => t.Name == ToolName(tools, name));
+            tool.ProtocolTool.Annotations.Should().NotBeNull("{0} carries the C-7 hints", name);
+            return tool.ProtocolTool.Annotations!;
+        }
+
+        Hints("screenshot").ReadOnlyHint.Should().BeTrue(
+            "the flash overlay is transient; nothing durable changes");
+        Hints("screenshot").DestructiveHint.Should().BeFalse();
+        Hints("filemanage").DestructiveHint.Should().BeTrue("file_manage deletes and replaces files");
+        Hints("filemanage").ReadOnlyHint.Should().BeFalse();
+        Hints("scrape").OpenWorldHint.Should().BeTrue(
+            "scrape fetches a URL from outside this machine");
+    }
+
+    // ---- C-2: registry_delete over the wire ---------------------------------------------------
+
+    /// <summary>C-2 (R5): the new tool's advertised signature.</summary>
+    [Fact]
+    public async Task Registry_delete_is_advertised_with_the_value_name_recursive_and_confirm()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var (properties, required) = SchemaOf(await client.ListToolsAsync(), "registrydelete");
+
+        ShouldAdvertise(properties, "hive", "path", "value_name", "recursive", "confirm");
+        properties.GetProperty("recursive").GetProperty("default").GetBoolean().Should().BeFalse(
+            "a key delete must not take the tree unless the caller asks");
+        properties.GetProperty("confirm").GetProperty("default").GetBoolean().Should().BeFalse();
+        required.Should().BeEquivalentTo(new[] { "hive", "path" },
+            "everything else has a default; the hive and the path do not");
+    }
+
+    /// <summary>
+    /// C-2 (R5): the refusal a client actually sees. The real RegistryService is wired in here, so
+    /// this also proves the confirm gate runs before anything touches the registry.
+    /// </summary>
+    [Fact]
+    public async Task Registry_delete_over_http_refuses_without_confirm()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var registryDelete = ToolName(await client.ListToolsAsync(), "registrydelete");
+
+        var refused = await client.CallToolAsync(registryDelete, new Dictionary<string, object?>
+        {
+            ["hive"] = "HKCU",
+            ["path"] = @"Software\WindowsMcpTests\does-not-exist",
+        });
+
+        refused.IsError.Should().BeTrue();
+        refused.Content.OfType<TextContentBlock>().Single().Text.Should().Contain("confirm");
+    }
+
+    /// <summary>C-2 (R5): a guarded root is refused by name even with confirm.</summary>
+    [Fact]
+    public async Task Registry_delete_over_http_refuses_a_guarded_root_by_name()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var registryDelete = ToolName(await client.ListToolsAsync(), "registrydelete");
+
+        var refused = await client.CallToolAsync(registryDelete, new Dictionary<string, object?>
+        {
+            ["hive"] = "HKCU",
+            ["path"] = "Software",
+            ["recursive"] = true,
+            ["confirm"] = true,
+        });
+
+        refused.IsError.Should().BeTrue("HKCU\\Software is the profile's whole software hive");
+        refused.Content.OfType<TextContentBlock>().Single().Text.Should().Contain("Software");
+    }
+
+    // ---- C-4: the notification's app_id -------------------------------------------------------
+
+    /// <summary>C-4 (R5): the parameter and its default as a remote client sees them.</summary>
+    [Fact]
+    public async Task Notification_is_advertised_with_an_app_id_defaulting_to_the_servers_aumid()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var (properties, required) = SchemaOf(await client.ListToolsAsync(), "notification");
+
+        ShouldAdvertise(properties, "title", "message", "app_id");
+        properties.GetProperty("app_id").GetProperty("default").GetString().Should().Be("Windows-MCP");
+        required.Should().BeEquivalentTo(new[] { "title", "message" });
+    }
 }
 
 

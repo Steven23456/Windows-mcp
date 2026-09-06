@@ -25,7 +25,7 @@ public sealed class ShellTools
         _heartbeatInterval = heartbeatInterval;
     }
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "Run PowerShell", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true), Description(
         "Execute a PowerShell command and return the result including stdout, stderr, and exit " +
         "code. Progress output is suppressed (there is no console to draw a progress bar on) and " +
         "the warning/verbose/debug streams arrive as prefixed text ('WARNING: careful'), not the " +

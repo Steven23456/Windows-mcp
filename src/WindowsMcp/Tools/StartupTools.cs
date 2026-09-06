@@ -13,7 +13,7 @@ public sealed class StartupTools
 
     public StartupTools(IStartupReportService report) => _report = report;
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "Startup report", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Generate a HiJackThis-style boot/persistence report (read-only): Run/RunOnce keys " +
         "(all hives incl. per-user SIDs, with effective enabled state), Startup folders, " +
         "startup-relevant scheduled tasks, auto-start services, hosts file, DNS servers, " +

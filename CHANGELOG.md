@@ -2,6 +2,43 @@
 
 ### Added
 
+- **`registry_delete` — remove a registry value or a whole key, behind `confirm`** (parity C-2;
+  68 → 69 tools, roadmap R6). `registry_delete(hive, path, value_name?, recursive = false,
+  confirm = false)` removes that one value when `value_name` is given, otherwise the key itself:
+  a key that has sub-keys also needs `recursive: true` (refused naming the flag and the count
+  otherwise), and the hive root and a short denylist of roots the profile or Windows depends on
+  (`Software`, `Software\Classes`, `Software\Microsoft`, the two `Windows` /
+  `Windows NT` roots and their `CurrentVersion` keys, `Software\Policies`,
+  `Software\WOW6432Node`, `System`, `SYSTEM\CurrentControlSet`, `SAM`, `SECURITY`,
+  `Environment`, `Control Panel`, `Volatile Environment`) are refused outright, before the
+  service is touched. Deleting what is
+  not there is not an error: `existed: false`. Returns `{hive, path, valueName?, deleted, existed,
+  subKeysRemoved?}`, where `subKeysRemoved` is the descendant count taken **before** the delete.
+  Under `HKLM` the unelevated server usually lacks the rights and the OS error passes through
+  unchanged. New pure `Services/RegistryGuard.cs` (the denylist, with normalisation so every
+  spelling of a root compares equal) and `IRegistryService.DeleteValueAsync` /
+  `DeleteKeyAsync` → `RegistryKeyDeleteResult`. No new service — the count stays 39. Design note:
+  `docs/design/C-2-registry-delete.md`.
+- **Every tool now advertises a title and all four MCP hints** (parity C-7, roadmap R10). Each
+  `[McpServerTool]` in `src/WindowsMcp/Tools/*.cs` names `Title`, `ReadOnly`, `Destructive`,
+  `Idempotent` and `OpenWorld` explicitly — even where the value equals the SDK default, which the
+  SDK could not otherwise distinguish from "never set" — so clients see `readOnlyHint`,
+  `destructiveHint`, `idempotentHint`, `openWorldHint` and a human title on all 69 tools instead
+  of the MCP defaults (not read-only, destructive, not idempotent, open-world) on every one of
+  them. A client can now auto-approve `screenshot` and `get_text` and confirm `file_manage` and
+  `registry_delete` without a hand-maintained allowlist. The classification is one reviewed table
+  (`docs/design/C-7-tool-annotations.md`), pinned column by column in `ToolInventoryTests`, which
+  also holds README's "Safety rails" list and `destructiveHint` to the same answer. No behaviour
+  change and no service touched.
+- **`notification` takes an `app_id`** (parity C-4). `notification(title, message,
+  app_id = "Windows-MCP")` shows the toast under that AppUserModelId — Windows treats the AUMID as
+  the toast's identity. The server's own default id is registered once per process under
+  `HKCU\Software\Classes\AppUserModelId\Windows-MCP` (a `DisplayName` value, the documented
+  registration for an unpackaged exe); a packaged app's AUMID (the `Package_hash!App` form) shows
+  the toast under that app, and any other id must already be registered or Windows drops the
+  toast — reported as `shown: false` with the reason in `note`, never a throw. A caller's id is
+  never written to the registry, and a blank `app_id` is an `ArgumentException`. Design note:
+  `docs/design/C-4-notification-app-id.md`.
 - **`multi_select` and `multi_edit` — a batch of clicks, or a whole form, in one call** (parity
   B-7; 66 → 68 tools, roadmap C3's last two slots). `multi_select(targets_json, ctrl = true)`
   takes a JSON array of `{x, y}` points or `{element_id}` objects — a JSON *string* holding that
@@ -281,6 +318,29 @@
 
 ### Changed
 
+- **`registry_get` without a `value_name` returns the key, not a comma-joined string of value
+  names** (parity C-2, roadmap R6 — a contract break). The tool used to answer with the value
+  names joined by commas and nothing about sub-keys, so walking a key meant falling back to
+  `powershell`. It now returns `{Path, Values: [{Path, Name, Data, Kind}], SubKeys: [...]}` —
+  every value with its data and kind, plus the immediate sub-key names — through the new
+  `IRegistryService.ListAsync`, which reuses the two enumerators `RegistryService` already had.
+  An empty `path` lists the hive root, and a missing key is an error naming the path rather than
+  an empty result. **Migration:** parse the JSON — the names are `Values[].Name` (with
+  `Values[].Data` and `Values[].Kind` alongside), not a `split(",")` of the response. A call
+  *with* `value_name` is unchanged.
+- **`notification` returns a result object instead of the string `"notification shown"`** (parity
+  C-4). It now answers `{shown, appId, registered, note?}`: `registered` is whether the platform
+  knows the AppUserModelId (a packaged AUMID, or one with an `AppUserModelId\<id>` registration
+  under HKCU/HKLM) and `note` explains a dropped toast. **Migration:** read `shown` instead of
+  matching the sentence — the old string was returned whether or not Windows had actually shown
+  anything, which is the bug this fixes.
+- **`notification` no longer shells out to PowerShell.** The toast is raised in-process through
+  WinRT (`Services/WinRtToastSink.cs` behind the internal `IToastSink` seam), so a toast no longer
+  pays a `powershell.exe` cold start or takes the PowerShell serialization gate behind whatever
+  else is queued. `NotificationService` accordingly depends on `IRegistryService` (for the
+  AppUserModelId registration) instead of `IPowerShellService`; the DI registration line is
+  unchanged and the service count stays 39. One retry, 1 s apart, covers the documented lag
+  between writing the registration and the platform honouring it (`COMException 0x80070490`).
 - **`wait_for` always returns a result object; a timeout is no longer the string `"null"`**
   (parity B-6, roadmap C4 — the one contract break in section B). The tool used to answer with a
   serialized `ElementInfo`, the literal string `"null"` when nothing turned up, or an error when

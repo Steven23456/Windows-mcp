@@ -17,7 +17,7 @@ public sealed class NetworkTools
         _firewall = firewall;
     }
 
-    [McpServerTool, Description("Query network info. action: adapters (list NICs), ports (active TCP listeners/connections), ping (ICMP ping), dns (DNS lookup), wifi (WiFi status).")]
+    [McpServerTool(Title = "Network info", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true), Description("Query network info. action: adapters (list NICs), ports (active TCP listeners/connections), ping (ICMP ping), dns (DNS lookup), wifi (WiFi status).")]
     public async Task<string> Network(
         [Description("Action: adapters, ports, ping, dns, wifi")] string action,
         [Description("Hostname or IP (required for ping and dns)")] string? host = null,
@@ -50,7 +50,7 @@ public sealed class NetworkTools
         }
     }
 
-    [McpServerTool, Description("Manage Windows Firewall rules. action: list (read enabled rules; full list is multi-MB so pass name_like to filter), add (create rule, requires confirm: true), remove (delete rule, requires confirm: true).")]
+    [McpServerTool(Title = "Firewall rules", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Manage Windows Firewall rules. action: list (read enabled rules; full list is multi-MB so pass name_like to filter), add (create rule, requires confirm: true), remove (delete rule, requires confirm: true).")]
     public async Task<string> Firewall(
         [Description("Action: list, add, remove")] string action,
         [Description("Rule display name (required for add and remove)")] string? name = null,

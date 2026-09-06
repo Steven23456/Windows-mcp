@@ -27,7 +27,7 @@ public sealed class ProcessTools
         _eventLog = eventLog;
     }
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "Processes", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description(
         "List/inspect/kill processes. actions: list|orphans|kill. " +
         "list: plain (Pid,Name,Path,MemoryMb); with includeLineage:true adds parentPid, parentName, " +
         "commandLine, startTime, ageMinutes, orphaned, runtimeKind, isSystemAdjacent, rootPid, " +
@@ -115,7 +115,7 @@ public sealed class ProcessTools
         }
     }
 
-    [McpServerTool, Description("Deep-inspect a process by PID: parent PID, command line, start time, and the loaded-module (DLL) inventory. Use to spot injected/sideloaded DLLs or trace a process's lineage. The module list may be unavailable (ModulesError set) for protected or higher-integrity processes.")]
+    [McpServerTool(Title = "Inspect process", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Deep-inspect a process by PID: parent PID, command line, start time, and the loaded-module (DLL) inventory. Use to spot injected/sideloaded DLLs or trace a process's lineage. The module list may be unavailable (ModulesError set) for protected or higher-integrity processes.")]
     public async Task<string> ProcessInspect(
         [Description("Process ID to inspect")] int pid,
         CancellationToken ct = default)
@@ -124,7 +124,7 @@ public sealed class ProcessTools
         return JsonSerializer.Serialize(detail);
     }
 
-    [McpServerTool, Description("Start a process detached from the MCP server. Either one command line (exe + args, split at the first space or after a quoted exe) or, with args_json, the executable plus a JSON array of arguments passed verbatim with no quoting; cwd sets the working directory and must exist; use_shell_execute launches through the shell. Returns {pid, executable, args, cwd}.")]
+    [McpServerTool(Title = "Start process", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = true), Description("Start a process detached from the MCP server. Either one command line (exe + args, split at the first space or after a quoted exe) or, with args_json, the executable plus a JSON array of arguments passed verbatim with no quoting; cwd sets the working directory and must exist; use_shell_execute launches through the shell. Returns {pid, executable, args, cwd}.")]
     public async Task<string> StartProcess(
         [Description("Command line to execute (exe + args), or the executable alone when args_json is given")] string command,
         [Description("Arguments as a JSON array of strings, e.g. [\"/c\",\"echo hi\"]; each item is passed verbatim, no quoting needed")] string? args_json = null,
@@ -138,7 +138,7 @@ public sealed class ProcessTools
         return JsonSerializer.Serialize(new { pid, executable = command, args = args ?? [], cwd = spec.Cwd });
     }
 
-    [McpServerTool, Description("Manage Windows services. action: list|status|start|stop|restart. stop and restart require confirm:true.")]
+    [McpServerTool(Title = "Windows service", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Manage Windows services. action: list|status|start|stop|restart. stop and restart require confirm:true.")]
     public async Task<string> Service(
         [Description("Action: list, status, start, stop, restart")] string action,
         [Description("Service name (required for status/start/stop/restart)")] string? name = null,
@@ -184,7 +184,7 @@ public sealed class ProcessTools
         }
     }
 
-    [McpServerTool, Description("Manage Windows scheduled tasks. action: list|get|run|create|delete. delete requires confirm:true.")]
+    [McpServerTool(Title = "Scheduled task", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false), Description("Manage Windows scheduled tasks. action: list|get|run|create|delete. delete requires confirm:true.")]
     public async Task<string> ScheduledTask(
         [Description("Action: list, get, run, create, delete")] string action,
         [Description("Task name (required for get/run/create/delete)")] string? name = null,
@@ -230,7 +230,7 @@ public sealed class ProcessTools
         }
     }
 
-    [McpServerTool, Description("Query Windows Event Log. log: Application|System|Security. level: error|warning|information. since: ISO 8601 datetime.")]
+    [McpServerTool(Title = "Event log", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Query Windows Event Log. log: Application|System|Security. level: error|warning|information. since: ISO 8601 datetime.")]
     public async Task<string> EventLog(
         [Description("Event log name: Application, System, Security, etc.")] string log,
         [Description("Filter by level: error, warning, information")] string? level = null,

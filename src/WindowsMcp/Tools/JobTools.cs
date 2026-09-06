@@ -12,7 +12,7 @@ public sealed class JobTools
 
     public JobTools(IJobService jobs) => _jobs = jobs;
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "Background job", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false), Description(
         "Manage background PowerShell jobs started via powershell background:true. " +
         "mode: status (one job's state/pid/exit code), output (buffered stdout/stderr; tail limits " +
         "to the last N chars per stream), cancel (kill a running job's process tree), " +

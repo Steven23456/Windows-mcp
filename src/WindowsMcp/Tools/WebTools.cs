@@ -15,12 +15,12 @@ public sealed class WebTools
         _web = web;
     }
 
-    [McpServerTool, Description("Fetch a URL and convert HTML to markdown.")]
+    [McpServerTool(Title = "Scrape web page", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true), Description("Fetch a URL and convert HTML to markdown.")]
     public async Task<string> Scrape(
         [Description("Public URL (private IPs rejected)")] string url)
         => await _web.ScrapeAsync(url);
 
-    [McpServerTool, Description("Make an HTTP request to a URL.")]
+    [McpServerTool(Title = "HTTP request", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = true), Description("Make an HTTP request to a URL.")]
     public async Task<string> HttpRequest(
         string url,
         [Description("GET|POST|PUT|DELETE|PATCH")] string method = "GET",

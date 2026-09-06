@@ -1,11 +1,11 @@
 ---
 name: windows
-description: "Playbook for driving Windows via the windows-mcp server's 68 tools — UI automation, system inspection, files, registry, services, processes, disk, network, security, and startup analysis. Use when the user says 'automate this Windows app', 'click/type into that window', 'take a screenshot' or 'OCR the screen', 'audit my startup items', 'why is my PC booting slowly', 'clean up orphaned processes', 'what's running', 'check Defender/firewall status', 'run a security audit', 'read/set a registry value', 'inspect a service or scheduled task', 'find/hash/inspect a file', 'check disk or storage health', 'baseline/check file integrity', 'what changed on my C: drive', 'watch a folder for changes', or any Windows desktop-automation or system-inspection task. Steers toward the windows-mcp tools over ad-hoc PowerShell, gives composed multi-tool workflows, and flags destructive tools. Does NOT add tools; it is guidance over the windows-mcp server. Not cross-platform; the server runs unelevated so admin-only operations may need elevation the skill cannot grant."
+description: "Playbook for driving Windows via the windows-mcp server's 69 tools — UI automation, system inspection, files, registry, services, processes, disk, network, security, and startup analysis. Use when the user says 'automate this Windows app', 'click/type into that window', 'take a screenshot' or 'OCR the screen', 'audit my startup items', 'why is my PC booting slowly', 'clean up orphaned processes', 'what's running', 'check Defender/firewall status', 'run a security audit', 'read/set a registry value', 'inspect a service or scheduled task', 'find/hash/inspect a file', 'check disk or storage health', 'baseline/check file integrity', 'what changed on my C: drive', 'watch a folder for changes', or any Windows desktop-automation or system-inspection task. Steers toward the windows-mcp tools over ad-hoc PowerShell, gives composed multi-tool workflows, and flags destructive tools. Does NOT add tools; it is guidance over the windows-mcp server. Not cross-platform; the server runs unelevated so admin-only operations may need elevation the skill cannot grant."
 ---
 
 # Windows
 
-A judgment layer over the `windows-mcp` server's 68 atomic tools for Windows desktop automation and system inspection — UI driving, screenshots/OCR, files, registry, services, processes, disk, network, and security/startup analysis. This skill adds no tools of its own: every action below is one of the server's existing MCP tools, composed into the right order with the right safety checks. Its job is to steer tool selection (MCP vs. raw PowerShell), sequence multi-step workflows correctly, and flag which tools are destructive enough to need confirmation first.
+A judgment layer over the `windows-mcp` server's 69 atomic tools for Windows desktop automation and system inspection — UI driving, screenshots/OCR, files, registry, services, processes, disk, network, and security/startup analysis. This skill adds no tools of its own: every action below is one of the server's existing MCP tools, composed into the right order with the right safety checks. Its job is to steer tool selection (MCP vs. raw PowerShell), sequence multi-step workflows correctly, and flag which tools are destructive enough to need confirmation first.
 
 **Skill root**: this skill ships inside the `windows-mcp` plugin (repo
 `Steven23456/Windows-mcp`, `skills/windows/`). Slash trigger: `/windows`.
@@ -29,9 +29,9 @@ Do NOT use this skill for:
 
 ## Tool selection: windows-mcp tools vs. raw PowerShell
 
-**Default to the MCP tool.** It is faster than a PowerShell cold-start, returns structured JSON instead of text to parse, and runs unelevated in one consistent place. Reach for raw PowerShell only when none of the 68 tools express what's needed.
+**Default to the MCP tool.** It is faster than a PowerShell cold-start, returns structured JSON instead of text to parse, and runs unelevated in one consistent place. Reach for raw PowerShell only when none of the 69 tools express what's needed.
 
-**Fall back to the `powershell` tool** only for one-off scripting the 68 tools don't cover. Multi-line scripts are fine — the tool passes the script as one unit. For anything that may run longer than a few minutes (installers, `DISM`, bulk hashes) pass `background: true` and poll with `job`.
+**Fall back to the `powershell` tool** only for one-off scripting the 69 tools don't cover. Multi-line scripts are fine — the tool passes the script as one unit. For anything that may run longer than a few minutes (installers, `DISM`, bulk hashes) pass `background: true` and poll with `job`.
 
 The MCP server **runs unelevated**. Admin-only operations — `registry_set` under `HKLM`, `service` start/stop, some `scheduled_task` actions — can return access-denied. Recognize that signature and surface it to the user instead of retrying blindly; the skill cannot grant elevation it doesn't have.
 
@@ -46,7 +46,7 @@ The MCP server **runs unelevated**. Admin-only operations — `registry_set` und
 
 If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mcp__plugin_windows-mcp_Windows-mcp__<tool>`.
 
-## The 68 tools, grouped by domain
+## The 69 tools, grouped by domain
 
 **UI automation / input (29)** — drive and read the desktop and its GUI applications: `snapshot`, `click`, `drag`, `hover`, `key`, `shortcut`, `type`, `scroll`, `focus`, `get_state`, `get_element`, `get_text`, `get_table`, `find_element`, `assert_element`, `interact_element`, `multi_select`, `multi_edit`, `wait`, `wait_for`, `switch_to_window`, `window`, `multi_monitor`, `screenshot`, `ocr`, `clipboard`, `file_dialog`, `notification`, `launch`
 
@@ -60,7 +60,7 @@ If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mc
 
 **Services / tasks (2)** — Windows services and scheduled tasks: `service`, `scheduled_task`
 
-**Registry (2)** — read and write registry values: `registry_get`, `registry_set`
+**Registry (3)** — read, write, and delete registry values and keys: `registry_get`, `registry_set`, `registry_delete`
 
 **Network / web (4)** — connectivity and HTTP: `network`, `firewall`, `http_request`, `scrape`
 
@@ -70,7 +70,7 @@ If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mc
 
 **Misc (2)** — utility operations: `archive`, `audio`
 
-(29+5+7+7+2+2+2+4+5+3+2 = 68.) If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mcp__plugin_windows-mcp_Windows-mcp__<tool>`.
+(29+5+7+7+2+2+3+4+5+3+2 = 69.) If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mcp__plugin_windows-mcp_Windows-mcp__<tool>`.
 
 ## Workflow playbooks
 
@@ -166,7 +166,7 @@ Locate the file(s) first, then layer on metadata, a hash suitable for IOC/VirusT
 
 ## Safety rails & gotchas
 
-- **Confirm before destructive tools:** `registry_set`, `service`, `scheduled_task`, `power_action`, `file_write`, `file_manage`, `firewall`. Each of these is gated behind a `confirm: true` parameter on the write/destructive path — treat that gate as a place to pause and get user sign-off, not just a required field to fill in. Run the read-only counterpart first: `registry_get` before `registry_set`; `process_inspect` before killing; `service` (status/list) before start/stop.
+- **Confirm before destructive tools:** `registry_set`, `registry_delete`, `service`, `scheduled_task`, `power_action`, `file_write`, `file_manage`, `firewall`. Each of these is gated behind a `confirm: true` parameter on the write/destructive path — treat that gate as a place to pause and get user sign-off, not just a required field to fill in. Run the read-only counterpart first: `registry_get` before `registry_set` or `registry_delete` (a key delete also needs `recursive: true` when the key has sub-keys, and the hive root and the profile/OS roots are refused outright); `process_inspect` before killing; `service` (status/list) before start/stop.
 - **`storage_health` can wedge on external / USB drives.** Its default mode is fast and never wakes sleeping drives, but `include_usage: true` wakes sleeping/USB drives to collect SMART data — scope to internal disks by default, or warn the user before running it with `include_usage: true` against removable media.
 - **Runs unelevated.** Admin-only operations (`registry_set` under `HKLM`, `service` start/stop, some `scheduled_task` actions) fail with access-denied. Surface that signature to the user; don't loop retrying.
 - **UIAutomation tools need the target app foregrounded** on an interactive desktop — they fail headless or against a backgrounded window.

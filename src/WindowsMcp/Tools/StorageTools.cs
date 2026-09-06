@@ -16,7 +16,7 @@ public sealed partial class StorageTools
     [GeneratedRegex("^[A-Za-z]:?$")]
     private static partial Regex DriveLetterRegex();
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "Storage health", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description(
         "Diagnose drive/disk HEALTH (not usage). DEFAULT is fast and never wakes sleeping drives: each disk's " +
         "model, bus type, health, and online/offline (Get-Disk); the volume->disk/partition map (filesystem, " +
         "label, health); and recent disk-stack Error/Warning events. Set include_usage:true to ALSO collect " +

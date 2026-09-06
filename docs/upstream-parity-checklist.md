@@ -3,7 +3,7 @@
 **Baseline:** 2026-09-04
 **Upstream:** [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) `main` = **v0.8.5**
 (released 2026-08-01; Python ≥ 3.14, FastMCP 3, 20 tools).
-**Ours:** `main` @ `8cb40b6` + the phase-2/3/4/5 branches, 68 tools, plugin `0.7.3`, `CHANGELOG.md
+**Ours:** `main` @ `8cb40b6` + the phase-2/3/4/5 branches, 69 tools, plugin `0.7.3`, `CHANGELOG.md
 [Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1,
 phase 3's A-2/A-3/A-4, phase 4's A-6 and phase 5's A-14, A-12 (phase 1), A-10 and A-5 (phase 1).
 SDK `ModelContextProtocol` 2.2.0.
@@ -95,12 +95,12 @@ function names are the stable anchor.
 | B-11 | `start_process` with argv list + cwd | P2 | S | [B-11](design/B-11-start-process-argv.md) | ☑ |
 | B-12 | `multi_monitor`: work area, orientation, DPI, scale | P2 | S | [B-12](design/B-12-monitor-detail.md) | ☑ |
 | C-1 | File tools: offset/limit, append, overwrite, recursive, pattern | P2 | M | — | ☐ |
-| C-2 | Registry delete + subkey listing on the tool surface | P2 | S | — | ☐ |
+| C-2 | Registry delete + subkey listing on the tool surface | P2 | S | [C-2](design/C-2-registry-delete.md) | ☑ |
 | C-3 | Process list CPU %, sort, limit; graceful kill | P2 | M | — | ☐ |
-| C-4 | Notification `app_id` (AUMID) | P3 | S | — | ☐ |
+| C-4 | Notification `app_id` (AUMID) | P3 | S | [C-4](design/C-4-notification-app-id.md) | ☑ |
 | C-5 | `scrape`: DOM source, query, MCP sampling summary | P2 | M | A-5 (DOM part) | ☐ |
 | C-6 | `powershell`: per-call timeout; env rebuild from registry | P2 | S–M | — | ☐ |
-| C-7 | Tool annotations on all 68 tools | P2 | S | — | ☐ |
+| C-7 | Tool annotations on all 69 tools | P2 | S | [C-7](design/C-7-tool-annotations.md) | ☑ |
 | S-1 | Tool allow/deny lists (`--tools`, `--exclude-tools`) | P2 | S | — | ☐ |
 | S-2 | IP allowlist (CIDR v4/v6) | P2 | S | S-8 | ☐ |
 | S-3 | CORS origins | P3 | S | — | ☐ |
@@ -120,6 +120,9 @@ The section-A sequencing, cross-item decisions (coordinate space, defaults, tool
 ids, env vars) and per-item test seeds are in [`docs/design/A-roadmap.md`](design/A-roadmap.md).
 The section-B plan (four phases, the element-target resolver, window matcher, typing planner and
 app-catalog decisions, per-item test seeds) is in [`docs/design/B-roadmap.md`](design/B-roadmap.md).
+The section-C plan (three phases, the safer file defaults, the registry denylist, in-process toasts,
+opt-in sampling and the annotation table, per-item test seeds) is in
+[`docs/design/C-roadmap.md`](design/C-roadmap.md).
 
 ---
 
@@ -1030,12 +1033,12 @@ a clear message) — Desktop-relative resolution is a foot-gun; record the decis
 **Done when.** Each new flag has a unit test in `FileSystemServiceTests`/`FileToolsTests`.
 
 ### C-2 — Registry delete and subkey listing on the tool surface  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-06 — [design note](design/C-2-registry-delete.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `Registry(mode=delete, path, name?)` removes a value or, without `name`, the whole
 key recursively; `mode=list` returns values **and** sub-keys in one call (`registry/service.py`).
 
-**Ours.** `registry_get` without `value_name` returns value names only; `RegistryService`
+**Ours (before C-2).** `registry_get` without `value_name` returned value names only; `RegistryService`
 already implements `EnumerateValuesAsync` (`:22`) and `EnumerateSubKeysAsync` (`:49`) but no tool
 exposes them; no delete at all.
 
@@ -1058,12 +1061,12 @@ sort, or limit; kill is always hard.
 `graceful:true` → `CloseMainWindow()` / `WM_CLOSE`, wait N s, then `Kill()`; keep `confirm`.
 
 ### C-4 — Notification `app_id` (AUMID)  `P3 · S`
-- [ ] Not started
+- [x] Done 2026-09-06 — [design note](design/C-4-notification-app-id.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `Notification(title, message, app_id)` — the AUMID is mandatory because Windows
 uses it as toast identity (`notifications/service.py`).
 
-**Ours.** `NotificationService.cs:25` hardcodes `'Windows-MCP'`. Unregistered AUMIDs are dropped
+**Ours (before C-4).** `NotificationService.cs:25` hard-coded `'Windows-MCP'` in a PowerShell script. Unregistered AUMIDs are dropped
 on some builds.
 
 **Sketch.** Optional `app_id` param (default keeps the current value); document the registration
@@ -1100,13 +1103,13 @@ which makes `git`, `node`, etc. "not found" inside tool calls.
 `PATH` lacks `%SystemRoot%\System32` or is empty, rebuild from the registry as above and inject
 into `ProcessStartInfo.Environment` (foreground and jobs share `PowerShellInvocation`).
 
-### C-7 — Tool annotations on all 68 tools  `P2 · S`
-- [ ] Not started
+### C-7 — Tool annotations on all 69 tools  `P2 · S`
+- [x] Done 2026-09-06 — [design note](design/C-7-tool-annotations.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** Every tool declares `ToolAnnotations(title, readOnlyHint, destructiveHint,
 idempotentHint, openWorldHint)` — clients use them for auto-approve and confirmation UX.
 
-**Ours.** `[McpServerTool]` everywhere with no properties set.
+**Ours (before C-7).** `[McpServerTool]` everywhere with no properties set.
 
 **Sketch.** `[McpServerTool(Name=…, Title=…, ReadOnly=…, Destructive=…, Idempotent=…,
 OpenWorld=…)]` — verify property names on `McpServerToolAttribute` in SDK 2.2.0. Classification
@@ -1127,7 +1130,7 @@ every listed tool has explicit annotations.
 `__main__.py` `_apply_tool_filter()`; unknown names error at startup. Lets an operator run a
 screenshot-only or no-PowerShell server.
 
-**Ours.** All 68 tools always.
+**Ours.** All 69 tools always.
 
 **Sketch.** `ServerOptions` gains `Tools`/`ExcludeTools` (flags + `WINDOWSMCP_TOOLS`/
 `WINDOWSMCP_EXCLUDE_TOOLS`, valid for both transports); in `WindowsMcpHost.AddWindowsMcp` filter
@@ -1254,7 +1257,7 @@ cleanup, VM/Sandbox recommendation for destructive tools.
 
 **Ours.** `skills/windows/SKILL.md` is a usage playbook, not a tester.
 
-**Sketch.** `skills/windows-tool-tester/SKILL.md` adapted to our 68 tools and `confirm:true`
+**Sketch.** `skills/windows-tool-tester/SKILL.md` adapted to our 69 tools and `confirm:true`
 gates; wire into the plugin manifest.
 
 ---
@@ -1275,7 +1278,7 @@ gates; wire into the plugin manifest.
 
 ## Appendix A — Tool name map (upstream → ours)
 
-| Upstream (20) | Ours (68) | Gap items |
+| Upstream (20) | Ours (69) | Gap items |
 |---|---|---|
 | `Snapshot` | `snapshot`, `get_state`, `find_element`, `get_element`, `get_text`, `window` (list/active) | A-1..A-6, A-11..A-13 |
 | `Screenshot` | `screenshot`, `ocr` | A-7..A-11 |
@@ -1285,9 +1288,9 @@ gates; wire into the plugin manifest.
 | `Scroll` | `scroll` | B-3 |
 | `Move` | `hover`, `drag` | B-2 |
 | `Shortcut` | `shortcut`, `key` | D-1 |
-| `Wait` | — | B-5 |
+| `Wait` | `wait` | B-5 |
 | `WaitFor` | `wait_for`, `assert_element` | B-6 |
-| `MultiSelect`, `MultiEdit` | — | B-7 |
+| `MultiSelect`, `MultiEdit` | `multi_select`, `multi_edit` | B-7 |
 | `App` | `launch`, `switch_to_window`, `focus`, `window`, `start_process` | B-8..B-11 |
 | `PowerShell` | `powershell`, `job` | C-6 |
 | `FileSystem` | `file_read/write/manage/search/info/hash/streams`, `archive` | C-1 |
@@ -1295,7 +1298,7 @@ gates; wire into the plugin manifest.
 | `Clipboard` | `clipboard` | — |
 | `Process` | `process`, `process_inspect` | C-3 |
 | `Notification` | `notification` | C-4 |
-| `Registry` | `registry_get`, `registry_set` | C-2 |
+| `Registry` | `registry_get`, `registry_set`, `registry_delete` | C-2 |
 | _(none)_ | services, tasks, event log, disk, storage, network, firewall, security, startup report, integrity, USN, watch, env, power, audio, WMI, drivers, reliability, cert store, Defender, signatures | ours only |
 
 ## Appendix B — Upstream source map (`src/windows_mcp/`)

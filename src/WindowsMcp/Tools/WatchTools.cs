@@ -12,7 +12,7 @@ public sealed class WatchTools
 
     public WatchTools(IWatchService watch) => _watch = watch;
 
-    [McpServerTool, Description(
+    [McpServerTool(Title = "Watch directory", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description(
         "Live directory watching (FileSystemWatcher) with server-side event buffering. " +
         "mode: start (watch a directory; returns a session id), poll (drain buffered created/changed/deleted/renamed events for a session), " +
         "stop (end a session), list (active sessions with buffered/dropped counts). " +

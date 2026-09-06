@@ -4,7 +4,7 @@ Cross-session task tracker. Shipped work is recorded in `CHANGELOG.md`. The feat
 against the upstream Python server (51 prioritized items with implementation sketches) is
 `docs/upstream-parity-checklist.md` — new capability work starts there, not here.
 
-## 🧪 Live e2e coverage sweep — ACTIVE (20/68 tools ever exercised against a live server)
+## 🧪 Live e2e coverage sweep — ACTIVE (20/69 tools ever exercised against a live server)
 
 **Why this exists:** all prior e2e testing was ad-hoc and unrecorded. A transcript audit
 (2026-07-12) found **no checklist ever existed** — 20 of the tools have been invoked against a
@@ -49,8 +49,8 @@ but the live server kept running **0.5.0 for four days**, and `process orphans` 
 - `storage_health include_usage:true` **wakes sleeping USB/external devices and can stall.** The
   default metadata-only path is safe; the deep path is opt-in for a reason. Don't pass it casually.
 - Destructive: `power_action` (really does enable `SeShutdownPrivilege` — it will shut down),
-  `registry_set`, `file_write`, `service` (stop/restart), `scheduled_task` (create/delete),
-  `archive`. Exercise against throwaway targets only.
+  `registry_set`, `registry_delete`, `file_write`, `service` (stop/restart), `scheduled_task`
+  (create/delete), `archive`. Exercise against throwaway targets only.
 - The 21 UI-automation/input tools need an **interactive foreground desktop**; they fail headless.
 
 ### ✅ Verified live (v0.6.x)
@@ -91,13 +91,13 @@ stdio without touching the registered server — spawn the exe, `initialize` →
 `system_info` · `start_process` · `file_search` · `wmi_query` · `file_streams` · `defender_status` ·
 `scheduled_task` · `file_manage` · `event_log` · `verify_signature` · `cert_store` · `driver_list`
 
-### 🔴 Never invoked live (48)
+### 🔴 Never invoked live (49)
 - **Safe / read-only — sweep these first (15):** `file_hash` · `reliability` · `env` · `network` ·
   `firewall` · `disk_inspect` · `security_audit` · `registry_get` · `http_request` · `scrape` ·
   `multi_monitor` · `fs_changes` (needs elevation) · `watch` · `job` · `wait`
-- **Write / destructive — throwaway targets only (9):** `file_write` · `registry_set` · `archive` ·
-  `service` · `power_action` · `notification` · `audio` · `clipboard` · `integrity` (writes a
-  baseline under `%LOCALAPPDATA%\windows-mcp\integrity`)
+- **Write / destructive — throwaway targets only (10):** `file_write` · `registry_set` ·
+  `registry_delete` · `archive` · `service` · `power_action` · `notification` · `audio` ·
+  `clipboard` · `integrity` (writes a baseline under `%LOCALAPPDATA%\windows-mcp\integrity`)
 - **UI-automation / input — needs interactive foreground desktop (24):** `click` · `type` · `key` ·
   `shortcut` · `hover` · `drag` · `scroll` · `focus` · `launch` · `window` · `switch_to_window` ·
   `snapshot` · `get_state` · `get_element` · `find_element` · `interact_element` · `assert_element` ·
