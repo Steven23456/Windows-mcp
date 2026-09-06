@@ -2,6 +2,60 @@
 
 ### Added
 
+- **`drag` moves the way a drop target expects: a nudge, intermediate motion, a duration, and an
+  origin that defaults to the cursor** (parity B-2).
+  `drag(from_x?, from_y?, to_x?, to_y?, element_id?, from_element_id?, button, duration_ms?,
+  steps?)` presses at the origin, moves first past the system drag threshold (`SM_CXDRAG` + 1),
+  then through `steps` interpolated points spaced `duration_ms / steps` apart, and releases
+  exactly on the destination — file managers, canvases and browser drag-and-drop ignore a drag
+  that teleports. The destination is `to_x`/`to_y` or `element_id` (its centre); the origin is
+  `from_x`/`from_y`, `from_element_id`, or nothing at all, which starts at the live cursor and
+  reports `fromTarget: "cursor"` (roadmap C2). `duration_ms` is 0–10000 (default 300) and `steps`
+  2–200 (default 20), both refused with the range when out of it; the button is released even
+  when the call is cancelled mid-motion, and middle-button drags are still unsupported. New pure
+  `Services/DragPath.cs` (nudge first, monotone points, the last one exactly the destination);
+  `IInputService.DragAsync(…, durationMs, steps)` joins the original press-jump-release overload,
+  which is unchanged. Design note: `docs/design/B-2-drag.md`.
+- **`scroll` scrolls under the cursor, at an element, or sideways with Shift** (parity B-3).
+  `scroll(direction, amount?, x?, y?, element_id?, shift_wheel?)`: with no target the wheel turns
+  wherever the pointer already is (`GetCursorPositionAsync`, roadmap C2), with `element_id` at
+  that element's centre, with `x`/`y` at the point — and the response says which of
+  `point | element | cursor` was used and where. `shift_wheel:true` holds Shift and sends the
+  *vertical* wheel for `left`/`right`, which is how a window with no horizontal wheel scrolls
+  sideways; it is refused for `up`/`down` in both the tool and the service.
+  `IInputService.ScrollAsync(…, shiftWheel)` joins the original overload, and an invalid
+  direction is now rejected before the cursor is moved rather than after. Design note:
+  `docs/design/B-3-scroll.md`.
+- **`type` takes a target, clears, places the caret, presses Enter — and pastes long text**
+  (parity B-1). `type(text, x?, y?, element_id?, clear?, caret?, press_enter?, pace_ms?)` is now
+  the whole gesture in one call: `x`/`y` or `element_id` clicks the target first, `clear:true`
+  sends Ctrl+A then Backspace, `caret: start|end` sends Ctrl+Home / Ctrl+End (`idle`, the
+  default, moves nothing), and `press_enter:true` presses Enter last — the
+  `click` → `ctrl+a` → `backspace` → `type` → `enter` round-trip in one round-trip. The new pure
+  `Services/TypePlanner.cs` decides how the text is entered (roadmap C8): 200 characters or more
+  with no control character other than newline or tab goes through the clipboard as a single
+  Ctrl+V, and the clipboard text that was there is put back afterwards; anything else is typed
+  key by key, one character per SendInput call with `pace_ms` (default 5) between them — a whole chunk in one call is what a busy target garbles into its last character. The result says which path ran —
+  `{typed, method: keys|paste, clipboardRestored?, x?, y?, elementId?, name?}` — and a paste that
+  cannot borrow the clipboard falls back to keys and reports `keys`. New `TypeOptions` and
+  `CaretPosition`; `TypeResult` gained trailing `Method`/`ClipboardRestored`;
+  `IInputService.TypeAsync(text, options)` joins the single-argument overload;
+  `InputService` takes an optional `IClipboardService` and executes plans against an internal
+  `IKeyboardSink` seam (`SimulatorKeyboardSink` in production), which is what makes keystroke
+  order testable without injecting input. Design note: `docs/design/B-1-type.md`.
+- **`click` takes a snapshot element id, and `clicks:0` is a hover** (parity B-4).
+  `click(x?, y?, element_id?, button, clicks)` accepts an `el_N` id from `snapshot` /
+  `find_element` in place of coordinates and clicks that element's centre, so the ids the
+  snapshot hands out no longer have to be copied back as numbers; an element that is off-screen,
+  has no bounds, or has empty bounds is refused with a message naming the id and the reason,
+  *before* any input is sent. `clicks:0` moves the pointer and presses nothing, reported as
+  `{action: "hover"}`; `hover` stays as its own tool. The response is
+  `{action, x, y, button, clicks, elementId?, name?}` with the point actually used. The rule is
+  one resolver for every input verb (roadmap C1): exactly one of (`x` and `y`) or `element_id`,
+  with both, half a pair, or neither where a target is required an `ArgumentException` naming the
+  parameters in play — `click`, `type`, `scroll` and `drag` share it, and `InputTools` now injects
+  `IUIAutomationService` for the id lookup. New pure `Services/UiTree/ElementTarget.cs`. Design
+  note: `docs/design/B-4-click-by-element.md`.
 - **`start_process` takes an argv list, a working directory and a shell-execute flag** (parity
   B-11). `start_process(command, args_json?, cwd?, use_shell_execute?)`: `args_json` is a JSON
   array of strings whose items go to `ProcessStartInfo.ArgumentList` **verbatim** — no quoting,
@@ -149,6 +203,40 @@
   (roadmap C9). Design note: `docs/design/A-1-window-inventory.md`.
 
 ### Changed
+
+- **`scroll` takes the direction first, and coordinates on `click`/`scroll`/`drag` are optional.**
+  `scroll(x, y, direction, amount)` became `scroll(direction, amount?, x?, y?, element_id?,
+  shift_wheel?)`: the only required argument is `direction`, and a call with no coordinates
+  scrolls under the cursor instead of failing. **Migration:** this is a positional break — a
+  caller that passed `scroll(100, 200, "down")` positionally must now pass
+  `scroll("down", 3, 100, 200)` or name the arguments; callers that already used names only lose
+  the requirement. `click` and `drag` keep their parameter order (`x`, `y` and `from_x`, `from_y`
+  are still first), but their coordinates are optional too — a `click` may give `element_id`
+  instead, and a `drag` may give `element_id`/`from_element_id` or let the origin default to the
+  cursor. Half a coordinate pair, or coordinates *and* an element id, is an `ArgumentException`
+  naming the parameters. The advertised schemas change accordingly and are pinned over the wire
+  in `HttpTransportTests`.
+- **`click`, `type`, `scroll` and `drag` return one result object each, not a sentence or a
+  serialized DTO.** `scroll` used to answer `"scrolled down by 3 at (100,200)"`; `click`, `drag`
+  and `type` serialized their `ClickResult` / `DragResult` / `TypeResult` DTOs, so the fields were
+  `X`, `Y`, `Button` (the enum's *number*), `Clicks`, `CharsTyped`. They now return camelCase
+  objects that carry the resolved target as well as the request: `click` →
+  `{action: click|hover, x, y, button, clicks, elementId?, name?}`, `type` →
+  `{typed, method, clipboardRestored?, x?, y?, elementId?, name?}`, `scroll` →
+  `{direction, amount, x, y, target: point|element|cursor, shiftWheel, elementId?, name?}`,
+  `drag` → `{fromX, fromY, toX, toY, button, durationMs, steps, fromTarget: point|element|cursor,
+  elementId?, name?}`. **Migration:** read the lower-case field names; `button` is now the name
+  (`"left"`), not the enum's ordinal, and the fields that describe an element target are `null`
+  when the call used coordinates or the cursor.
+- **`type(text)` and `interact_element(type)` press Enter for a newline instead of typing it
+  raw.** Every text entry now goes through `TypePlanner`, so a `\n`, `\r` or `\r\n` in the text
+  becomes an Enter key press and a `\t` becomes Tab, in place of one `TextEntry` call with the
+  raw string — which some controls swallowed or turned into a literal glyph. This applies to
+  everything that types: `type`, D-2's `interact_element(type)` keyboard fallback, and
+  `file_dialog`. The same path also means text of 200 characters or more with no other control
+  characters is pasted through the clipboard rather than typed. **Migration:** a caller that
+  relied on a newline landing as a character in a single-line control must strip it first; a
+  caller that wanted a new line gets one.
 
 - **Test infrastructure: the Notepad fixture leaves nothing behind.** Modern Notepad is one
   process hosting every window and persists every open tab as session state, so a fixture that

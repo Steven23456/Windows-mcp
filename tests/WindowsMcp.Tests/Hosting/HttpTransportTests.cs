@@ -975,6 +975,83 @@ public class HttpTransportTests
             It.IsAny<CancellationToken>()),
             Times.Once, "the requested backend reaches the capture service through the real host");
     }
+
+    // ---- B phase 2: the four input verbs' advertised schemas ----------------------------------
+
+    /// <summary>
+    /// The properties and the required list a client sees for one tool. B phase 2 changes all four
+    /// input verbs' schemas (optional coordinates, element_id, direction first), which is a
+    /// contract change for every remote caller - so it is pinned over the wire, not by reflection.
+    /// </summary>
+    private static (JsonElement Properties, string[] Required) SchemaOf(IEnumerable<McpClientTool> tools, string name)
+    {
+        var resolved = ToolName(tools, name);
+        var tool = tools.Single(t => t.Name.Equals(resolved, StringComparison.Ordinal));
+        var schema = tool.ProtocolTool.InputSchema;
+        var required = schema.TryGetProperty("required", out var list) && list.ValueKind == JsonValueKind.Array
+            ? list.EnumerateArray().Select(e => e.GetString()!).ToArray()
+            : Array.Empty<string>();
+        return (schema.GetProperty("properties"), required);
+    }
+
+    private static void ShouldAdvertise(JsonElement properties, params string[] names)
+    {
+        foreach (var name in names)
+            properties.TryGetProperty(name, out _).Should().BeTrue($"the tool advertises '{name}'");
+    }
+
+    [Fact]
+    public async Task Click_is_advertised_with_optional_coordinates_and_an_element_id()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var (properties, required) = SchemaOf(await client.ListToolsAsync(), "click");
+
+        ShouldAdvertise(properties, "x", "y", "element_id", "button", "clicks");
+        required.Should().BeEmpty(
+            "B-4: a click by element_id gives no coordinates, so x and y stop being required");
+    }
+
+    [Fact]
+    public async Task Type_is_advertised_with_the_target_and_the_editing_options()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var (properties, required) = SchemaOf(await client.ListToolsAsync(), "type");
+
+        ShouldAdvertise(properties, "text", "x", "y", "element_id", "clear", "caret", "press_enter", "pace_ms");
+        // B-1 adds options around the text; the text itself stays the only requirement.
+        required.Should().Equal("text");
+    }
+
+    [Fact]
+    public async Task Scroll_is_advertised_with_the_direction_required_and_the_coordinates_optional()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var (properties, required) = SchemaOf(await client.ListToolsAsync(), "scroll");
+
+        ShouldAdvertise(properties, "direction", "amount", "x", "y", "element_id", "shift_wheel");
+        // B-3: x and y move from required to optional - the schema change CHANGELOG has to carry.
+        required.Should().Equal("direction");
+    }
+
+    [Fact]
+    public async Task Drag_is_advertised_with_both_ends_optional_and_the_motion_controls()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var (properties, required) = SchemaOf(await client.ListToolsAsync(), "drag");
+
+        ShouldAdvertise(properties,
+            "from_x", "from_y", "to_x", "to_y", "element_id", "from_element_id", "button", "duration_ms", "steps");
+        required.Should().BeEmpty(
+            "B-2: the origin defaults to the cursor and the destination may be an element id");
+    }
 }
 
 

@@ -492,6 +492,20 @@ public class UIAutomationServiceUnitTests
     }
 
     [Fact]
+    public async Task GetElementAsync_on_an_unknown_id_throws_the_KeyNotFoundException_the_input_verbs_let_surface()
+    {
+        // B-4: every input verb resolves element_id through THIS method and deliberately does not
+        // catch what it throws, and every tool test mocks it. This is the non-mocked sibling: the
+        // real service, an empty cache, and the exception type the mocks promise - naming the id,
+        // because "el_404 is gone, take a new snapshot" is the whole value of the refusal.
+        using var svc = new UIAutomationService(new Mock<IInputService>().Object, new Mock<IWindowService>().Object);
+
+        Func<Task> act = () => svc.GetElementAsync("el_404");
+
+        (await act.Should().ThrowAsync<KeyNotFoundException>()).Which.Message.Should().Contain("el_404");
+    }
+
+    [Fact]
     public async Task AssertElementAsync_other_states_throw_for_an_unknown_id()
     {
         using var svc = new UIAutomationService(new Mock<IInputService>().Object, new Mock<IWindowService>().Object);

@@ -14,27 +14,8 @@ namespace WindowsMcp.Tests.Tools;
 [Trait("Category", "Unit")]
 public class InputToolsTests
 {
-    [Fact]
-    public async Task Click_dispatches_to_service_with_correct_args()
-    {
-        var mock = new Mock<IInputService>();
-        mock.Setup(s => s.ClickAsync(100, 200, MouseButton.Left, 2, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ClickResult(100, 200, MouseButton.Left, 2));
-        var tools = new InputTools(mock.Object, new Mock<IClipboardService>().Object);
-
-        var result = await tools.Click(100, 200, "left", 2);
-
-        result.Should().Contain("100").And.Contain("200");
-        mock.VerifyAll();
-    }
-
-    [Fact]
-    public async Task Click_rejects_unknown_button_with_clear_message()
-    {
-        var tools = new InputTools(new Mock<IInputService>().Object, new Mock<IClipboardService>().Object);
-        Func<Task> act = () => tools.Click(0, 0, "fourth", 1);
-        await act.Should().ThrowAsync<ArgumentException>().WithMessage("*button*");
-    }
+    // The click tests that lived here moved to InputToolsClickTests when B-4 gave `click` an
+    // element_id, optional coordinates and the clicks:0 hover. Everything below is B-5's `wait`.
 
     // ---- B-5: wait -------------------------------------------------------------------------
     // The tool exists so an agent stops paying a PowerShell cold start (seconds to tens of
@@ -42,7 +23,9 @@ public class InputToolsTests
     // a plain Task.Delay with a bounded, honestly-reported argument.
 
     private static InputTools NewTools(Mock<IInputService>? input = null, Mock<IClipboardService>? clipboard = null)
-        => new((input ?? new Mock<IInputService>()).Object, (clipboard ?? new Mock<IClipboardService>()).Object);
+        => new((input ?? new Mock<IInputService>()).Object,
+               (clipboard ?? new Mock<IClipboardService>()).Object,
+               new Mock<IUIAutomationService>().Object);
 
     private static JsonElement Parse(string json)
     {
@@ -187,5 +170,116 @@ public class InputToolsTests
         parameters[0].ParameterType.Should().Be(typeof(double));
         parameters.Should().Contain(p => p.ParameterType == typeof(CancellationToken),
             "the SDK passes the request's token, and a 60 s sleep must be interruptible");
+    }
+
+    // ---- the thin verbs: hover, key, shortcut, clipboard -------------------------------------
+    // No element_id and no options, so they have no file of their own - but they are the other
+    // half of the same tool class, and each one is a forwarding contract that can silently rot
+    // (a lower-cased key, a swapped x/y, a "set" that returns before it sets).
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(250)]
+    public async Task Hover_forwards_the_point_and_the_duration_it_was_given(int durationMs)
+    {
+        var input = new Mock<IInputService>();
+
+        var text = await NewTools(input).Hover(x: 12, y: -34, duration_ms: durationMs);
+
+        input.Verify(s => s.HoverAsync(12, -34, durationMs, It.IsAny<CancellationToken>()), Times.Once);
+        input.VerifyNoOtherCalls();
+        text.Should().Contain("12").And.Contain("-34").And.Contain(durationMs.ToString());
+    }
+
+    [Theory]
+    [InlineData("enter")]
+    [InlineData("F5")]
+    [InlineData("/")]
+    public async Task Key_forwards_the_key_string_exactly_as_written(string key)
+    {
+        // Case and punctuation belong to ShortcutParser, not to the tool: lower-casing here would
+        // silently change which key a caller asked for on a layout where case matters.
+        var input = new Mock<IInputService>();
+
+        var text = await NewTools(input).Key(key);
+
+        input.Verify(s => s.PressKeyAsync(key, It.IsAny<CancellationToken>()), Times.Once);
+        input.VerifyNoOtherCalls();
+        text.Should().Contain(key);
+    }
+
+    [Theory]
+    [InlineData("ctrl+c")]
+    [InlineData("CTRL+SHIFT+S")]
+    [InlineData("win")]
+    public async Task Shortcut_forwards_the_chord_exactly_as_written(string chord)
+    {
+        var input = new Mock<IInputService>();
+
+        var text = await NewTools(input).Shortcut(chord);
+
+        input.Verify(s => s.PressShortcutAsync(chord, It.IsAny<CancellationToken>()), Times.Once);
+        input.VerifyNoOtherCalls();
+        text.Should().Contain(chord);
+    }
+
+    [Theory]
+    [InlineData("get")]
+    [InlineData("GET")]
+    public async Task Clipboard_get_returns_what_the_clipboard_holds(string action)
+    {
+        var clipboard = new Mock<IClipboardService>();
+        clipboard.Setup(c => c.GetTextAsync(It.IsAny<CancellationToken>())).ReturnsAsync("hello");
+
+        var text = await NewTools(clipboard: clipboard).Clipboard(action);
+
+        text.Should().Be("hello");
+        clipboard.Verify(c => c.GetTextAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Clipboard_get_of_a_clipboard_holding_no_text_is_an_empty_string()
+    {
+        // Null would serialise as "null" over MCP and read as the literal word to a model.
+        var clipboard = new Mock<IClipboardService>();
+        clipboard.Setup(c => c.GetTextAsync(It.IsAny<CancellationToken>())).ReturnsAsync((string?)null);
+
+        (await NewTools(clipboard: clipboard).Clipboard("get")).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Clipboard_set_stores_the_text_and_reports_its_length()
+    {
+        var clipboard = new Mock<IClipboardService>();
+
+        var text = await NewTools(clipboard: clipboard).Clipboard("set", "abcd");
+
+        clipboard.Verify(c => c.SetTextAsync("abcd", It.IsAny<CancellationToken>()), Times.Once);
+        text.Should().Contain("4");
+    }
+
+    [Fact]
+    public async Task Clipboard_set_without_text_is_refused_and_sets_nothing()
+    {
+        var clipboard = new Mock<IClipboardService>();
+
+        var act = () => NewTools(clipboard: clipboard).Clipboard("set");
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("text");
+        clipboard.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("paste")]
+    [InlineData("")]
+    public async Task Clipboard_rejects_an_unknown_action_and_lists_the_two_it_takes(string action)
+    {
+        var clipboard = new Mock<IClipboardService>();
+
+        var act = () => NewTools(clipboard: clipboard).Clipboard(action);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("get").And.Contain("set");
+        clipboard.VerifyNoOtherCalls();
     }
 }
