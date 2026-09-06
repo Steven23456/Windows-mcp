@@ -256,6 +256,13 @@ checklist unless corrected.
   closed.
 - **Done when.** `launch("calc")`, `launch("edge")`, `launch("visual studio code")` all open and
   return the window handle.
+- **Shipped as** ([note](B-8-launch-catalog.md)): as planned, except that `ShortcutResolver`
+  is not involved — a shortcut's name is the `.lnk` file name and its launch target is the
+  `.lnk` path, which `ShellExecute` opens directly, so no shortcut is ever resolved to its
+  executable. Only an explicit `.exe` name short-circuits to `PATH`; a bare word goes to the
+  catalog even when a same-named executable exists (`"calc"` was short-circuited in the first
+  cut and the unit tests caught it). `edge` and `visual studio code` are proven to resolve, not
+  opened; the desktop launches Calculator and Notepad.
 
 #### B-9 — Window resize / move  `P2 · S · ~2 h`
 
@@ -271,6 +278,9 @@ checklist unless corrected.
   maximised Notepad is refused, then accepted with `restore_first`.
 - **Done when.** `window(action:"set_bounds", title:"notepad", x:100, y:100, width:800,
   height:600)` and the inventory reports exactly that rect.
+- **Shipped as** ([note](B-9-window-bounds.md)): as planned; a half-given pair (`x` without
+  `y`) is a legal move with the other half taken from the current rect, and the no-target case
+  reports `MatchStrategy: "foreground"`.
 
 ### Phase 4 — composites
 

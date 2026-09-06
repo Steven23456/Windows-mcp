@@ -193,6 +193,38 @@ public class WindowsMcpHostTests
             "one per process, like every other service here");
     }
 
+    // ---- B-8: the app catalog -----------------------------------------------------------------
+    // WindowService takes it as a constructor argument, so a missing registration is not a quietly
+    // unfilled field - it is every launch(name) failing at the catalog with a null reference.
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_app_catalog_service()
+    {
+        using var provider = Build(ServerOptions.Stdio);
+
+        var catalog = provider.GetRequiredService<IAppCatalogService>();
+        catalog.Should().BeOfType<AppCatalogService>();
+        catalog.Should().BeSameAs(provider.GetRequiredService<IAppCatalogService>(),
+            "one per process - the five-minute cache is worthless if every call gets a new instance");
+    }
+
+    [Fact]
+    public void AddWindowsMcp_gives_the_window_service_the_catalog_it_was_registered_with()
+    {
+        // B-8 launches by name through IAppCatalogService; a WindowService built without it would
+        // compile, resolve, and then fail on the first launch("calc").
+        using var provider = Build(ServerOptions.Stdio);
+
+        var window = provider.GetRequiredService<IWindowService>();
+
+        window.Should().BeOfType<WindowService>();
+        var field = typeof(WindowService)
+            .GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            .SingleOrDefault(f => f.FieldType == typeof(IAppCatalogService));
+        field.Should().NotBeNull("the service has to hold the catalog it was given");
+        field!.GetValue(window).Should().BeSameAs(provider.GetRequiredService<IAppCatalogService>());
+    }
+
     [Fact]
     public void AddWindowsMcp_still_resolves_the_window_service_and_its_tool()
     {

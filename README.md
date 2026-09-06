@@ -199,6 +199,23 @@ first, then the tool climbs a `SetForegroundWindow` → `AttachThreadInput` → 
 re-reads the foreground window after each rung, so `Success` is observed rather than assumed. A
 title that matches nothing is an error listing the open windows.
 
+`launch(app_name, wait_for_window?, timeout_ms?)` takes the name a person would say. A path, or
+an executable name that exists, is started outright; anything else is resolved against an
+in-process catalog of Start Menu shortcuts and packaged (Store/MSIX) apps — matched exact, then
+by prefix, then fuzzy (score ≥ 70) — so `launch("calc")` opens Calculator and `launch("vs code")`
+opens Visual Studio Code, with no PowerShell anywhere in the path. It then polls the window
+inventory for up to `timeout_ms` (default 10 s) for a window of the launched process, or a new
+window whose title matches, and returns `{MatchedName, Kind, Score, Strategy, Pid, Hwnd, Title,
+WindowDetected}`. A wait that runs out is `WindowDetected: false` with the pid, not an error; a
+name that matches nothing lists the five nearest apps with their scores.
+
+`window(action: "move" | "resize" | "set_bounds", ...)` places a window: `move` needs `x`/`y`,
+`resize` needs `width`/`height`, `set_bounds` all four. The target is a `title`/`hwnd` matched the
+same way, or the foreground window when neither is given; a minimized or maximized window is
+refused naming its state unless `restore_first: true`. The window is never raised or activated,
+and the `After` bounds in `{Window, Before, After, MatchStrategy, Score, Restored}` are re-read
+from the window rather than echoed back from the request.
+
 `wait(seconds)` pauses in-process (more than 0, at most 60) — use it between an action and the
 next `snapshot` instead of a PowerShell sleep; `wait_for` is the conditional wait.
 `start_process(command, args_json?, cwd?, use_shell_execute?)` passes a JSON array of arguments

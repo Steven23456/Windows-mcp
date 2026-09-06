@@ -270,7 +270,8 @@ Output: {"typed":10,"method":"keys","clipboardRestored":null,
 
 ## Bring-to-Front Data Flow (window matching + the foreground ladder)
 
-`switch_to_window`, `focus` and the four acting `window` actions share one target resolver and,
+`switch_to_window`, `focus` and the seven acting `window` actions (`minimize`, `maximize`,
+`restore`, `close`, and B-9's `move`, `resize`, `set_bounds`) share one target resolver and,
 for the two focus tools, one foreground ladder. Windows refuses `SetForegroundWindow` to a
 background process, so the outcome is re-read rather than assumed (roadmap C11).
 
@@ -281,10 +282,15 @@ background process, so the outcome is re-read rather than assumed (roadmap C11).
    └─► switch_to_window(title?, hwnd?) | focus(title?, hwnd?)
        WindowTools refuses "neither given" with an ArgumentException before
        the inventory is read; window(action, title?, hwnd?) validates the
-       action first, then that one of title/hwnd is present
+       action first, then that one of title/hwnd is present — except
+       move/resize/set_bounds, which check their own x/y/width/height rule
+       and fall back to the foreground window when neither is given
 
-2. WindowService.BringToFrontAsync(title, hwnd)  |  ExecuteAsync(action, title, hwnd)
+2. WindowService.BringToFrontAsync(title, hwnd)  |  ExecuteAsync(action, title,
+   hwnd)  |  SetBoundsAsync(title, hwnd, x, y, width, height, restoreFirst)
    └─► ListAsync(includeMinimized: true, includeHidden: false)   — A-1's inventory
+       (SetBoundsAsync with neither title nor hwnd skips it and takes
+        GetActiveAsync instead: Strategy="foreground", Score=100)
 
 3. WindowMatcher.Match(inventory, title, hwnd)   — pure
    ├─► hwnd given      → that window, Strategy="hwnd", Score=100 (never fuzzes)
@@ -300,7 +306,21 @@ background process, so the outcome is re-read rather than assumed (roadmap C11).
     └─► WindowAction { Action, Title (the matched window's), Success=true,
                        MatchStrategy, Score, Hwnd }
 
-4b. ForegroundLadder.Bring(match, IForegroundNative)  — Win32ForegroundNative in
+4b. window(move|resize|set_bounds): WindowGeometry.Apply(match, x?, y?, width?,
+    height?, restore_first, IWindowGeometryNative)   — pure decisions,
+    Win32WindowGeometryNative in production
+    ├─► IsIconic / IsZoomed → refuse naming the state, unless restore_first,
+    │   which sends ShowWindow(SW_RESTORE) first          → Restored=true
+    ├─► GetWindowRect                                     → Before
+    ├─► SetWindowPos(hwnd, null, x ?? Before.X, y ?? Before.Y,
+    │       width ?? Before.Width, height ?? Before.Height,
+    │       SWP_NOZORDER|SWP_NOACTIVATE
+    │       [|SWP_NOMOVE when no x/y] [|SWP_NOSIZE when no width/height])
+    ├─► GetWindowRect again                               → After (the outcome)
+    └─► WindowBoundsResult { Window, Before, After, MatchStrategy, Score,
+                             Restored }
+
+4c. ForegroundLadder.Bring(match, IForegroundNative)  — Win32ForegroundNative in
     production, a recording fake in the tests
     ├─► IsIconic → ShowWindow(SW_RESTORE)                    → Restored=true
     ├─► rung 1: SetForegroundWindow                        → "SetForegroundWindow"
@@ -314,6 +334,56 @@ background process, so the outcome is re-read rather than assumed (roadmap C11).
 
 5. MCP Response: ForegroundResult { Window, MatchStrategy, Score, Restored,
                                     Strategy (null when no rung worked), Success }
+```
+
+---
+
+## Launch Data Flow (path → catalog → activate → wait)
+
+`launch` resolves a name the way a person says it, starts the app, and then reports the window it
+actually produced rather than the request it sent (roadmap C7 and C11). Nothing here spawns
+PowerShell.
+
+### Data Transformations
+
+```
+1. MCP Request
+   └─► launch(app_name, wait_for_window = true, timeout_ms = 10000)
+       WindowTools rejects a blank app_name and a timeout_ms outside 1..60000
+       before the service is touched
+
+2. WindowService.LaunchAsync(appName, waitForWindow, timeoutMs)
+   └─► with waitForWindow: ListAsync(true, false) FIRST — the set of Hwnds that
+       were already open, so a title match afterwards can only be a NEW window
+
+3a. IsPathOrExecutable(appName)      — File/Directory.Exists, or a name ending
+    in ".exe" found on PATH; a bare word like "calc" is NOT a path
+    └─► IAppActivator.StartShortcutOrPath(appName)  → pid
+        Kind="path", Strategy="path", Score=100, MatchedName=appName
+
+3b. otherwise IAppCatalogService.ResolveAsync(appName)
+    ├─► ListAsync(): the two Start Menu Programs folders' *.lnk files +
+    │   PackageManager.FindPackagesForUser("") → GetAppListEntriesAsync()
+    │   (display name + AUMID), merged by AppCatalog.Merge, cached 5 min
+    ├─► AppCatalog.Match: exact → prefix (shortest name) → fuzzy
+    │   max(PartialRatio, TokenSetRatio) ≥ 70 (highest, ties shortest name)
+    ├─► a miss refreshes the cache ONCE, then re-matches
+    └─► still nothing → KeyNotFoundException naming the five nearest with scores
+    └─► IAppActivator.ActivatePackaged(AUMID)      → pid   (packaged)
+        IAppActivator.StartShortcutOrPath(.lnk)    → pid   (shortcut)
+
+4. wait_for_window:false → LaunchResult with Hwnd/Title null, WindowDetected=false
+   wait_for_window:true  → LaunchWait.ForWindowAsync(ListAsync, pid, matchedName,
+                             before, timeout_ms, pollMs = 250)
+   └─► LaunchWait.Pick per poll: a window with that Pid (lowest ZOrder first),
+       else a window NOT in `before` whose title matches matchedName
+       exact → substring → fuzzy ≥ 70  (packaged apps and browsers hand off to
+       a process the activation never named)
+   └─► timeout → null, which is WindowDetected:false — an outcome, not an error
+
+5. MCP Response: LaunchResult { MatchedName, Kind (shortcut|packaged|path), Score,
+                                Pid, Hwnd?, Title?, WindowDetected,
+                                Strategy (path|exact|prefix|fuzzy) }
 ```
 
 ---
@@ -554,7 +624,7 @@ Host.CreateApplicationBuilder(args)
         │
         ▼
 builder.Services.AddSingleton<IInputService, InputService>()
-  ...  (38 services + the ScreenshotOptions record from --screenshot-scale,
+  ...  (39 services + the ScreenshotOptions record from --screenshot-scale,
        --flash, --profile-snapshot and --screenshot-backend, and the
        UiTreeOptions record from --max-tree-elements and --profile-snapshot)
         │
@@ -769,6 +839,8 @@ Scrollable (1):
 | `InputService.TypeAsync` | `TypeOptions.PaceMs` (default 5 ms) between the steps of a typing plan, never after the last one; a paste waits 150 ms after `ctrl+v` before restoring the previous clipboard text | The settle only runs on the real simulator sink, so the unit tests do not pay it. The target reads the clipboard on its own schedule, which is what the settle covers |
 | `InputService.DragAsync(…, durationMs, steps)` | `durationMs / steps` between the interpolated moves (default 300 ms / 20 = 15 ms), including after the last one; `durationMs:0` moves without pausing | A drop target needs real motion, not a teleport; the button is released in a `finally`, so a cancelled drag never leaves it down |
 | `wait` (`InputTools`) | The only tool whose *job* is a delay: one `Task.Delay(seconds)` on the request's cancellation token, `seconds` in (0, 60] | Validated in the tool before the delay; outside the range is an `ArgumentException` naming it and pointing at `wait_for`. No process is spawned — it replaces `powershell("Start-Sleep")`, which paid a cold start and took the serialization gate |
+| `launch`'s window wait | `LaunchWait.ForWindowAsync` reads the inventory immediately, then every 250 ms until `timeout_ms` (default 10 000, max 60 000); the last sleep is clamped to the remaining budget | A timeout is `WindowDetected:false` with the pid, never an exception — a packaged app or a browser may hand its window to another process |
+| `AppCatalogService` | The catalog is read from the Start Menu and the package manager at most once per 5 minutes; a resolve miss forces one extra refresh | Enumerating a few hundred packages costs ~1 s cold, which is why it is cached rather than read per `launch` |
 | `PowerShellService` | Async wait on process exit | 15-min execution backstop (armed after the serialization gate); caller cancellation kills the process tree |
 | `ShellTools` heartbeat | Progress notification every 10s during a foreground `powershell` call | Lets spec-compliant clients reset their request timeout |
 | `JobService` | Background jobs poll-based; per-job 60-min backstop | Runs outside the PowerShell serialization gate |

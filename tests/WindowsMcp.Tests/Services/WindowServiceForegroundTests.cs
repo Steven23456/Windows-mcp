@@ -113,14 +113,15 @@ public class WindowServiceForegroundTests
     [Fact]
     public async Task BringToFrontAsync_honours_a_cancelled_token()
     {
-        // Checked before the inventory read and before any user32 call: a cancelled request must
-        // not end with the desktop rearranged.
+        // Checked before the inventory read, before the matcher and before any user32 call: a
+        // cancelled request must not end with the desktop rearranged. The hwnd is deliberately one
+        // no window owns, so a check moved after the matcher would surface as KeyNotFoundException.
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
         var svc = new WindowService();
-        var active = await svc.GetActiveAsync();
+        var staleHwnd = 0x7FFFFFFFL;   // a handle no window has: the pre-check is the ONLY route to a cancel
 
-        var act = () => svc.BringToFrontAsync(null, active!.Hwnd, cts.Token);
+        var act = () => svc.BringToFrontAsync(null, staleHwnd, cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
     }

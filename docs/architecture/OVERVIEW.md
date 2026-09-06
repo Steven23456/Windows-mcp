@@ -20,7 +20,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 | Feature | Description |
 |---------|-------------|
 | **Native Windows Integration** | Direct access to Windows UI Automation API via `FlaUI.UIA3` |
-| **Dependency Injection** | All 38 services are singleton-scoped, registered in `Hosting/WindowsMcpHost.AddWindowsMcp` via `Microsoft.Extensions.Hosting` |
+| **Dependency Injection** | All 39 services are singleton-scoped, registered in `Hosting/WindowsMcpHost.AddWindowsMcp` via `Microsoft.Extensions.Hosting` |
 | **Source-Generated Tool Discovery** | `[McpServerTool]` attributes are discovered at compile time by the MCP SDK source generator |
 | **Interface-Driven Architecture** | Every service backed by an `IXxxService` interface in a separate Abstractions assembly |
 | **DPI-Aware** | Per-Monitor DPI Awareness V2 enabled at startup for correct multi-monitor coordinate handling |
@@ -58,11 +58,11 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Abstraction Layer  (WindowsMcp.Abstractions)      ││
-│  │        38 IXxxService interfaces + Model DTOs               ││
+│  │        39 IXxxService interfaces + Model DTOs               ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Implementation Layer  (WindowsMcp.Services)       ││
-│  │        38 XxxService singletons registered via DI           ││
+│  │        39 XxxService singletons registered via DI           ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
                                 │
@@ -109,10 +109,10 @@ Windows-MCP exposes **66 MCP tools** across 19 tool classes:
 ### Window Tools (`WindowTools` — 5 tools)
 | Tool | Purpose |
 |------|---------|
-| `Window` | `list` the user-visible top-level windows in z-order (each with its `DesktopId`) or `active` the foreground one; `desktops` the virtual-desktop inventory and the current one; minimize, maximize, restore, or close a window named by `title` (exact → substring → fuzzy) or by `hwnd`, which wins; the result carries the matched title, hwnd, match strategy and score, and no match throws listing the open windows |
+| `Window` | `list` the user-visible top-level windows in z-order (each with its `DesktopId`) or `active` the foreground one; `desktops` the virtual-desktop inventory and the current one; minimize, maximize, restore, or close a window named by `title` (exact → substring → fuzzy) or by `hwnd`, which wins; the result carries the matched title, hwnd, match strategy and score, and no match throws listing the open windows. `move` (x, y), `resize` (width, height) and `set_bounds` (all four) place a window with `SetWindowPos` and never raise or activate it; the target is matched the same way or is the foreground window when neither `title` nor `hwnd` is given, a minimized or maximized window is refused naming its state unless `restore_first:true`, and the result is `{Window, Before, After, MatchStrategy, Score, Restored}` with `After` re-read from the window |
 | `SwitchToWindow` | Bring a window to the foreground by `title` (exact → substring → fuzzy, score ≥ 70) or `hwnd`; restores a minimised window, then climbs the SetForegroundWindow → AttachThreadInput → ALT-nudge ladder, re-reading `GetForegroundWindow` after each rung. Returns `{Window, MatchStrategy, Score, Restored, Strategy, Success}` |
 | `Focus` | Alias of `SwitchToWindow` — same parameters, same result |
-| `Launch` | Launch an application by name or path (ShellExecute); returns the PID |
+| `Launch` | Launch an app by its Start Menu name, a packaged app's display name, or a path: a path or an existing executable name starts outright, anything else resolves against the in-process app catalog (exact → prefix → fuzzy 70+). `wait_for_window` (default true) polls the window inventory up to `timeout_ms` for the app's window. Returns `{MatchedName, Kind, Score, Pid, Hwnd, Title, WindowDetected, Strategy}` |
 | `MultiMonitor` | Enumerate monitors: geometry, primary flag, and per-monitor `WorkArea`, `Orientation` (0/90/180/270), `EffectiveDpi` and `Scale` |
 
 ### File Tools (`FileTools` — 9 tools)

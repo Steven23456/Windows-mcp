@@ -60,6 +60,24 @@ public record ForegroundResult(
     bool Success);
 
 /// <summary>
+/// B-9: the outcome of <c>window(action: move|resize|set_bounds)</c>.
+/// <paramref name="Window"/> is the inventory entry that was targeted and
+/// <paramref name="MatchStrategy"/>/<paramref name="Score"/> are the matcher's verdict, exactly as
+/// on <see cref="ForegroundResult"/>. <paramref name="Before"/> and <paramref name="After"/> are
+/// <c>GetWindowRect</c> in virtual-desktop pixels, read before the move and re-read after it
+/// (roadmap C11: the response is the outcome, never the request);
+/// <paramref name="Restored"/> is true when the window was minimised or maximised and
+/// <c>restore_first</c> sent SW_RESTORE before the move.
+/// </summary>
+public record WindowBoundsResult(
+    WindowInfo Window,
+    Bounds Before,
+    Bounds After,
+    string MatchStrategy,
+    int Score,
+    bool Restored);
+
+/// <summary>
 /// A-1: how a top-level window is showing. <see cref="Minimized"/> wins over
 /// <see cref="Maximized"/> — a minimized window keeps its WS_MAXIMIZE style, so
 /// <c>IsIconic</c> has to be asked first.

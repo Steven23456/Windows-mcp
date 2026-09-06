@@ -2,6 +2,46 @@
 
 ### Added
 
+- **`launch` opens an app by the name a person would say it, and hands back its window** (parity
+  B-8). `launch(app_name, wait_for_window = true, timeout_ms = 10000)`: a path, or an executable
+  name that exists on `PATH`, is still started outright; anything else is resolved against an
+  in-process catalog of Start Menu shortcuts (every `.lnk` under both `Programs` folders) and
+  packaged Store/MSIX apps (the WinRT `PackageManager`'s app list entries — display name plus
+  AUMID), matched exact, then by prefix, then fuzzy (score ≥ 70), so `launch("calc")` opens
+  Calculator and `launch("vs code")` opens Visual Studio Code. A packaged app is activated by its
+  AUMID through the shell's activation manager — the only API that hands back the pid — and a
+  `.lnk` or a path goes through ShellExecute. The window inventory is then polled every 250 ms up
+  to `timeout_ms` (1–60000) for a window of that pid, else for a window that was **not** open
+  before the launch whose title matches the resolved name, so a packaged app or a browser that
+  hands its window to a process the activation never named is still found. Returns `{MatchedName,
+  Kind (shortcut|packaged|path), Score, Pid, Hwnd, Title, WindowDetected, Strategy
+  (path|exact|prefix|fuzzy)}`; a wait that runs out is `WindowDetected:false` with the pid, not an
+  error, and a name that matches nothing is an error listing the five nearest apps with their
+  scores. Roadmap C7: no PowerShell anywhere in this path — `Get-StartApps` would pay a process
+  cold start and take the serialization gate on every `launch`. New
+  `IAppCatalogService`/`AppCatalogService`, registered as a singleton (38 → 39 services), with
+  the catalog cached for five minutes and refreshed once on a miss; pure `Services/AppCatalog.cs`
+  (merge and match) and `Services/LaunchWait.cs` (pick and poll); the `IAppActivator` seam with
+  `Services/Win32AppActivator.cs` (`IApplicationActivationManager`, leading method only per the
+  COM rule); DTOs `AppEntry`, `AppMatch` and `LaunchResult`; and `IWindowService.LaunchAsync(app,
+  waitForWindow, timeoutMs)` alongside the original `LaunchAsync(app)` overload, which is
+  unchanged. Design note: `docs/design/B-8-launch-catalog.md`.
+- **`window` moves and resizes** (parity B-9). `window(action: "move" | "resize" | "set_bounds",
+  title?, hwnd?, x?, y?, width?, height?, restore_first?)`: `move` needs `x` and `y` and keeps the
+  size, `resize` needs `width` and `height` and keeps the position, `set_bounds` needs all four —
+  the per-action rule is checked in the tool, before any window is touched. The target is matched
+  exactly as the other `window` actions (`hwnd` wins, else `title` exact → substring → fuzzy),
+  or is the foreground window when neither is given. A minimized or maximized window is refused
+  naming its state unless `restore_first:true`, which sends `SW_RESTORE` first. One `SetWindowPos`
+  always carries `SWP_NOZORDER|SWP_NOACTIVATE` — a move must not raise or focus the window — plus
+  `SWP_NOMOVE` or `SWP_NOSIZE` for the half that was not asked for. Returns `{Window, Before,
+  After, MatchStrategy, Score, Restored}`, where `After` is a second `GetWindowRect` rather than
+  the requested rectangle (roadmap C11: the response is the outcome). New pure
+  `Services/WindowGeometry.cs` behind an `IWindowGeometryNative` seam
+  (`Services/Win32WindowGeometryNative.cs`), `IWindowService.SetBoundsAsync` and the
+  `WindowBoundsResult` DTO; `NativeMethods.txt` is unchanged — `SetWindowPos`, `GetWindowRect`,
+  `IsIconic`, `IsZoomed` and `ShowWindow` were already declared. Design note:
+  `docs/design/B-9-window-bounds.md`.
 - **`drag` moves the way a drop target expects: a nudge, intermediate motion, a duration, and an
   origin that defaults to the cursor** (parity B-2).
   `drag(from_x?, from_y?, to_x?, to_y?, element_id?, from_element_id?, button, duration_ms?,
@@ -204,6 +244,14 @@
 
 ### Changed
 
+- **`launch` returns a result object instead of `"launched (pid=N)"`.** The tool used to answer
+  with that sentence and nothing else, so a caller could not tell which app the name had resolved
+  to or whether a window ever appeared. It now returns `{MatchedName, Kind, Score, Pid, Hwnd,
+  Title, WindowDetected, Strategy}` (parity B-8). **Migration:** parse the JSON — the pid is
+  `Pid`, and "did it actually open" is `WindowDetected`, not the presence of the word "launched".
+  The two new parameters (`wait_for_window`, `timeout_ms`) are optional and default to the waiting
+  behaviour, so `launch("notepad")` still works; `IWindowService.LaunchAsync(app)` → `int` is
+  untouched for callers that only want a pid.
 - **`scroll` takes the direction first, and coordinates on `click`/`scroll`/`drag` are optional.**
   `scroll(x, y, direction, amount)` became `scroll(direction, amount?, x?, y?, element_id?,
   shift_wheel?)`: the only required argument is `direction`, and a call with no coordinates

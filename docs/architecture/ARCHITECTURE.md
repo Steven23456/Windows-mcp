@@ -37,7 +37,7 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
 │  IRegistryService · IServiceControlService · IEventLogService                │
 │  ITaskSchedulerService · IProcessService · IWindowService · IWmiService      │
 │  IEnvService · IPowerService · INotificationService · INetworkService        │
-│  IWebService · IVirtualDesktopService · IFlashOverlay  (38 interfaces total) │
+│  IWebService · IVirtualDesktopService · IFlashOverlay  (39 interfaces total) │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │ implemented by
                                     ▼
@@ -50,7 +50,7 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
 │  TaskSchedulerService · ProcessService · WindowService · WmiService          │
 │  EnvService · PowerService · NotificationService · NetworkService            │
 │  WebService · VirtualDesktopService · FlashOverlay                           │
-│               (38 singletons — registered in Hosting/WindowsMcpHost)         │
+│               (39 singletons — registered in Hosting/WindowsMcpHost)         │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -157,7 +157,7 @@ public sealed class InputTools
 ### 3. Service Abstraction Layer (`WindowsMcp.Abstractions`)
 
 A separate assembly (`WindowsMcp.Abstractions.csproj`) containing:
-- **38 `IXxxService` interfaces** — define the contract for each domain
+- **39 `IXxxService` interfaces** — define the contract for each domain
 - **Model DTOs** in `WindowsMcp.Abstractions.Models` — records/classes shared between tools and services
 
 The abstraction layer exists so tool classes compile against interfaces, not concrete types. This enforces the dependency inversion principle and makes services independently testable.
@@ -185,7 +185,7 @@ public interface IInputService
 
 ### 4. Service Implementation Layer
 
-All 38 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as two options records — `ScreenshotOptions` (read by the screen tools) and `UiTreeOptions` (injected into `UIAutomationService`):
+All 39 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as two options records — `ScreenshotOptions` (read by the screen tools) and `UiTreeOptions` (injected into `UIAutomationService`):
 
 ```csharp
 // --screenshot-scale, --flash, --profile-snapshot, --screenshot-backend
@@ -196,7 +196,7 @@ services.AddSingleton(new UiTreeOptions(options.MaxTreeElements, options.Profile
 services.AddSingleton<IFlashOverlay, FlashOverlay>();   // always registered; the tool gates on ScreenshotOptions.Flash
 services.AddSingleton<IInputService, InputService>();
 services.AddSingleton<IScreenshotService, ScreenshotService>();
-// ... (38 registrations)
+// ... (39 registrations)
 ```
 
 Services contain all business logic and directly call Windows APIs through platform packages. They are constructed once at host startup and shared across all tool invocations.
@@ -211,6 +211,7 @@ Services contain all business logic and directly call Windows APIs through platf
 | `H.InputSimulator` | `SendInput` Win32 | Inject keyboard and mouse events at driver level |
 | `SkiaSharp` | GDI+/DirectX | Hold either capture backend's frame, downscale (Mitchell cubic), annotate, encode PNG/JPEG |
 | `Windows.Graphics.Capture` (no package — the `net10.0-windows10.0.19041` WinRT projection) | WGC + D3D11 | The `wgc` screenshot backend: compositor frames for the GPU-accelerated and DRM surfaces GDI returns black for |
+| `Windows.Management.Deployment` (no package — the same WinRT projection) | PackageManager | B-8's app catalog: `FindPackagesForUser("")` → `Package.GetAppListEntriesAsync()` for every packaged app's display name and AUMID |
 | `CsWin32` | P/Invoke gen | Auto-generates interop for `SetProcessDpiAwareness`, `SetCurrentProcessExplicitAppUserModelID`, etc. |
 | `TaskScheduler` | Task Scheduler COM | Create, read, update, delete scheduled tasks |
 | `System.Management` | WMI | Query hardware, driver, and configuration data |
@@ -304,7 +305,7 @@ Windows-mcp.slnx
 │   │   │   ├── IntegrityTools.cs
 │   │   │   ├── UsnTools.cs
 │   │   │   └── WatchTools.cs
-│   │   ├── Services/                      (38 service implementations + helpers)
+│   │   ├── Services/                      (39 service implementations + helpers)
 │   │   │   ├── InputService.cs            (+ TypePlanner, DragPath, IKeyboardSink and
 │   │   │   │                               SimulatorKeyboardSink — B-1's typing plan and
 │   │   │   │                               keystroke seam, B-2's drag path)
@@ -314,7 +315,12 @@ Windows-mcp.slnx
 │   │   │   │                               UiTraverser, SnapshotRenderer, DomCorrection,
 │   │   │   │                               ElementTarget — B-4's element_id → point)
 │   │   │   ├── WindowService.cs           (+ FuzzyMatch, WindowMatcher, ForegroundLadder and
-│   │   │   │                               Win32ForegroundNative — B-10's matcher and ladder)
+│   │   │   │                               Win32ForegroundNative — B-10's matcher and ladder;
+│   │   │   │                               WindowGeometry and Win32WindowGeometryNative —
+│   │   │   │                               B-9's move/resize)
+│   │   │   ├── AppCatalogService.cs       (+ AppCatalog, LaunchWait, IAppActivator and
+│   │   │   │                               Win32AppActivator — B-8's catalog, window wait
+│   │   │   │                               and activation)
 │   │   │   ├── ProcessService.cs          (+ ArgvJson — B-11's args_json parser)
 │   │   │   └── ...
 │   │   └── Startup/                       (startup-report renderer + approval decoding)
@@ -322,8 +328,8 @@ Windows-mcp.slnx
 │       ├── WindowsMcp.Abstractions.csproj
 │       ├── IInputService.cs
 │       ├── IUIAutomationService.cs
-│       ├── ... (38 interfaces)
-│       └── Models/                        (21 DTO files)
+│       ├── ... (39 interfaces)
+│       └── Models/                        (22 DTO files)
 │           ├── InputDtos.cs
 │           └── ...
 ├── tests/WindowsMcp.Tests/                (xUnit + Moq + FluentAssertions)

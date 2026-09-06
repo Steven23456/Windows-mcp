@@ -25,13 +25,31 @@ public sealed class WindowService : IWindowService
     /// <summary>B-10: the user32 behind the foreground ladder; a fake in the unit tests.</summary>
     private readonly IForegroundNative _native;
 
-    public WindowService(IVirtualDesktopService? desktops = null) : this(desktops, null) { }
+    public WindowService(IVirtualDesktopService? desktops = null, IAppCatalogService? catalog = null)
+        : this(desktops, null, catalog) { }
 
-    internal WindowService(IVirtualDesktopService? desktops, IForegroundNative? native)
+    internal WindowService(
+        IVirtualDesktopService? desktops,
+        IForegroundNative? native,
+        IAppCatalogService? catalog = null,
+        IAppActivator? activator = null,
+        IWindowGeometryNative? geometry = null)
     {
         _desktops = desktops;
         _native = native ?? Win32ForegroundNative.Instance;
+        _catalog = catalog;
+        _activator = activator ?? Win32AppActivator.Instance;
+        _geometry = geometry ?? Win32WindowGeometryNative.Instance;
     }
+
+    /// <summary>B-8: the app catalog `launch` resolves names against; null (no DI) means only paths launch.</summary>
+    private readonly IAppCatalogService? _catalog;
+    /// <summary>B-8: how apps are started; a recorder in the unit tests.</summary>
+    private readonly IAppActivator _activator;
+    /// <summary>B-9: the user32 behind move/resize; a fake in the unit tests.</summary>
+    private readonly IWindowGeometryNative _geometry;
+
+    private const int MaxLaunchTimeoutMs = 60_000;
 
     /// <summary>
     /// B-10: the target is resolved through <see cref="WindowMatcher"/> (hwnd, else exact →
@@ -190,6 +208,97 @@ public sealed class WindowService : IWindowService
 
         var match = WindowMatcher.Match(await ListAsync(true, false, ct), title, hwnd);
         return ForegroundLadder.Bring(match, _native);
+    }
+
+    /// <summary>
+    /// B-8: launch by Start Menu name — a path short-circuit, else the catalog, then the window
+    /// wait. See <see cref="IWindowService.LaunchAsync(string, bool, int, CancellationToken)"/>.
+    /// </summary>
+    public async Task<LaunchResult> LaunchAsync(string appName, bool waitForWindow, int timeoutMs, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(appName))
+            throw new ArgumentException("app_name is required: a Start Menu name, a Store app's display name, or a path.", nameof(appName));
+        if (timeoutMs is < 1 or > MaxLaunchTimeoutMs)
+            throw new ArgumentException($"timeoutMs must be between 1 and {MaxLaunchTimeoutMs}, got {timeoutMs}", nameof(timeoutMs));
+
+        // The inventory before the launch: a title match afterwards must be a NEW window.
+        var before = waitForWindow
+            ? (await ListAsync(true, false, ct)).Select(w => w.Hwnd).ToHashSet()
+            : [];
+
+        string matchedName, kind, strategy;
+        int score, pid;
+        if (IsPathOrExecutable(appName))
+        {
+            // A path, or an executable on PATH: started outright, no catalog consulted.
+            matchedName = appName; kind = "path"; strategy = "path"; score = 100;
+            pid = _activator.StartShortcutOrPath(appName);
+        }
+        else
+        {
+            if (_catalog is null)
+                throw new InvalidOperationException($"'{appName}' is not a path and no app catalog is available to resolve it.");
+            var match = await _catalog.ResolveAsync(appName, ct);
+            matchedName = match.Entry.Name; kind = match.Entry.Kind; strategy = match.Strategy; score = match.Score;
+            pid = kind == "packaged"
+                ? _activator.ActivatePackaged(match.Entry.Target)
+                : _activator.StartShortcutOrPath(match.Entry.Target);
+        }
+
+        if (!waitForWindow)
+            return new LaunchResult(matchedName, kind, score, pid, null, null, false, strategy);
+
+        var window = await LaunchWait.ForWindowAsync(
+            token => ListAsync(true, false, token), pid, matchedName, before, timeoutMs, LaunchWait.DefaultPollMs, ct);
+        return window is null
+            ? new LaunchResult(matchedName, kind, score, pid, null, null, false, strategy)
+            : new LaunchResult(matchedName, kind, score, pid, window.Hwnd, window.Title, true, strategy);
+    }
+
+    /// <summary>An existing file or directory, or an executable name that resolves on PATH.</summary>
+    private static bool IsPathOrExecutable(string appName)
+    {
+        if (appName.IndexOfAny(Path.GetInvalidPathChars()) >= 0) return false;
+        try
+        {
+            if (File.Exists(appName) || Directory.Exists(appName)) return true;
+            if (appName.Contains(Path.DirectorySeparatorChar) || appName.Contains(Path.AltDirectorySeparatorChar)) return false;
+            var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+            {
+                // Only an explicit executable name ("notepad.exe") resolves on PATH: a bare word
+                // like "calc" is a Start Menu name and belongs to the catalog even though calc.exe exists.
+                if (appName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && File.Exists(Path.Combine(dir, appName))) return true;
+            }
+        }
+        catch { /* an odd path is not a path */ }
+        return false;
+    }
+
+    /// <summary>
+    /// B-9: move and/or resize the matched window and report the rect it actually ended up with.
+    /// See <see cref="IWindowService.SetBoundsAsync"/>.
+    /// </summary>
+    public async Task<WindowBoundsResult> SetBoundsAsync(
+        string? title, long? hwnd, int? x, int? y, int? width, int? height, bool restoreFirst,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        WindowGeometry.Validate(x, y, width, height);   // a call that asks for nothing reads no window
+
+        WindowMatch match;
+        if (hwnd is null && string.IsNullOrWhiteSpace(title))
+        {
+            var active = await GetActiveAsync(ct)
+                ?? throw new InvalidOperationException("No window named and no foreground window to act on: give a title or an hwnd.");
+            match = new WindowMatch(active, "foreground", 100);
+        }
+        else
+        {
+            match = WindowMatcher.Match(await ListAsync(true, false, ct), title, hwnd);
+        }
+        return WindowGeometry.Apply(match, x, y, width, height, restoreFirst, _geometry);
     }
 
     public Task<int> LaunchAsync(string appName, CancellationToken ct = default)

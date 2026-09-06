@@ -21,6 +21,31 @@ public interface IWindowService
     /// </summary>
     Task<ForegroundResult> BringToFrontAsync(string? title, long? hwnd, CancellationToken ct = default);
     Task<int> LaunchAsync(string appName, CancellationToken ct = default);
+
+
+    /// <summary>
+    /// B-8: launch by Start Menu name. A path or an executable name that exists is started
+    /// outright (<c>Strategy: "path"</c>, no catalog consulted); anything else is resolved through
+    /// <see cref="IAppCatalogService"/> and activated by AUMID (packaged) or by ShellExecute on
+    /// its <c>.lnk</c> (shortcut). With <paramref name="waitForWindow"/> the window inventory is
+    /// polled up to <paramref name="timeoutMs"/> (1..60000) for a window of the launched process,
+    /// or a new window whose title matches the resolved name; a timeout is reported as
+    /// <c>WindowDetected:false</c>, not thrown.
+    /// </summary>
+    Task<LaunchResult> LaunchAsync(string appName, bool waitForWindow, int timeoutMs, CancellationToken ct = default);
+
+    /// <summary>
+    /// B-9: move and/or resize one window. The target is resolved through the same matcher as
+    /// <see cref="BringToFrontAsync"/> (hwnd wins, else title exact → substring → fuzzy); both
+    /// null targets the foreground window. At least one of
+    /// <paramref name="x"/>/<paramref name="y"/>/<paramref name="width"/>/<paramref name="height"/>
+    /// is required; a minimised or maximised target is refused naming its state unless
+    /// <paramref name="restoreFirst"/>. The bounds in the result are re-read from the window.
+    /// </summary>
+    Task<WindowBoundsResult> SetBoundsAsync(
+        string? title, long? hwnd, int? x, int? y, int? width, int? height, bool restoreFirst,
+        CancellationToken ct = default);
+
     Task<MonitorInfo[]> EnumerateMonitorsAsync(CancellationToken ct = default);
 
     /// <summary>
