@@ -108,7 +108,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 ---
 
-### `InputTools` — 8 tools
+### `InputTools` — 9 tools
 `src/WindowsMcp/Tools/InputTools.cs`
 
 **Injected:** `IInputService`, `IClipboardService`
@@ -122,6 +122,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 | `Key` | `(string key)` | Press one key: a character (`a`, `7`, `/`), `f1`–`f24`, or a name (enter, tab, esc, win, printscreen, …) |
 | `Shortcut` | `(string shortcut)` | Press a chord (`ctrl+c`, `ctrl+shift+s`, `win+r`); a single part such as `win` is a bare key press |
 | `Scroll` | `(int x, int y, string direction, int amount=3)` | Scroll mouse wheel |
+| `Wait` | `(double seconds)` | Pause in-process for `seconds` — more than 0 and at most 60, fractions allowed; anything outside that range is an `ArgumentException` naming it, and the token cancels the delay. Returns `{"waited": seconds}`. Annotated `ReadOnly = true, Idempotent = true` |
 | `Clipboard` | `(string action, string? text=null)` | `get` or `set` clipboard text |
 
 ---
@@ -152,11 +153,11 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 
 | Method | Description |
 |--------|-------------|
-| `Window` | `list` every user-visible top-level window in z-order (`include_minimized` default true, `include_hidden` default false), each row carrying the `DesktopId` of the virtual desktop it is on / `active` the foreground one (`{"found":false}` when there is none) / `desktops` the virtual-desktop inventory as `{"current": …\|null, "all": [{Id, Name, Index, IsCurrent}]}`, one read for both halves / `minimize`, `maximize`, `restore`, `close` a window found by exact title (`FindWindow`); the action is validated first, then the title the four acting actions require |
-| `SwitchToWindow` | Bring a window to the foreground by exact title (`SetForegroundWindow`) |
-| `Focus` | Alias of `SwitchToWindow` |
+| `Window` | `list` every user-visible top-level window in z-order (`include_minimized` default true, `include_hidden` default false), each row carrying the `DesktopId` of the virtual desktop it is on / `active` the foreground one (`{"found":false}` when there is none) / `desktops` the virtual-desktop inventory as `{"current": …\|null, "all": [{Id, Name, Index, IsCurrent}]}`, one read for both halves / `minimize`, `maximize`, `restore`, `close` a window resolved by `WindowMatcher` — an explicit `hwnd` wins, else the `title` exact → substring → fuzzy; the action is validated first, then that one of `title`/`hwnd` is present. The result is `WindowAction(Action, Title /* the matched window's */, Success, MatchStrategy, Score, Hwnd)`; nothing matched is a `KeyNotFoundException` listing the open titles, not `Success:false` |
+| `SwitchToWindow` | `(string? title=null, long? hwnd=null)` — bring a window to the foreground: matched by `hwnd` or by `title` exact → substring → fuzzy (score ≥ 70), restored if minimised, then `ForegroundLadder` climbs `SetForegroundWindow` → `AttachThreadInput`+`BringWindowToTop` → ALT nudge, re-reading `GetForegroundWindow` after each rung. Returns `ForegroundResult` JSON; neither argument is an `ArgumentException` raised before the inventory is read |
+| `Focus` | Alias of `SwitchToWindow` — same parameters, same `ForegroundResult` |
 | `Launch` | Launch an application by name or path via ShellExecute; returns the PID |
-| `MultiMonitor` | Enumerate monitors: index, device name, bounds, primary flag |
+| `MultiMonitor` | Enumerate monitors: index, device name, bounds, primary flag, plus `WorkArea`, `Orientation`, `EffectiveDpi` and `Scale` |
 
 ---
 
@@ -220,7 +221,7 @@ Tool classes are `[McpServerToolType]`-annotated, sealed, and stateless (except 
 |--------|-------------|
 | `Process` | actions `list\|orphans\|kill`. `list` is plain by default; `includeLineage:true` adds recycle-aware parent lineage + signals (age, runtime kind, system-adjacency, root PID); `groupByRoot:true` collapses processes under their nearest-live root ancestor. `orphans` lists lineage rows whose parent is gone (recycle-aware). `kill` by PID or name (`confirm:true` required); `tree:true` kills descendants leaves-first; `startTime` guards against PID reuse. Data path: WMI bulk query → CIM datetime parse → pure lineage classifier. |
 | `ProcessInspect` | Deep per-process detail: parent PID, command line, start time, loaded modules |
-| `StartProcess` | Start a detached process; returns the PID |
+| `StartProcess` | `(string command, string? args_json=null, string? cwd=null, bool use_shell_execute=false)` — `command` alone keeps the old whole-command-line split; with `args_json` (a JSON array of strings, parsed by `ArgvJson`) it is the executable only and the items go to `ArgumentList` verbatim. A `cwd` that does not exist is a `DirectoryNotFoundException` raised before anything is spawned. Returns `{pid, executable, args, cwd}` |
 | `Service` | List/status/start/stop/restart Windows services |
 | `ScheduledTask` | List/get/run/create/delete scheduled tasks |
 | `EventLog` | Query the Windows Event Log |
@@ -384,8 +385,8 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IServiceControlService` | `ListAsync`, `GetStatusAsync`, `StartAsync`, `StopAsync`, `RestartAsync` |
 | `IEventLogService` | `QueryAsync` |
 | `ITaskSchedulerService` | `ListAsync`, `ListDetailedAsync`, `GetAsync`, `CreateAsync`, `DeleteAsync`, `RunAsync` |
-| `IProcessService` | `ListAsync`, `InspectAsync`, `StartDetachedAsync`, `KillAsync`, `ListLineageAsync`, `GroupByRootAsync`, `KillGuardedAsync`, `KillTreeAsync` |
-| `IWindowService` | `ExecuteAsync(action, title)`, `SwitchToAsync(title)`, `LaunchAsync(app)`, `EnumerateMonitorsAsync`, `ListAsync(includeMinimized, includeHidden)` → `WindowInfo[]`, `GetActiveAsync()` → `WindowInfo?` |
+| `IProcessService` | `ListAsync`, `InspectAsync`, `StartDetachedAsync(command)`, `StartDetachedAsync(ProcessStart)`, `KillAsync`, `ListLineageAsync`, `GroupByRootAsync`, `KillGuardedAsync`, `KillTreeAsync` |
+| `IWindowService` | `ExecuteAsync(action, title, hwnd?)` → `WindowAction`, `BringToFrontAsync(title?, hwnd?)` → `ForegroundResult` (replaced `SwitchToAsync(title)` → `bool` in B-10), `LaunchAsync(app)`, `EnumerateMonitorsAsync`, `ListAsync(includeMinimized, includeHidden)` → `WindowInfo[]`, `GetActiveAsync()` → `WindowInfo?` |
 | `IVirtualDesktopService` | `ListAsync()` → `VirtualDesktopInfo[]`, `GetCurrentAsync()` → `VirtualDesktopInfo?`, `GetWindowDesktopIdAsync(hwnd)` → `string?`, `IsWindowOnCurrentDesktopAsync(hwnd)` → `bool?` — read-only (phase 1); an unavailable registry key or COM object is an empty array / null, never a throw |
 | `IWmiService` | `QueryAsync(className, properties?, where?)` → rows |
 | `IStorageService` | `GetHealthAsync(driveLetter?, includeUsage, timeoutSeconds)` → `StorageHealthReport` |
@@ -419,8 +420,8 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 21 f
 | `InputDtos.cs` | `ClickResult`, `DragResult`, `TypeResult`, `CursorPosition`, `MouseButton` (enum) |
 | `ScreenDtos.cs` | `ScreenRegion`, `CaptureOptions` (trailing `Annotations`/`Grid`/`Profile`/`Backend`), `AnnotationBox`, `GridSpec`, `ScreenshotResult` (trailing `AnnotationsDrawn`/`Stages`/`Backend`), `StageTiming`, `ScreenshotOptions` (`Scale`, `Flash`, `Profile`, `Backend`), `ImageFormat` (enum) |
 | `UIAutomationDtos.cs` | `ElementInfo` (trailing `Scroll`), `Bounds`, `ScrollInfo`, `ElementTree` (trailing `Truncated`/`ElementLimit`, omitted from JSON when default), `FindElementResult`, `FindKind` (enum), `FindScope` (enum), `TableData`, `InteractResult`, `AssertResult`, `SnapshotScope` (enum), `SnapshotRequest` (trailing `UseDom`), `UiTreeOptions` (`MaxElements`, `Profile`), `SnapshotElement`, `SnapshotScrollable`, `SnapshotPage`, `SnapshotResult` (trailing `Stages`/`Pages`, both omitted from JSON when null) |
-| `WindowDtos.cs` | `WindowAction`, `MonitorInfo`, `WindowInfo` (trailing `DesktopId`), `WindowProbe`, `WindowState` (enum, serialised by name), `VirtualDesktopInfo` |
-| `ProcessDtos.cs` | `ProcessDto`, `ProcessDetailDto`, `ModuleInfo`, `ProcessLineageDto`, `ProcessGroupDto` |
+| `WindowDtos.cs` | `WindowAction` (trailing `MatchStrategy`/`Score`/`Hwnd`), `MonitorInfo` (trailing `WorkArea`/`Orientation`/`EffectiveDpi`/`Scale`, all defaulted), `ForegroundResult`, `WindowInfo` (trailing `DesktopId`), `WindowProbe`, `WindowState` (enum, serialised by name), `VirtualDesktopInfo` |
+| `ProcessDtos.cs` | `ProcessDto`, `ProcessStart`, `ProcessDetailDto`, `ModuleInfo`, `ProcessLineageDto`, `ProcessGroupDto` |
 | `PowerShellDtos.cs` | `PSResult` (success, stdout, stderr, exit code, parsed errors) |
 | `JobDtos.cs` | `JobInfo`, `JobOutput` |
 | `FileSystemDtos.cs` | `FileInfoDto`, `FileSearchHit`, `AlternateStreamInfo`, `FileStreamsDto`, `RegistryValueDto`, `ServiceDto`, `ScheduledTaskDto`, `ScheduledTaskDetailDto`, `EventLogEntryDto` |
@@ -527,6 +528,13 @@ Two frame sources (GDI or Windows.Graphics.Capture) + **SkiaSharp** downscale, a
 - Returns `ScreenshotResult(Bytes, Width, Height, Format, OriginalWidth, OriginalHeight, CoordinateScale, CursorDrawn, AnnotationsDrawn, Stages, Backend)`; the `screenshot` tool turns that into an image content block plus a metadata text block (`output="file"` writes to `%TEMP%\WindowsMcp` and returns the path instead)
 - Which rect to capture is the tool's decision (`RegionMath` over `IWindowService.EnumerateMonitorsAsync`); the service captures whatever rect it is handed
 
+### `WindowService` — matching, the foreground ladder, monitor detail
+
+B-10/B-12 — the window verbs, with every decision pushed into a pure helper:
+- `ExecuteAsync(action, title, hwnd?)` and `BringToFrontAsync(title?, hwnd?)` both resolve their target through `WindowMatcher.Match` over the A-1 inventory (`ListAsync(includeMinimized:true, includeHidden:false)`), so a partial title acts on the window it names and `FindWindow` is gone from both paths. `ExecuteAsync` validates the verb before it reads the inventory and reports `Success:true` for the window it acted on — a title that matches nothing throws instead of returning `Success:false`
+- `BringToFrontAsync` hands the match to `ForegroundLadder.Bring` with an `IForegroundNative` (`Win32ForegroundNative` in production, a recording fake in the tests), so which rung is tried and what is reported is unit-testable with no desktop
+- `EnumerateMonitorsAsync` reads `MONITORINFOEXW` (the same header plus the device name `EnumDisplaySettings` needs), so each `MonitorInfo` now carries `WorkArea` from `rcWork`, `Orientation` from the current display mode's `dmDisplayOrientation` × 90, `EffectiveDpi` from `GetDpiForMonitor(MDT_EFFECTIVE_DPI)` and `Scale` = `EffectiveDpi / 96.0`. Both extra reads are guarded and fall back to `96` / `0` rather than dropping the monitor, and `Index` is still the position in the returned array so `screenshot`/`ocr` `display` selection is unaffected
+
 ### `VirtualDesktopService`
 
 A-12 phase 1 — read-only virtual-desktop facts, from the registry through `IRegistryService` and from the documented `IVirtualDesktopManager` (declared in vtable order per the COM rule):
@@ -541,7 +549,7 @@ A-14 — the post-capture glow, and the only signal a person at the target machi
 - `Show(rect, duration)` hides any glow already up and replaces it; `Hide()` is idempotent and is called before **every** capture, whatever `--flash` says, so the glow can never be in a picture. The thread only starts on the first `Show`, so an off switch costs nothing
 - Nothing here throws: with no interactive window station (Task Scheduler, session 0) every member is a silent no-op and `IsVisible` stays false — which is why the tool reports `flash` from `IsVisible` rather than from the switch
 
-### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `Annotator`, `FlashGlow`, `UiText`, `WindowFilter`, `VirtualDesktopRegistry`)
+### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `Annotator`, `FlashGlow`, `UiText`, `WindowFilter`, `VirtualDesktopRegistry`, `FuzzyMatch`, `WindowMatcher`, `ForegroundLadder`, `ArgvJson`)
 
 `internal static` classes in `Services/` with no Win32, no screen and no UIA dependency, so every
 rule is unit-tested headless:
@@ -552,6 +560,10 @@ rule is unit-tested headless:
 - `Annotator` — A-6's drawing core (SkiaSharp only, no screen): a twelve-colour opaque `Palette` indexed by list position via `ColorFor`, so a colour always means the same label even when an off-image box is skipped; `ToImage` maps virtual-desktop `Bounds` to image pixels (subtract the captured origin, divide by the coordinate scale, round half **away from zero**, widen a sub-pixel box to 1 px, clip — null when nothing is in the picture); `ChipRect` places the label chip just above the box's top-left, inside the box when there is no room, never off the image; `UseDarkText` picks black or white by luminance; `Draw` paints the grid first, then each box as a 2 px stroke plus a filled chip, and returns how many were drawn. Grid lines are translucent dark grey at every interior division, captioned with the **virtual-desktop** coordinate, not the image pixel
 - `FlashGlow` — A-14's glow as pixels: `WindowRect` inflates the captured rect by the 10 px band, `Render` paints an orange band fading outward with the captured area left fully transparent, so the picture underneath is untouched
 - `VirtualDesktopRegistry` — A-12's core over the two Explorer registry blobs: `Parse(ids, current, nameOf)` yields one `VirtualDesktopInfo` per complete 16-byte GUID in registry order (a trailing partial GUID is ignored), flags the one `current` names, and falls back to `Desktop N` when no name is stored; `Id` is the wire form (lower-case, dashed, no braces) and `GuidKey` the registry subkey form (upper-case, braced)
+- `FuzzyMatch` — B-10's three `thefuzz` scorers, in-repo and package-free: `Ratio` (`round(200 × LCS / (|a| + |b|))`, away from zero), `PartialRatio` (the best `Ratio` of the shorter string against every same-length window of the longer) and `TokenSetRatio` (lower-case, split on every non-alphanumeric run, best of the three shared/own token comparisons). Every score is 0–100 and case-insensitive; two empty strings score 100, one empty against a non-empty 0
+- `WindowMatcher.Match(inventory, title?, hwnd?)` — the single title-to-window resolver for `switch_to_window`, `focus` and `window(action:…)`: an `hwnd` wins and never fuzzes, else exact (ordinal, ignoring case) → substring → fuzzy (`max(PartialRatio, TokenSetRatio) >= 70`), ties inside one strategy going to the lowest `ZOrder` (the frontmost). Minimised windows are candidates. Neither argument is an `ArgumentException`; nothing matched is a `KeyNotFoundException` listing up to 15 open titles and the nearest score. Deliberately **not** `UIAutomationService.MatchWindows`, which stays exact-then-substring — a snapshot scope must not fuzz
+- `ForegroundLadder.Bring(match, native)` — restore if `IsIconic`, then `SetForegroundWindow`, then `AttachThreadInput` + `BringWindowToTop` + `SetForegroundWindow` + detach (the whole rung is skipped when the attach is refused, the usual elevated-target case), then the ALT nudge. `GetForegroundWindow` is re-read after every rung and is the only source of `ForegroundResult.Success`/`Strategy`; `SetForegroundWindow`'s own return value is never consulted. The Win32 sits behind `IForegroundNative`/`Win32ForegroundNative`, so the ladder is headless-testable
+- `ArgvJson.Parse(args_json)` — B-11: null or blank → null (the command keeps its whole-command-line meaning); a JSON array of strings → its items verbatim (an empty array still means argv mode); anything else — an object, a bare string, an array holding a non-string, unparseable text — is an `ArgumentException` naming `args_json` and the offending item
 - `UiText.Sanitize` — strips Private Use Area code points, replaces lone UTF-16 surrogates with U+FFFD, drops C0/C1 controls except tab/LF/CR, trims; returns the same instance when nothing needed changing
 - `WindowFilter` — A-1's judgement over the `WindowProbe` records `WindowService` gathers, so every rule is provable on hand-written probes with no desktop attached. `Keep` drops a window that is not visible, a `WS_EX_TOOLWINDOW` without `WS_EX_APPWINDOW`, a DWM-cloaked one (UWP ghosts, other virtual desktops), a zero-area one, the shell chrome classes (`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`, `Progman`, `WorkerW`, `IME`, `MSCTFIME UI`), an untitled one unless `includeHidden` (the title is judged **after** `UiText.Sanitize`) and a minimized one unless `includeMinimized`; `StateOf` reads `Minimized` before `Maximized` (a minimized window keeps `WS_MAXIMIZE`); `IsBrowser` matches `chrome, msedge, firefox, brave, opera, vivaldi` with or without `.exe`; `Build` projects the survivors onto `WindowInfo`, renumbering `ZOrder` from 0 and taking `MonitorIndex` from the window's centre via `CursorMath.MonitorIndexOf`; `ActiveOf` picks the entry flagged `IsActive`, so `active` reports the list's real `ZOrder`
 

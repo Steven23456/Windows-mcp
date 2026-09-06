@@ -2,6 +2,15 @@ namespace WindowsMcp.Abstractions.Models;
 
 public record ProcessDto(int Pid, string Name, string? Path, long MemoryMb);
 
+/// <summary>
+/// B-11: what to start. <paramref name="Command"/> is the executable — the whole command line
+/// (split on the first space, quoted-exe aware) when <paramref name="Args"/> is null, the
+/// executable path and nothing else when it is not. <paramref name="Args"/> becomes
+/// <c>ProcessStartInfo.ArgumentList</c> verbatim: no quoting, no splitting, no escaping.
+/// <paramref name="Cwd"/> must exist when given.
+/// </summary>
+public record ProcessStart(string Command, string[]? Args, string? Cwd, bool UseShellExecute);
+
 /// <summary>A DLL/module loaded into a process.</summary>
 public record ModuleInfo(string Name, string? Path);
 

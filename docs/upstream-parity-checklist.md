@@ -86,14 +86,14 @@ function names are the stable anchor.
 | B-2 | `drag`: duration / intermediate motion / from-cursor | P2 | S | D-3 | ☐ |
 | B-3 | `scroll` at current cursor or element | P2 | S | — | ☐ |
 | B-4 | `click` by element id; `clicks=0` hover | P2 | S | D-2 | ☐ |
-| B-5 | Plain `wait` tool | P1 | S | — | ☐ |
+| B-5 | Plain `wait` tool | P1 | S | [B-5](design/B-5-wait.md) | ☑ |
 | B-6 | `wait_for` conditions + window filter | P2 | M | A-1, A-2 | ☐ |
 | B-7 | `multi_select` / `multi_edit` batch tools | P2 | S–M | B-1 | ☐ |
 | B-8 | Launch by Start Menu name (fuzzy) + wait for window | P1 | M | A-1 | ☐ |
 | B-9 | Window resize / move | P2 | S | — | ☐ |
-| B-10 | Fuzzy window match + robust bring-to-foreground | P1 | M | A-1 | ☐ |
-| B-11 | `start_process` with argv list + cwd | P2 | S | — | ☐ |
-| B-12 | `multi_monitor`: work area, orientation, DPI, scale | P2 | S | — | ☐ |
+| B-10 | Fuzzy window match + robust bring-to-foreground | P1 | M | A-1 · [B-10](design/B-10-window-matching.md) | ☑ |
+| B-11 | `start_process` with argv list + cwd | P2 | S | [B-11](design/B-11-start-process-argv.md) | ☑ |
+| B-12 | `multi_monitor`: work area, orientation, DPI, scale | P2 | S | [B-12](design/B-12-monitor-detail.md) | ☑ |
 | C-1 | File tools: offset/limit, append, overwrite, recursive, pattern | P2 | M | — | ☐ |
 | C-2 | Registry delete + subkey listing on the tool surface | P2 | S | — | ☐ |
 | C-3 | Process list CPU %, sort, limit; graceful kill | P2 | M | — | ☐ |
@@ -874,12 +874,12 @@ click (D-2).
 `clicks=0` as hover for parity. Mostly falls out of D-2.
 
 ### B-5 — Plain `wait` tool  `P1 · S`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/B-5-wait.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `Wait(duration)` sleeps N seconds (`tools/input.py` ~422). Agents call it
 constantly between launch/click and the next snapshot.
 
-**Ours.** None. Agents fall back to `powershell("Start-Sleep 2")`, which pays a PowerShell
+**Ours (before B-5).** None. Agents fell back to `powershell("Start-Sleep 2")`, which pays a PowerShell
 cold-start (seconds to tens of seconds under Defender — see `CLAUDE.md`) and takes the
 serialization gate.
 
@@ -958,7 +958,7 @@ active window via `MoveWindow`; refuses minimized/maximized windows (`resize_app
 `restore_first:true`; return new bounds.
 
 ### B-10 — Fuzzy window matching and robust bring-to-foreground  `P1 · M`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/B-10-window-matching.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `_find_window_by_name()` (~412) fuzzy-matches (score ≥ 70) over the snapshot's
 window list; `switch_app()` restores from minimized; `bring_window_to_top()` (~574) tries
@@ -966,7 +966,7 @@ window list; `switch_app()` restores from minimized; `bring_window_to_top()` (~5
 `AttachThreadInput` to the target thread (skipped when elevated/Access Denied), retries, and
 reports "Restored … and switched" vs "Switched".
 
-**Ours.** `FindWindow(null, exactTitle)` + a bare `SetForegroundWindow` (`WindowService.cs:51`),
+**Ours (before B-10).** `FindWindow(null, exactTitle)` + a bare `SetForegroundWindow` (`WindowService.cs:51`),
 which Windows refuses when our process is not the foreground process — the common case for an
 MCP server — so `switch_to_window`/`focus` often return `false` for a title that exists.
 
@@ -980,24 +980,24 @@ return `{matchedTitle, score, strategy, restored}`.
 front from behind another app.
 
 ### B-11 — `start_process` with argv list and cwd  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/B-11-start-process-argv.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `App(mode=launch_executable, executable, args=[…], cwd)` validates the exe and cwd
 exist, uses `Popen([...], shell=False)` (no quoting bugs), returns `{pid, executable, args, cwd}`
 (`tools/app.py` `_launch_executable`).
 
-**Ours.** `start_process(command)` — one command-line string, no cwd (`ProcessTools.cs:125`).
+**Ours (before B-11).** `start_process(command)` — one command-line string, no cwd (`ProcessTools.cs:125`).
 
 **Sketch.** Add `args_json` (`string[]`) → `ProcessStartInfo.ArgumentList`, `cwd`,
 `use_shell_execute`; validate paths; keep `command` for backward compatibility.
 
 ### B-12 — `multi_monitor` detail: work area, orientation, DPI, scale  `P2 · S`
-- [ ] Not started
+- [x] Done 2026-09-05 — [design note](design/B-12-monitor-detail.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `DisplayInventory` → index, device, primary, bounds, work_area, resolution,
 orientation, effective_dpi, scale (`tools/display.py`, `uia.DisplayInfo`).
 
-**Ours.** `MonitorInfo(Index, DeviceName, X, Y, Width, Height, IsPrimary)`.
+**Ours (before B-12).** `MonitorInfo(Index, DeviceName, X, Y, Width, Height, IsPrimary)`.
 
 **Sketch.** Extend the record: `WorkArea` (`GetMonitorInfo.rcWork`), `Orientation`
 (`EnumDisplaySettings.dmDisplayOrientation`), `EffectiveDpi` (`GetDpiForMonitor`,

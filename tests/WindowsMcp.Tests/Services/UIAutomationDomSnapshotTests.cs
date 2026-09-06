@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using FlaUI.Core.AutomationElements;
 using FlaUI.UIA3;
 using FluentAssertions;
@@ -225,12 +225,21 @@ public class UIAutomationDomSnapshotIntegrationTests
         snap.ElementCount.Should().BeGreaterThan(0, "and it really was walked");
     }
 
+    /// <summary>
+    /// A window these tests may walk: visible, titled, not a browser - and not one of this test
+    /// process's own. WindowServiceExecuteTests creates a real top-level window and destroys it a
+    /// moment later, and a walk that picked it would fail with "no top-level window matching"
+    /// through no fault of the code under test.
+    /// </summary>
+    private static bool IsWalkable(WindowInfo w)
+        => !w.IsBrowser && w.State != WindowState.Minimized && w.Hwnd != 0 && w.Title.Length > 0
+           && w.Pid != Environment.ProcessId;
+
     /// <summary>Any visible, titled, non-browser window; the caller does not care what is inside it.</summary>
     private static async Task<WindowInfo> FirstNonBrowserWindowAsync()
     {
         var windows = await new WindowService().ListAsync();
-        var target = windows.FirstOrDefault(w =>
-            !w.IsBrowser && w.State != WindowState.Minimized && w.Hwnd != 0 && w.Title.Length > 0);
+        var target = windows.FirstOrDefault(w => IsWalkable(w));
         target.Should().NotBeNull("this session must have at least one visible non-browser window to walk");
         return target!;
     }
@@ -272,8 +281,7 @@ public class UIAutomationDomSnapshotIntegrationTests
     {
         var windows = await new WindowService().ListAsync();
         var candidates = new List<(WindowInfo, AutomationElement)>();
-        foreach (var w in windows.Where(w =>
-                     !w.IsBrowser && w.State != WindowState.Minimized && w.Hwnd != 0 && w.Title.Length > 0))
+        foreach (var w in windows.Where(IsWalkable))
         {
             AutomationElement? root;
             try { root = automation.FromHandle((nint)w.Hwnd); }

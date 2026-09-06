@@ -9,6 +9,17 @@ public interface IProcessService
     Task<ProcessDto[]> ListAsync(string? nameFilter = null, CancellationToken ct = default);
     Task KillAsync(int pid, CancellationToken ct = default);
     Task<int> StartDetachedAsync(string command, CancellationToken ct = default);
+
+    /// <summary>
+    /// B-11: start a process from an explicit spec — argv list, working directory, shell-execute
+    /// flag. <c>StartDetachedAsync(command)</c> is exactly
+    /// <c>StartDetachedAsync(new ProcessStart(command, null, null, false))</c> and keeps its
+    /// first-space / quoted-exe splitting; with <see cref="ProcessStart.Args"/> the command is the
+    /// executable only and the items go to <c>ArgumentList</c> unquoted. A
+    /// <see cref="ProcessStart.Cwd"/> that does not exist is a
+    /// <see cref="DirectoryNotFoundException"/> raised before anything is spawned.
+    /// </summary>
+    Task<int> StartDetachedAsync(ProcessStart spec, CancellationToken ct = default);
     /// <summary>Deep detail for one process: parent PID, command line, start time, loaded modules.</summary>
     Task<ProcessDetailDto> InspectAsync(int pid, CancellationToken ct = default);
     /// <summary>All processes with recycle-aware lineage + signals; optionally only orphans,

@@ -195,23 +195,39 @@ public class WindowServiceTests
 
     // ---- the acting path, through the real service ------------------------------------------
     // WindowTools' minimize/maximize/restore/close route reaches ExecuteAsync, which every tool
-    // test mocks away. These two are the non-mocked sibling: read-only, because FindWindow on a
-    // title that cannot exist returns null and no window is ever touched.
+    // test mocks away. These are the non-mocked sibling: read-only, because a title that cannot
+    // exist is refused by the matcher before a handle is ever produced.
 
     [Theory]
     [InlineData("minimize")]
     [InlineData("maximize")]
     [InlineData("restore")]
     [InlineData("close")]
-    public async Task ExecuteAsync_on_a_title_no_window_has_reports_not_found_and_touches_nothing(string action)
+    public async Task ExecuteAsync_on_a_title_no_window_has_throws_and_touches_nothing(string action)
     {
+        // B-10 replaced the pre-B-10 contract (a WindowAction with Success:false, which read as
+        // "the action ran and failed") with the matcher's refusal: a KeyNotFoundException that
+        // names the title and lists what is open, so the caller can retry against a real window.
         var title = "wmcp-window-" + Guid.NewGuid().ToString("N");
+        var svc = new WindowService();
+        var before = await svc.ListAsync(includeMinimized: true);
 
-        var result = await new WindowService().ExecuteAsync(action, title);
+        var act = () => svc.ExecuteAsync(action, title);
 
-        result.Success.Should().BeFalse("no window has that title, so nothing was acted on");
-        result.Action.Should().Be(action, "the response echoes the action the caller sent");
-        result.Title.Should().Be(title);
+        var message = (await act.Should().ThrowAsync<KeyNotFoundException>(
+            "no window has that title, and B-10 refuses rather than reporting a no-op success"))
+            .Which.Message;
+        message.Should().Contain(title, "the caller is told which title found nothing")
+            .And.Contain("Open windows: ", "and what it could have named instead");
+
+        // Nothing was touched: no ShowWindow, no WM_CLOSE. The witness is the inventory — every
+        // window that is still open is in the state it was in. (Windows that came or went belong
+        // to other test classes' short-lived processes, so the claim is scoped to the survivors,
+        // and the close case is covered on a live desktop by WindowCloseDesktopTests.)
+        var after = (await svc.ListAsync(includeMinimized: true)).ToDictionary(w => w.Hwnd);
+        foreach (var w in before.Where(w => after.ContainsKey(w.Hwnd)))
+            after[w.Hwnd].State.Should().Be(w.State,
+                $"'{w.Title}' was not the target of anything, so '{action}' must not have moved it");
     }
 
     [Theory]
@@ -223,6 +239,34 @@ public class WindowServiceTests
         var act = () => new WindowService().ExecuteAsync("minimize", title);
 
         (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("title");
+    }
+
+    [Theory]
+    [InlineData("bogus")]
+    [InlineData("focus")]        // a real verb of another tool, and not one of this one's four
+    [InlineData("")]
+    public async Task ExecuteAsync_rejects_an_unknown_action_before_it_ever_looks_for_the_window(string action)
+    {
+        // Ordering, and it is observable: the title below matches nothing, so if the inventory
+        // were read first the caller would get the matcher's KeyNotFoundException about a window
+        // instead of being told the action does not exist. Gate, then look up.
+        var act = () => new WindowService().ExecuteAsync(action, "wmcp-window-" + Guid.NewGuid().ToString("N"));
+
+        var message = (await act.Should().ThrowAsync<ArgumentException>()).Which.Message;
+        message.Should().Contain($"'{action}'", "the model needs to see what it sent, quoted so a blank one is visible")
+            .And.Contain("minimize|maximize|restore|close", "and the four verbs that do exist");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_honours_a_cancelled_token()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        var act = () => new WindowService().ExecuteAsync("minimize", "Notepad", null, cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "a cancelled request must not act on a window on its way out");
     }
 
     [Fact]

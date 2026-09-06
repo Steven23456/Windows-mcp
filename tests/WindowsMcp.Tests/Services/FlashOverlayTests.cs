@@ -191,7 +191,7 @@ public class FlashOverlayTests
 /// excluded from headless runs like every other test that draws on someone's desktop.
 /// </summary>
 [Trait("Category", "UIAutomation")]
-[Collection(PointerAndPixelCollection.Name)]
+[Collection(DesktopCollection.Name)]
 public class FlashOverlayDesktopTests
 {
     /// <summary>The captured rect the glow frames; its window rect is exactly (0,0,220,120).</summary>

@@ -11,8 +11,8 @@ namespace WindowsMcp.Tests.Services;
 // whatever window has focus, so a headless or background run must never execute them. The
 // read-only ones (a cursor read, argument validation) stay Integration/Unit.
 // The class moves the real pointer and asserts where it landed, so it is serialised against every
-// other pointer/pixel class (see PointerAndPixelCollection).
-[Collection(PointerAndPixelCollection.Name)]
+// other pointer/pixel class (see DesktopCollection).
+[Collection(DesktopCollection.Name)]
 public class InputServiceTests
 {
     // Recategorized to Integration: SendInput / SetCursorPos fail under the test runner (UIPI

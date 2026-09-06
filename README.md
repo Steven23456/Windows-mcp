@@ -2,7 +2,7 @@
 
 An MCP server for Windows desktop automation, written in C# on the official
 [`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol)
-SDK. See [Tool reference](#tool-reference) for the 65 tools.
+SDK. See [Tool reference](#tool-reference) for the 66 tools.
 
 ## Build
 
@@ -157,11 +157,11 @@ operations. See [`skills/windows/SKILL.md`](skills/windows/SKILL.md).
 
 ## Tool reference
 
-65 tools, grouped:
+66 tools, grouped:
 
 | Category | Tools |
 |---|---|
-| Input | `click`, `drag`, `hover`, `type`, `key`, `shortcut`, `scroll`, `clipboard` |
+| Input | `click`, `drag`, `hover`, `type`, `key`, `shortcut`, `scroll`, `wait`, `clipboard` |
 | Screen | `screenshot`, `ocr` |
 | Window | `window`, `switch_to_window`, `launch`, `focus`, `multi_monitor` |
 | UI Automation | `snapshot`, `get_state`, `find_element`, `get_element`, `get_text`, `assert_element`, `interact_element`, `get_table`, `wait_for` |
@@ -175,6 +175,21 @@ operations. See [`skills/windows/SKILL.md`](skills/windows/SKILL.md).
 | Registry | `registry_get`, `registry_set` |
 | Web | `scrape`, `http_request` |
 | Monitoring | `integrity` (file-integrity tripwire), `fs_changes` (NTFS USN journal), `watch` (live directory watch) |
+
+Name a window by `Title` — matched exact, then substring, then fuzzy (score ≥ 70), so
+`switch_to_window("notepad")` finds `Untitled - Notepad` — or by the `Hwnd` from
+`window(action:"list")`, which wins over a title. `switch_to_window`/`focus` return
+`{Window, MatchStrategy, Score, Restored, Strategy, Success}`: a minimised window is restored
+first, then the tool climbs a `SetForegroundWindow` → `AttachThreadInput` → ALT-nudge ladder and
+re-reads the foreground window after each rung, so `Success` is observed rather than assumed. A
+title that matches nothing is an error listing the open windows.
+
+`wait(seconds)` pauses in-process (more than 0, at most 60) — use it between an action and the
+next `snapshot` instead of a PowerShell sleep; `wait_for` is the conditional wait.
+`start_process(command, args_json?, cwd?, use_shell_execute?)` passes a JSON array of arguments
+verbatim (no quoting) and returns `{pid, executable, args, cwd}`. `multi_monitor` reports each
+monitor's `WorkArea`, `Orientation` (0/90/180/270), `EffectiveDpi` and `Scale` alongside its
+bounds and primary flag.
 
 ## Safety rails
 

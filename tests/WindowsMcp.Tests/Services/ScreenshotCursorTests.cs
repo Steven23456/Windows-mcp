@@ -20,7 +20,7 @@ namespace WindowsMcp.Tests.Services;
 /// </para>
 /// </summary>
 [Trait("Category", "UIAutomation")]
-[Collection(PointerAndPixelCollection.Name)]
+[Collection(DesktopCollection.Name)]
 public class ScreenshotCursorTests
 {
     /// <summary>Full resolution, PNG, lossless — so a byte comparison means what it says.</summary>

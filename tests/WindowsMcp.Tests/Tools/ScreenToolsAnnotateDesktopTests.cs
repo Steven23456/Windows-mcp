@@ -23,6 +23,9 @@ namespace WindowsMcp.Tests.Tools;
 /// <c>Category=UIAutomation</c>: excluded from headless runs.
 /// </summary>
 [Trait("Category", "UIAutomation")]
+// DesktopCollection: it opens a Notepad window through the fixture AND asserts on captured
+// pixels, both halves of that collection's membership rule.
+[Collection(DesktopCollection.Name)]
 public class ScreenToolsAnnotateDesktopTests : IClassFixture<NotepadFixture>
 {
     private readonly NotepadFixture _np;
@@ -70,10 +73,13 @@ public class ScreenToolsAnnotateDesktopTests : IClassFixture<NotepadFixture>
         return count;
     }
 
-    private static async Task<string> NotepadRegionAsync()
+    private async Task<string> NotepadRegionAsync()
     {
-        var window = (await new WindowService().ListAsync())
-            .FirstOrDefault(w => w.Title.Contains("Notepad", StringComparison.OrdinalIgnoreCase))
+        // Prefer the window the fixture opened: the title search finds an arbitrary Notepad
+        // window on a desktop that has more than one, and the region would frame the wrong app.
+        var listed = await new WindowService().ListAsync();
+        var window = listed.FirstOrDefault(w => w.Hwnd == _np.Hwnd)
+            ?? listed.FirstOrDefault(w => w.Title.Contains("Notepad", StringComparison.OrdinalIgnoreCase))
             ?? throw new Xunit.Sdk.XunitException("Notepad has no listed window");
         var b = window.Bounds;
         return $"{b.X},{b.Y},{b.Width},{b.Height}";

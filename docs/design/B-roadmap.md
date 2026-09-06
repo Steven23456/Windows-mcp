@@ -37,7 +37,7 @@ Nothing in section C or S is needed; A-1, A-2 and D-2/D-3/D-5 are already in.
 | C7 | **No PowerShell in B-8.** The app catalog is built from the two Start Menu folders' `.lnk` files (`ShortcutResolver`, already here) and from packaged apps through the WinRT `PackageManager.FindPackagesForUser("")` → `Package.GetAppListEntriesAsync()` (display name + AUMID, in the `net10.0-windows10.0.19041.0` projection, no new package). Launch: a `.lnk`/path via `ShellExecute` (today's `LaunchAsync`); an AUMID via `IApplicationActivationManager.ActivateApplication` (one COM interface, vtable rule, returns the **PID**). The catalog is cached in-process for 5 min and refreshed on a miss. | `Get-StartApps` costs a PowerShell cold start (seconds to tens of seconds under Defender, `CLAUDE.md`) and takes the serialization gate on every `launch`. The WinRT route is in-process, returns the PID the window wait needs, and is unit-testable behind `IAppCatalogService`. |
 | C8 | **Long text is pasted, short text is typed**: a pure `TypePlanner` decides — `paste` when `text.Length ≥ 200` and it contains no control characters other than `\n`/`\t`; otherwise per-key with `\n` → Enter, `\t` → Tab and a 5 ms pace (`pace_ms` overridable). Paste goes through `IClipboardService` and **restores the previous clipboard text** afterwards (best effort; a non-text clipboard is not restored and the response says `clipboardRestored:false`). The response always says `method: keys \| paste`. `interact_element(type)` and B-7's `multi_edit` call the same path so `clear`/`caret`/`press_enter` mean the same thing everywhere (D-2 deferred `clear` to here for exactly this reason). | `TextEntry` bursts drop keys in some apps and 5 000 characters at 5 ms is 25 s; a paste is one keystroke. Restoring the clipboard is what makes it safe to do behind the user's back. |
 | C9 | **Every native call new to B is declared in `NativeMethods.txt`** (`AttachThreadInput`, `BringWindowToTop`, `AllowSetForegroundWindow`, `GetWindowThreadProcessId`, `GetCurrentThreadId`, `keybd_event`/`SendInput` for the ALT nudge, `GetDpiForMonitor`, `EnumDisplaySettings`, `MonitorFromWindow`, `GetWindowPlacement`), except the two COM interfaces (`IApplicationActivationManager`; `IShellFolder` only if the WinRT route falls short) which follow the vtable-gap rule. `SetWindowPos`, `ShowWindow`, `IsIconic`, `GetMonitorInfo` are already declared. | Repo convention (A-roadmap C9). |
-| C10 | **Injected input is `UIAutomation`-category, always** (the phase-4 rule): any test that clicks, types, drags, scrolls, moves the pointer or changes the foreground window is `UIAutomation` and joins the `PointerAndPixelCollection` when it also reads pixels or the pointer. Pure planners (`TypePlanner`, `ElementTarget`, `WindowMatcher`, `FuzzyMatch`, `DragPath`, the app-catalog matcher, `wait_for`'s condition evaluator) are `Unit`; the wiring gets one `UIAutomation` test each on the Notepad fixture. | Section B is almost entirely injection; the only way it is testable at all is to keep the decision logic pure, which is also what makes the GREEN bite checks mean something. |
+| C10 | **Injected input is `UIAutomation`-category, always** (the phase-4 rule): any test that clicks, types, drags, scrolls, moves the pointer or changes the foreground window is `UIAutomation` and joins the `DesktopCollection` when it reads pixels, moves the pointer, or opens a Notepad window (modern Notepad is one process, and the fixture identifies its window by an inventory diff, so two fixtures must never launch at once). Pure planners (`TypePlanner`, `ElementTarget`, `WindowMatcher`, `FuzzyMatch`, `DragPath`, the app-catalog matcher, `wait_for`'s condition evaluator) are `Unit`; the wiring gets one `UIAutomation` test each on the Notepad fixture. | Section B is almost entirely injection; the only way it is testable at all is to keep the decision logic pure, which is also what makes the GREEN bite checks mean something. |
 | C11 | **Foreground changes are reported, not assumed**: every tool that brings a window forward (`switch_to_window`, `focus`, `launch`, B-9, B-7's per-entry clicks via B-1's target click) re-reads `GetForegroundWindow` after the attempt and returns `{success, strategy, restored}` with `strategy` naming which step worked (`SetForegroundWindow` \| `AttachThreadInput` \| `AltNudge`), `false` when none did. | Windows refuses `SetForegroundWindow` to a background process and reports it truthfully; the tool should too (A-7's "outcome, not request" rule). |
 | C12 | **One PR per phase, one version bump per phase**, CHANGELOG bullet per item under `[Unreleased]`, `docs-agent` before each PR. Phase 1 → 0.8.x, phase 2 → 0.9.0 (tool signatures change: optional coordinates, `wait_for` result), phase 3 → 0.9.x, phase 4 → 0.10.0 (two new tools). The release cut stays the user's `/version-bump`. | Matches how A landed. Behaviour changes get a minor bump. |
 
@@ -86,6 +86,7 @@ checklist unless corrected.
   cancellation cuts it short with `OperationCanceledException`; the tool is discovered over
   HTTP with the two annotations; SKILL.md's playbook no longer says `Start-Sleep`.
 - **Done when.** `wait(1.5)` returns after ~1.5 s with no PowerShell process spawned.
+- **Shipped as** ([note](B-5-wait.md)): as planned.
 
 #### B-10 — Fuzzy window matching and robust bring-to-foreground  `P1 · M · ~2 h`
 
@@ -113,6 +114,13 @@ checklist unless corrected.
   minimised Notepad is restored and `Restored:true`.
 - **Done when.** `switch_to_window("notepad")` brings "Untitled - Notepad" to the front from
   behind another app, and says which strategy did it.
+- **Shipped as** ([note](B-10-window-matching.md)): as planned, except that a refused
+  `AttachThreadInput` (an elevated target) is skipped silently — `ForegroundResult` carries no
+  note field, so a refused attach and a rung that ran and failed both show as the ladder moving
+  on to the nudge. `AllowSetForegroundWindow(-1)` was not added (it only helps when our process
+  already holds the foreground, which rung 1 covers). The desktop tests forced a repair of
+  `NotepadFixture`: modern Notepad is one process hosting every window, so the fixture now
+  closes the window it opened rather than the process it launched.
 
 #### B-12 — `multi_monitor` detail  `P2 · S · ~1 h`
 
@@ -126,6 +134,8 @@ checklist unless corrected.
   this session every monitor's DPI ≥ 96 and the primary's work area is the `SPI_GETWORKAREA`
   rect; the JSON over HTTP carries the four fields.
 - **Done when.** `multi_monitor` reports a 150 % display as `EffectiveDpi:144, Scale:1.5`.
+- **Shipped as** ([note](B-12-monitor-detail.md)): as planned; `WorkArea` is `Bounds?` (null
+  when Windows will not say, never a zero rect).
 
 #### B-11 — `start_process` with argv list and cwd  `P2 · S · ~1 h`
 
@@ -140,6 +150,9 @@ checklist unless corrected.
   `command`-only call unchanged (existing tests).
 - **Done when.** `start_process("notepad.exe", args_json:["C:\\path with space\\a.txt"])` opens
   that file.
+- **Shipped as** ([note](B-11-start-process-argv.md)): as planned; the result is
+  `{pid, executable, args, cwd}` for both call shapes (the old `"started (pid=N)"` string is
+  gone), and the raw-JSON-array binding of `args_json` is left for the live e2e sweep.
 
 ### Phase 2 — input verbs
 
@@ -317,7 +330,7 @@ parallel branches save ~½ day.
   `wait_for` line is updated in the same PR and the old shape is not kept.
 - **Injected input in tests** lands on whatever has focus (phase-4 lesson): every `UIAutomation`
   test in B targets the Notepad fixture by id or title, never "the focused window", and the
-  pointer-moving ones join the `PointerAndPixelCollection`.
+  pointer-moving ones join the `DesktopCollection`.
 
 ## 7. Decisions taken before phase 1 (2026-09-05)
 

@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Reflection;
 using System.Text.Json;
 using FluentAssertions;
@@ -17,7 +17,7 @@ public class WindowToolsTests
     public async Task Window_dispatches_to_service_with_correct_action_and_title()
     {
         var mock = new Mock<IWindowService>();
-        mock.Setup(s => s.ExecuteAsync("minimize", "Notepad", It.IsAny<CancellationToken>()))
+        mock.Setup(s => s.ExecuteAsync("minimize", "Notepad", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new WindowAction("minimize", "Notepad", true));
         var tools = NewTools(mock.Object);
 
@@ -112,7 +112,7 @@ public class WindowToolsTests
         second.GetProperty("ZOrder").GetInt32().Should().Be(1);
 
         mock.Verify(s => s.ListAsync(true, false, It.IsAny<CancellationToken>()), Times.Once);
-        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
@@ -149,6 +149,29 @@ public class WindowToolsTests
 
     [Theory]
     [InlineData("list")]
+    [InlineData("active")]
+    [InlineData("desktops")]
+    public async Task Window_ignores_an_hwnd_on_the_reading_actions(string action)
+    {
+        // The description says list/active/desktops ignore 'title' and 'hwnd'. An hwnd that
+        // quietly turned a read into an act would be the worst kind of surprise.
+        var mock = new Mock<IWindowService>();
+        mock.Setup(s => s.ListAsync(It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Info()]);
+        mock.Setup(s => s.GetActiveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Info());
+        var desktops = new Mock<IVirtualDesktopService>();
+        desktops.Setup(d => d.ListAsync(It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        var tools = new WindowTools(mock.Object, desktops.Object);
+
+        await tools.Window(action, hwnd: 0x99L);
+
+        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "an hwnd is a target for the acting actions only");
+        mock.Verify(s => s.BringToFrontAsync(It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("list")]
     [InlineData("LIST")]
     [InlineData("List")]
     public async Task Window_list_is_case_insensitive_and_ignores_a_title(string action)
@@ -162,7 +185,7 @@ public class WindowToolsTests
 
         root.GetArrayLength().Should().Be(1);
         mock.Verify(s => s.ListAsync(true, false, It.IsAny<CancellationToken>()), Times.Once);
-        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never,
+        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never,
             "list needs no title, so a title given with it is ignored, not acted on");
     }
 
@@ -185,7 +208,7 @@ public class WindowToolsTests
         root.GetProperty("IsBrowser").GetBoolean().Should().BeTrue();
         root.GetProperty("State").GetString().Should().Be("Maximized");
         mock.Verify(s => s.GetActiveAsync(It.IsAny<CancellationToken>()), Times.Once);
-        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never);
         mock.Verify(s => s.ListAsync(It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -216,8 +239,10 @@ public class WindowToolsTests
 
         var act = () => tools.Window(action);
 
-        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("title");
-        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never,
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("title").And.Contain("hwnd",
+                "B-10: either one names the window, so the refusal has to mention both");
+        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never,
             "the missing argument is caught before the service is asked to act on nothing");
     }
 
@@ -232,7 +257,7 @@ public class WindowToolsTests
         var act = () => tools.Window("minimize", title);
 
         (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("title");
-        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
@@ -253,7 +278,7 @@ public class WindowToolsTests
         ex.Message.Should().Contain(action, "the model needs to see what it sent")
             .And.Contain("list|active|desktops|minimize|maximize|restore|close",
                 "every action belongs in the error the model reads when it guesses wrong — A-12 added 'desktops'");
-        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never,
+        mock.Verify(s => s.ExecuteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<CancellationToken>()), Times.Never,
             "an unknown action is rejected by the tool, not turned into a no-op success by the service");
     }
 
@@ -419,14 +444,14 @@ public class WindowToolsTests
     {
         // The response echoes the action the caller sent, and ExecuteAsync lowercases internally.
         var mock = new Mock<IWindowService>();
-        mock.Setup(s => s.ExecuteAsync("MINIMIZE", "Notepad", It.IsAny<CancellationToken>()))
+        mock.Setup(s => s.ExecuteAsync("MINIMIZE", "Notepad", null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new WindowAction("MINIMIZE", "Notepad", true));
         var tools = NewTools(mock.Object);
 
         var json = await tools.Window("MINIMIZE", "Notepad");
 
         Parse(json).GetProperty("Action").GetString().Should().Be("MINIMIZE");
-        mock.Verify(s => s.ExecuteAsync("MINIMIZE", "Notepad", It.IsAny<CancellationToken>()), Times.Once);
+        mock.Verify(s => s.ExecuteAsync("MINIMIZE", "Notepad", null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ---- the rest of the tool surface (pre-existing, unchanged by A-1) -----------------------
@@ -434,32 +459,209 @@ public class WindowToolsTests
     // rather than left as the only uncovered methods in a changed file. Behaviour is pinned as
     // it stands today — nothing about them was altered by A-1.
 
+    // ---- B-10: switch_to_window / focus return the whole ForegroundResult -------------------
+    // Both tools are the same call with a different name (the alias predates B-10), so every
+    // requirement below is a [Theory] over the two of them: a fix applied to one and forgotten
+    // on the other is a failure, not a coincidence.
+
+    private const string SwitchVerb = "switch_to_window";
+    private const string FocusVerb = "focus";
+
+    private static Func<WindowTools, string?, long?, Task<string>> Verb(string verb) => verb switch
+    {
+        SwitchVerb => (tools, title, hwnd) => tools.SwitchToWindow(title, hwnd),
+        FocusVerb => (tools, title, hwnd) => tools.Focus(title, hwnd),
+        _ => throw new ArgumentOutOfRangeException(nameof(verb)),
+    };
+
+    private static ForegroundResult Fg(
+        WindowInfo? window = null,
+        string matchStrategy = "substring",
+        int score = 100,
+        bool restored = false,
+        string? strategy = "SetForegroundWindow",
+        bool success = true)
+        => new(window ?? Info(), matchStrategy, score, restored, strategy, success);
+
     [Theory]
-    [InlineData(true, "switched to 'Notepad'")]
-    [InlineData(false, "window 'Notepad' not found")]
-    public async Task SwitchToWindow_reports_whether_the_window_was_found(bool found, string expected)
+    [InlineData(SwitchVerb)]
+    [InlineData(FocusVerb)]
+    public async Task SwitchToWindow_and_focus_serialise_every_field_of_the_foreground_result(string verb)
     {
         var mock = new Mock<IWindowService>();
-        mock.Setup(s => s.SwitchToAsync("Notepad", It.IsAny<CancellationToken>())).ReturnsAsync(found);
+        mock.Setup(s => s.BringToFrontAsync("notepad", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fg(matchStrategy: "fuzzy", score: 86, restored: true, strategy: "AttachThreadInput"));
 
-        var text = await NewTools(mock.Object).SwitchToWindow("Notepad");
+        var root = Parse(await Verb(verb)(NewTools(mock.Object), "notepad", null));
 
-        text.Should().Be(expected);
-        mock.Verify(s => s.SwitchToAsync("Notepad", It.IsAny<CancellationToken>()), Times.Once);
+        root.GetProperty("Window").GetProperty("Title").GetString().Should().Be("Untitled - Notepad",
+            "the model needs the title of the window that actually matched, not the string it sent");
+        root.GetProperty("Window").GetProperty("Hwnd").GetInt64().Should().Be(0x1234);
+        root.GetProperty("MatchStrategy").GetString().Should().Be("fuzzy");
+        root.GetProperty("Score").GetInt32().Should().Be(86);
+        root.GetProperty("Restored").GetBoolean().Should().BeTrue();
+        root.GetProperty("Strategy").GetString().Should().Be("AttachThreadInput");
+        root.GetProperty("Success").GetBoolean().Should().BeTrue();
+        mock.Verify(s => s.BringToFrontAsync("notepad", null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
-    [InlineData(true, "focused 'Notepad'")]
-    [InlineData(false, "window 'Notepad' not found")]
-    public async Task Focus_is_switch_to_window_with_its_own_wording(bool found, string expected)
+    [InlineData(SwitchVerb)]
+    [InlineData(FocusVerb)]
+    public async Task SwitchToWindow_and_focus_pass_an_hwnd_through_with_no_title(string verb)
     {
         var mock = new Mock<IWindowService>();
-        mock.Setup(s => s.SwitchToAsync("Notepad", It.IsAny<CancellationToken>())).ReturnsAsync(found);
+        mock.Setup(s => s.BringToFrontAsync(null, 0x1234L, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fg(matchStrategy: "hwnd"));
 
-        var text = await NewTools(mock.Object).Focus("Notepad");
+        var root = Parse(await Verb(verb)(NewTools(mock.Object), null, 0x1234L));
 
-        text.Should().Be(expected, "the alias reports 'focused', not 'switched to'");
-        mock.Verify(s => s.SwitchToAsync("Notepad", It.IsAny<CancellationToken>()), Times.Once);
+        root.GetProperty("MatchStrategy").GetString().Should().Be("hwnd");
+        mock.Verify(s => s.BringToFrontAsync(null, 0x1234L, It.IsAny<CancellationToken>()), Times.Once,
+            "an hwnd is a complete target: no title has to be invented for it");
+    }
+
+    [Theory]
+    [InlineData(SwitchVerb, null)]
+    [InlineData(SwitchVerb, "")]
+    [InlineData(SwitchVerb, "   ")]
+    [InlineData(FocusVerb, null)]
+    [InlineData(FocusVerb, "")]
+    [InlineData(FocusVerb, "   ")]
+    public async Task SwitchToWindow_and_focus_reject_a_call_with_neither_title_nor_hwnd(string verb, string? title)
+    {
+        var mock = new Mock<IWindowService>();
+
+        var act = () => Verb(verb)(NewTools(mock.Object), title, null);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("title").And.Contain("hwnd",
+                "the model is told both ways to name a window, not just the one it left out");
+        mock.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(SwitchVerb)]
+    [InlineData(FocusVerb)]
+    public async Task SwitchToWindow_and_focus_report_a_refused_foreground_change_instead_of_throwing(string verb)
+    {
+        // Roadmap C11: Windows refusing every step is an outcome the agent acts on, not an error.
+        var mock = new Mock<IWindowService>();
+        mock.Setup(s => s.BringToFrontAsync("notepad", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Fg(strategy: null, success: false));
+
+        var root = Parse(await Verb(verb)(NewTools(mock.Object), "notepad", null));
+
+        root.GetProperty("Success").GetBoolean().Should().BeFalse();
+        root.GetProperty("Strategy").ValueKind.Should().Be(JsonValueKind.Null,
+            "no step worked, so no step is named");
+    }
+
+    [Theory]
+    [InlineData(nameof(WindowTools.SwitchToWindow))]
+    [InlineData(nameof(WindowTools.Focus))]
+    public void SwitchToWindow_and_focus_describe_the_matching_ladder_and_the_result(string method)
+    {
+        var description = typeof(WindowTools).GetMethod(method)!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should()
+            .Contain("exact", "the model has to know the title is not matched exactly only")
+            .And.Contain("substring")
+            .And.Contain("fuzzy")
+            .And.Contain("hwnd", "the second way to name a window belongs in the description")
+            .And.Contain("Strategy", "the field that says which step worked is only useful if it is advertised")
+            .And.NotContain("using SetForegroundWindow",
+                "SetForegroundWindow is the first rung of a ladder now, not the whole method");
+    }
+
+    // ---- B-10: window(action:…) targets through the same matcher ----------------------------
+
+    [Fact]
+    public async Task Window_acts_on_an_hwnd_with_no_title()
+    {
+        var mock = new Mock<IWindowService>();
+        mock.Setup(s => s.ExecuteAsync("close", null, 0x99L, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WindowAction("close", "Untitled - Notepad", true, "hwnd", 100, 0x99));
+
+        var root = Parse(await NewTools(mock.Object).Window("close", hwnd: 0x99L));
+
+        root.GetProperty("Success").GetBoolean().Should().BeTrue();
+        mock.Verify(s => s.ExecuteAsync("close", null, 0x99L, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Window_reports_the_window_that_actually_matched_not_the_string_it_was_given()
+    {
+        // window(action:"close", title:"notepad") closes "Untitled - Notepad" — and says so.
+        var mock = new Mock<IWindowService>();
+        mock.Setup(s => s.ExecuteAsync("close", "notepad", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WindowAction("close", "Untitled - Notepad", true, "fuzzy", 86, 0x1234));
+
+        var root = Parse(await NewTools(mock.Object).Window("close", "notepad"));
+
+        root.GetProperty("Title").GetString().Should().Be("Untitled - Notepad");
+        root.GetProperty("MatchStrategy").GetString().Should().Be("fuzzy");
+        root.GetProperty("Score").GetInt32().Should().Be(86);
+        root.GetProperty("Hwnd").GetInt64().Should().Be(0x1234);
+    }
+
+    [Fact]
+    public async Task Window_forwards_a_title_and_an_hwnd_together_and_lets_the_matcher_decide()
+    {
+        var mock = new Mock<IWindowService>();
+        mock.Setup(s => s.ExecuteAsync("minimize", "notepad", 0x99L, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new WindowAction("minimize", "Untitled - Notepad", true, "hwnd", 100, 0x99));
+
+        await NewTools(mock.Object).Window("minimize", "notepad", hwnd: 0x99L);
+
+        mock.Verify(s => s.ExecuteAsync("minimize", "notepad", 0x99L, It.IsAny<CancellationToken>()), Times.Once,
+            "which of the two wins is the matcher's rule (hwnd), not something the tool decides");
+    }
+
+    [Fact]
+    public void Window_description_advertises_the_hwnd_target()
+    {
+        var method = typeof(WindowTools).GetMethod(nameof(WindowTools.Window))!;
+
+        method.GetCustomAttribute<DescriptionAttribute>()!.Description.Should()
+            .Contain("hwnd", "targeting by handle is new in B-10 and the model only knows what the description says")
+            .And.NotContain("no tool takes it yet",
+                "the description told the model the handle was useless; B-10 makes it a target");
+        method.GetParameters().Single(p => p.Name == "hwnd")
+            .GetCustomAttribute<DescriptionAttribute>().Should().NotBeNull();
+    }
+
+    // ---- B-12: multi_monitor carries the display detail --------------------------------------
+
+    [Fact]
+    public async Task MultiMonitor_serialises_the_work_area_orientation_dpi_and_scale()
+    {
+        var mock = new Mock<IWindowService>();
+        mock.Setup(s => s.EnumerateMonitorsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new MonitorInfo(0, "DISPLAY1", 0, 0, 1920, 1080, true,
+                    WorkArea: new Bounds(0, 0, 1920, 1032), Orientation: 0, EffectiveDpi: 144, Scale: 1.5),
+                new MonitorInfo(1, "DISPLAY2", 1920, 0, 1440, 2560, false,
+                    WorkArea: new Bounds(1920, 0, 1440, 2560), Orientation: 90, EffectiveDpi: 96, Scale: 1.0),
+            });
+
+        var root = Parse(await NewTools(mock.Object).MultiMonitor());
+
+        var first = root[0];
+        var work = first.GetProperty("WorkArea");
+        (work.GetProperty("X").GetInt32(), work.GetProperty("Y").GetInt32(),
+         work.GetProperty("Width").GetInt32(), work.GetProperty("Height").GetInt32())
+            .Should().Be((0, 0, 1920, 1032), "the taskbar is the difference between Bounds and WorkArea");
+        first.GetProperty("Orientation").GetInt32().Should().Be(0);
+        first.GetProperty("EffectiveDpi").GetInt32().Should().Be(144);
+        first.GetProperty("Scale").GetDouble().Should().Be(1.5, "a 150% display is 144 dpi");
+
+        var second = root[1];
+        second.GetProperty("Orientation").GetInt32().Should().Be(90, "a rotated display reports its rotation");
+        second.GetProperty("EffectiveDpi").GetInt32().Should().Be(96);
+        second.GetProperty("Scale").GetDouble().Should().Be(1.0);
     }
 
     [Fact]
