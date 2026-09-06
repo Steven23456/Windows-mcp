@@ -73,6 +73,19 @@ public sealed class InputTools
         return $"scrolled {direction} by {amount} at ({x},{y})";
     }
 
+    [McpServerTool(ReadOnly = true, Idempotent = true), Description("Pause for a number of seconds (more than 0, at most 60) and return; use it between an action and the next snapshot instead of a PowerShell sleep. Returns {\"waited\": seconds}. For a longer pause, or to wait until something is on screen, use wait_for.")]
+    public async Task<string> Wait(
+        [Description("Seconds to pause: more than 0 and at most 60 (fractions allowed)")] double seconds,
+        CancellationToken ct = default)
+    {
+        // NaN fails the first comparison, infinity the second: nothing outside (0, 60] gets a delay.
+        if (!(seconds > 0 && seconds <= 60))
+            throw new ArgumentException($"seconds must be more than 0 and at most 60, got {seconds}; for a longer or conditional wait use wait_for.", nameof(seconds));
+
+        await Task.Delay(TimeSpan.FromSeconds(seconds), ct);
+        return JsonSerializer.Serialize(new { waited = seconds });
+    }
+
     [McpServerTool, Description("Clipboard get/set.")]
     public async Task<string> Clipboard(
         [Description("Action: get or set")] string action,

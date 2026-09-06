@@ -1092,6 +1092,26 @@ public class ScreenToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Screenshot_display_entries_keep_exactly_the_six_fields_A8_defined()
+    {
+        // B-12 gives MonitorInfo a work area, an orientation, a DPI and a scale. That detail is
+        // multi_monitor's; the screenshot metadata deliberately does not grow, because every extra
+        // key is paid for on every capture the model takes. This test fails if the tool ever
+        // starts serialising the MonitorInfo record instead of projecting these six fields.
+        var monitors = new[]
+        {
+            new MonitorInfo(0, "Monitor0", 0, 0, 1920, 1080, true,
+                WorkArea: new Bounds(0, 0, 1920, 1032), Orientation: 90, EffectiveDpi: 144, Scale: 1.5),
+        };
+        var tools = MakeTools(ShotMock().Object, windows: WinMock(monitors).Object);
+
+        var meta = Meta(await tools.Screenshot(format: "png", output: "inline"));
+
+        Field(meta, "displays")[0].EnumerateObject().Select(p => p.Name)
+            .Should().Equal("index", "x", "y", "width", "height", "isPrimary");
+    }
+
+    [Fact]
     public async Task Screenshot_file_metadata_lists_the_displays_and_the_region_too()
     {
         // One metadata shape for both output modes (the A-7/A-9 rule).

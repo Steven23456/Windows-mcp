@@ -4,7 +4,7 @@ Cross-session task tracker. Shipped work is recorded in `CHANGELOG.md`. The feat
 against the upstream Python server (51 prioritized items with implementation sketches) is
 `docs/upstream-parity-checklist.md` — new capability work starts there, not here.
 
-## 🧪 Live e2e coverage sweep — ACTIVE (20/65 tools ever exercised against a live server)
+## 🧪 Live e2e coverage sweep — ACTIVE (20/66 tools ever exercised against a live server)
 
 **Why this exists:** all prior e2e testing was ad-hoc and unrecorded. A transcript audit
 (2026-07-12) found **no checklist ever existed** — 20 of the tools have been invoked against a

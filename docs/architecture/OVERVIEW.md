@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 65 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 66 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
 
 ## Purpose
 
@@ -78,9 +78,9 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 ## Available Tools
 
-Windows-MCP exposes **65 MCP tools** across 19 tool classes:
+Windows-MCP exposes **66 MCP tools** across 19 tool classes:
 
-### Input Tools (`InputTools` — 8 tools)
+### Input Tools (`InputTools` — 9 tools)
 | Tool | Purpose |
 |------|---------|
 | `Click` | Click at screen coordinates (left/right/middle, single/double/triple) |
@@ -90,6 +90,7 @@ Windows-MCP exposes **65 MCP tools** across 19 tool classes:
 | `Key` | Press one key: a character (`a`, `7`, `/`), `f1`-`f24`, or a name (enter, tab, esc, arrows, win, printscreen, …) |
 | `Shortcut` | Press a chord (`ctrl+c`, `ctrl+shift+s`, `win+r`); a single key such as `win` also works |
 | `Scroll` | Scroll the mouse wheel (up/down/left/right) |
+| `Wait` | Pause for `seconds` (more than 0, at most 60) in-process, instead of a PowerShell sleep; returns `{"waited": seconds}` |
 | `Clipboard` | Get or set clipboard text |
 
 ### UI Automation Tools (`UIAutomationTools` — 9 tools)
@@ -108,11 +109,11 @@ Windows-MCP exposes **65 MCP tools** across 19 tool classes:
 ### Window Tools (`WindowTools` — 5 tools)
 | Tool | Purpose |
 |------|---------|
-| `Window` | `list` the user-visible top-level windows in z-order (each with its `DesktopId`) or `active` the foreground one; `desktops` the virtual-desktop inventory and the current one; minimize, maximize, restore, or close a window by exact title |
-| `SwitchToWindow` | Bring a window to the foreground by exact title |
-| `Focus` | Alias of `SwitchToWindow` |
+| `Window` | `list` the user-visible top-level windows in z-order (each with its `DesktopId`) or `active` the foreground one; `desktops` the virtual-desktop inventory and the current one; minimize, maximize, restore, or close a window named by `title` (exact → substring → fuzzy) or by `hwnd`, which wins; the result carries the matched title, hwnd, match strategy and score, and no match throws listing the open windows |
+| `SwitchToWindow` | Bring a window to the foreground by `title` (exact → substring → fuzzy, score ≥ 70) or `hwnd`; restores a minimised window, then climbs the SetForegroundWindow → AttachThreadInput → ALT-nudge ladder, re-reading `GetForegroundWindow` after each rung. Returns `{Window, MatchStrategy, Score, Restored, Strategy, Success}` |
+| `Focus` | Alias of `SwitchToWindow` — same parameters, same result |
 | `Launch` | Launch an application by name or path (ShellExecute); returns the PID |
-| `MultiMonitor` | Enumerate monitors with geometry and primary flag |
+| `MultiMonitor` | Enumerate monitors: geometry, primary flag, and per-monitor `WorkArea`, `Orientation` (0/90/180/270), `EffectiveDpi` and `Scale` |
 
 ### File Tools (`FileTools` — 9 tools)
 | Tool | Purpose |
@@ -158,7 +159,7 @@ Windows-MCP exposes **65 MCP tools** across 19 tool classes:
 |------|---------|
 | `Process` | List/inspect/kill processes: plain list, recycle-aware lineage + orphan detection (`orphans`), root-grouping, name/cmdline filtering, and recycle-safe kill by PID/name or whole tree |
 | `ProcessInspect` | Deep per-process detail: parent PID, command line, start time, loaded modules |
-| `StartProcess` | Start a detached process; returns the PID |
+| `StartProcess` | Start a detached process from a command line, or an executable plus an `args_json` array passed verbatim, with an optional `cwd` and `use_shell_execute`; returns `{pid, executable, args, cwd}` |
 | `Service` | List/status/start/stop/restart Windows services |
 | `ScheduledTask` | List/get/run/create/delete scheduled tasks |
 | `EventLog` | Query the Windows Event Log |

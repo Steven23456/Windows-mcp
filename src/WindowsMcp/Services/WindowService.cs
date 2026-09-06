@@ -3,6 +3,7 @@ using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.Graphics.Dwm;
 using Windows.Win32.Graphics.Gdi;
+using Windows.Win32.UI.HiDpi;
 using Windows.Win32.UI.WindowsAndMessaging;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
@@ -21,41 +22,54 @@ public sealed class WindowService : IWindowService
     /// </summary>
     private readonly IVirtualDesktopService? _desktops;
 
-    public WindowService(IVirtualDesktopService? desktops = null) => _desktops = desktops;
+    /// <summary>B-10: the user32 behind the foreground ladder; a fake in the unit tests.</summary>
+    private readonly IForegroundNative _native;
 
-    public Task<WindowAction> ExecuteAsync(string action, string? title, CancellationToken ct = default)
+    public WindowService(IVirtualDesktopService? desktops = null) : this(desktops, null) { }
+
+    internal WindowService(IVirtualDesktopService? desktops, IForegroundNative? native)
+    {
+        _desktops = desktops;
+        _native = native ?? Win32ForegroundNative.Instance;
+    }
+
+    /// <summary>
+    /// B-10: the target is resolved through <see cref="WindowMatcher"/> (hwnd, else exact →
+    /// substring → fuzzy over the inventory), so a partial title acts on the window it names; the
+    /// action is validated before the inventory is read; nothing matched is a
+    /// <see cref="KeyNotFoundException"/> naming the open windows.
+    /// </summary>
+    public async Task<WindowAction> ExecuteAsync(string action, string? title, long? hwnd = null, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
 
-        if (string.IsNullOrWhiteSpace(title))
-            throw new ArgumentException("title is required for window action", nameof(title));
+        var verb = action.ToLowerInvariant();
+        if (verb is not ("minimize" or "maximize" or "restore" or "close"))
+            throw new ArgumentException($"Unknown action '{action}'; expected minimize|maximize|restore|close");
+        if (hwnd is null && string.IsNullOrWhiteSpace(title))
+            throw new ArgumentException("A window action needs a title or an hwnd.", nameof(title));
 
-        HWND hwnd = PInvoke.FindWindow(null, title);
-        bool found = hwnd != HWND.Null;
+        var match = WindowMatcher.Match(await ListAsync(true, false, ct), title, hwnd);
+        var handle = ToHwnd(match.Window.Hwnd);
 
-        if (found)
+        switch (verb)
         {
-            switch (action.ToLowerInvariant())
-            {
-                case "minimize":
-                    PInvoke.ShowWindow(hwnd, SHOW_WINDOW_CMD.SW_MINIMIZE);
-                    break;
-                case "maximize":
-                    PInvoke.ShowWindow(hwnd, SHOW_WINDOW_CMD.SW_MAXIMIZE);
-                    break;
-                case "restore":
-                    PInvoke.ShowWindow(hwnd, SHOW_WINDOW_CMD.SW_RESTORE);
-                    break;
-                case "close":
-                    // CloseWindow() actually minimizes; PostMessage WM_CLOSE performs a real close.
-                    PInvoke.PostMessage(hwnd, WM_CLOSE, default, default);
-                    break;
-                default:
-                    throw new ArgumentException($"Unknown action '{action}'; expected minimize|maximize|restore|close");
-            }
+            case "minimize":
+                PInvoke.ShowWindow(handle, SHOW_WINDOW_CMD.SW_MINIMIZE);
+                break;
+            case "maximize":
+                PInvoke.ShowWindow(handle, SHOW_WINDOW_CMD.SW_MAXIMIZE);
+                break;
+            case "restore":
+                PInvoke.ShowWindow(handle, SHOW_WINDOW_CMD.SW_RESTORE);
+                break;
+            case "close":
+                // CloseWindow() actually minimizes; PostMessage WM_CLOSE performs a real close.
+                PInvoke.PostMessage(handle, WM_CLOSE, default, default);
+                break;
         }
 
-        return Task.FromResult(new WindowAction(action, title, found));
+        return new WindowAction(verb, match.Window.Title, true, match.Strategy, match.Score, match.Window.Hwnd);
     }
 
     /// <summary>
@@ -161,16 +175,21 @@ public sealed class WindowService : IWindowService
             ProcessName: processName);
     }
 
-    public Task<bool> SwitchToAsync(string title, CancellationToken ct = default)
+    private static unsafe HWND ToHwnd(long hwnd) => new((void*)(nint)hwnd);
+
+    /// <summary>
+    /// B-10: match (hwnd, else exact → substring → fuzzy), then climb the ladder —
+    /// <c>SetForegroundWindow</c>, <c>AttachThreadInput</c>, the ALT nudge — re-reading the
+    /// foreground window after each step. The result says which step worked, or that none did.
+    /// </summary>
+    public async Task<ForegroundResult> BringToFrontAsync(string? title, long? hwnd, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        if (hwnd is null && string.IsNullOrWhiteSpace(title))
+            throw new ArgumentException("Name the window: a title (exact, substring or fuzzy) or an hwnd from window list.", nameof(title));
 
-        HWND hwnd = PInvoke.FindWindow(null, title);
-        if (hwnd == HWND.Null)
-            return Task.FromResult(false);
-
-        bool ok = PInvoke.SetForegroundWindow(hwnd);
-        return Task.FromResult(ok);
+        var match = WindowMatcher.Match(await ListAsync(true, false, ct), title, hwnd);
+        return ForegroundLadder.Bring(match, _native);
     }
 
     public Task<int> LaunchAsync(string appName, CancellationToken ct = default)
@@ -207,15 +226,17 @@ public sealed class WindowService : IWindowService
         var results = new List<MonitorInfo>();
         foreach (var handle in monitors)
         {
-            var info = new MONITORINFO
-            {
-                cbSize = (uint)sizeof(MONITORINFO)
-            };
+            // MONITORINFOEXW: the same header plus the device name EnumDisplaySettings needs.
+            var info = new MONITORINFOEXW();
+            info.monitorInfo.cbSize = (uint)sizeof(MONITORINFOEXW);
 
-            if (PInvoke.GetMonitorInfo(handle, ref info))
+            if (PInvoke.GetMonitorInfo(handle, (MONITORINFO*)&info))
             {
-                var rc = info.rcMonitor;
-                bool isPrimary = (info.dwFlags & MONITORINFOF_PRIMARY) != 0;
+                var rc = info.monitorInfo.rcMonitor;
+                var work = info.monitorInfo.rcWork;
+                bool isPrimary = (info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY) != 0;
+                int dpi = EffectiveDpiOf(handle);
+                int orientation = OrientationOf(info.szDevice.ToString());
 
                 // Index = position in the returned array, not the enumeration counter: a failed
                 // GetMonitorInfo must not leave a gap, because screenshot/ocr 'display' selects
@@ -228,10 +249,40 @@ public sealed class WindowService : IWindowService
                     rc.top,
                     rc.right - rc.left,
                     rc.bottom - rc.top,
-                    isPrimary));
+                    isPrimary,
+                    // B-12: the detail. WorkArea is the monitor rect minus the taskbar/docked bars.
+                    WorkArea: new Bounds(work.left, work.top, work.right - work.left, work.bottom - work.top),
+                    Orientation: orientation,
+                    EffectiveDpi: dpi,
+                    Scale: dpi / 96.0));
             }
         }
 
         return Task.FromResult(results.ToArray());
+    }
+
+    /// <summary>B-12: <c>GetDpiForMonitor(MDT_EFFECTIVE_DPI)</c>; 96 when Windows will not say.</summary>
+    private static int EffectiveDpiOf(HMONITOR handle)
+    {
+        try
+        {
+            return PInvoke.GetDpiForMonitor(handle, MONITOR_DPI_TYPE.MDT_EFFECTIVE_DPI, out uint dpiX, out _).Succeeded && dpiX > 0
+                ? (int)dpiX
+                : 96;
+        }
+        catch { return 96; }
+    }
+
+    /// <summary>B-12: the display's rotation in degrees (0, 90, 180, 270) from its current mode; 0 when unknown.</summary>
+    private static unsafe int OrientationOf(string deviceName)
+    {
+        try
+        {
+            var mode = new DEVMODEW { dmSize = (ushort)sizeof(DEVMODEW) };
+            if (!PInvoke.EnumDisplaySettings(deviceName, ENUM_DISPLAY_SETTINGS_MODE.ENUM_CURRENT_SETTINGS, ref mode))
+                return 0;
+            return (int)mode.Anonymous1.Anonymous2.dmDisplayOrientation * 90;
+        }
+        catch { return 0; }
     }
 }

@@ -236,7 +236,7 @@ public class ScreenshotAnnotateTests
 /// <c>Category=UIAutomation</c>: excluded from headless runs.
 /// </summary>
 [Trait("Category", "UIAutomation")]
-[Collection(PointerAndPixelCollection.Name)]
+[Collection(DesktopCollection.Name)]
 public class ScreenshotAnnotateDesktopTests
 {
     /// <summary>The top-left 200x100 of the primary display; the primary's origin is (0,0) by definition.</summary>

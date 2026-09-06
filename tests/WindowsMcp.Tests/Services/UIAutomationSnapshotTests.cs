@@ -701,6 +701,9 @@ public class UIAutomationSnapshotIntegrationTests
 /// real UIA elements: the editor's action hint, the ids, the tree, and the traverser itself.
 /// </summary>
 [Trait("Category", "UIAutomation")]
+// DesktopCollection, not just the UIAutomation trait: this class opens a Notepad window through
+// the fixture, and two fixtures must never launch Notepad concurrently.
+[Collection(DesktopCollection.Name)]
 public class UIAutomationSnapshotDesktopTests : IClassFixture<NotepadFixture>
 {
     private readonly NotepadFixture _np;
@@ -716,6 +719,10 @@ public class UIAutomationSnapshotDesktopTests : IClassFixture<NotepadFixture>
 
     private long NotepadHwnd()
     {
+        // The window this fixture opened, when it knows which one that is: a desktop can hold
+        // several Notepad windows and the title search below would pick an arbitrary one.
+        if (_np.Hwnd != 0) return _np.Hwnd;
+
         var window = _np.App.GetMainWindow(_np.Automation, TimeSpan.FromSeconds(2));
         if (window is not null)
         {

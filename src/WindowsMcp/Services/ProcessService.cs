@@ -55,50 +55,75 @@ public sealed class ProcessService : IProcessService
     }
 
     public Task<int> StartDetachedAsync(string command, CancellationToken ct = default)
+        => StartDetachedAsync(new ProcessStart(command, null, null, false), ct);
+
+    /// <summary>
+    /// The pre-B-11 split of a whole command line: a quoted executable then the rest, or the
+    /// first space. Unchanged, so every caller of the command-only form gets what it always got.
+    /// </summary>
+    private static (string Exe, string Args) SplitCommand(string command)
     {
-        ct.ThrowIfCancellationRequested();
-
-        // Split command into executable + arguments on the first space.
-        // Handles quoted executables: "C:\My App\foo.exe" arg1 arg2
-        string exe;
-        string args = string.Empty;
-
         command = command.Trim();
         if (command.StartsWith('"'))
         {
             int closingQuote = command.IndexOf('"', 1);
             if (closingQuote < 0)
                 throw new ArgumentException("Unmatched opening quote in command");
-            exe = command[1..closingQuote];
-            args = command[(closingQuote + 1)..].TrimStart();
+            return (command[1..closingQuote], command[(closingQuote + 1)..].TrimStart());
+        }
+        int spaceIdx = command.IndexOf(' ');
+        return spaceIdx < 0
+            ? (command, string.Empty)
+            : (command[..spaceIdx], command[(spaceIdx + 1)..].TrimStart());
+    }
+
+    /// <summary>
+    /// B-11: the <see cref="ProcessStartInfo"/> a <see cref="ProcessStart"/> describes — pure, so
+    /// the argv/cwd/shell-execute decisions are testable without spawning anything. Also the one
+    /// place a missing working directory is refused, which is what makes "rejected before any
+    /// spawn" a fact rather than a hope.
+    /// </summary>
+    internal static ProcessStartInfo BuildStartInfo(ProcessStart spec)
+    {
+        var psi = new ProcessStartInfo
+        {
+            UseShellExecute = spec.UseShellExecute,
+            RedirectStandardOutput = false,
+            CreateNoWindow = false,
+        };
+
+        if (spec.Args is null)
+        {
+            // Command-only: the whole line, split as it always was.
+            var (exe, args) = SplitCommand(spec.Command);
+            psi.FileName = exe;
+            psi.Arguments = args;
         }
         else
         {
-            int spaceIdx = command.IndexOf(' ');
-            if (spaceIdx < 0)
-            {
-                exe = command;
-            }
-            else
-            {
-                exe = command[..spaceIdx];
-                args = command[(spaceIdx + 1)..].TrimStart();
-            }
+            // Argv mode: the command is the executable and every item is one argument, verbatim.
+            psi.FileName = spec.Command;
+            foreach (var arg in spec.Args) psi.ArgumentList.Add(arg);
         }
 
-        var psi = new ProcessStartInfo
+        if (!string.IsNullOrWhiteSpace(spec.Cwd))
         {
-            FileName = exe,
-            Arguments = args,
-            UseShellExecute = false,
-            RedirectStandardOutput = false,
-            CreateNoWindow = false
-        };
+            if (!Directory.Exists(spec.Cwd))
+                throw new DirectoryNotFoundException($"cwd '{spec.Cwd}' is not an existing directory.");
+            psi.WorkingDirectory = spec.Cwd;
+        }
 
-        // Detached child keeps running after we dispose the wrapper (UseShellExecute=false,
-        // no handles we own); dispose only releases our handle to it.
+        return psi;
+    }
+
+    public Task<int> StartDetachedAsync(ProcessStart spec, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var psi = BuildStartInfo(spec);   // refuses a bad cwd before anything is spawned
+
+        // Detached child keeps running after we dispose the wrapper; dispose only releases our handle.
         using var process = Process.Start(psi)
-            ?? throw new InvalidOperationException($"Failed to start process: {command}");
+            ?? throw new InvalidOperationException($"Failed to start process: {spec.Command}");
 
         return Task.FromResult(process.Id);
     }

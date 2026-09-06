@@ -2,8 +2,62 @@ using System.Text.Json.Serialization;
 
 namespace WindowsMcp.Abstractions.Models;
 
-public record WindowAction(string Action, string? Title, bool Success);
-public record MonitorInfo(int Index, string DeviceName, int X, int Y, int Width, int Height, bool IsPrimary);
+/// <summary>
+/// The outcome of <c>window(action: minimize|maximize|restore|close)</c>.
+/// <paramref name="Title"/> is the title of the window that was actually acted on (B-10: the
+/// matcher's pick, which need not equal the string the caller sent);
+/// <paramref name="MatchStrategy"/>/<paramref name="Score"/>/<paramref name="Hwnd"/> say how it
+/// was found. The three trailing fields default so pre-B-10 constructions still compile.
+/// </summary>
+public record WindowAction(
+    string Action,
+    string? Title,
+    bool Success,
+    string? MatchStrategy = null,
+    int Score = 0,
+    long Hwnd = 0);
+
+/// <summary>
+/// One monitor. The first seven fields are A-8's and are unchanged; B-12 appends the detail
+/// <c>multi_monitor</c> reports and nothing else consumes:
+/// <paramref name="WorkArea"/> is <c>GetMonitorInfo.rcWork</c> (the desktop minus the taskbar and
+/// any appbars) in virtual-desktop pixels, <paramref name="Orientation"/> is the display rotation
+/// in degrees (0|90|180|270), <paramref name="EffectiveDpi"/> is
+/// <c>GetDpiForMonitor(MDT_EFFECTIVE_DPI)</c> and <paramref name="Scale"/> is
+/// <c>EffectiveDpi / 96.0</c>. The four are trailing and defaulted so every existing
+/// construction and A-8's region maths are untouched.
+/// </summary>
+public record MonitorInfo(
+    int Index,
+    string DeviceName,
+    int X,
+    int Y,
+    int Width,
+    int Height,
+    bool IsPrimary,
+    Bounds? WorkArea = null,
+    int Orientation = 0,
+    int EffectiveDpi = 96,
+    double Scale = 1.0);
+
+/// <summary>
+/// B-10: the outcome of bringing a window to the foreground.
+/// <paramref name="Window"/> is the inventory entry that was targeted;
+/// <paramref name="MatchStrategy"/>/<paramref name="Score"/> are the matcher's verdict
+/// (<c>exact|substring|fuzzy|hwnd</c>);
+/// <paramref name="Restored"/> is true when the window was minimised and SW_RESTORE was sent;
+/// <paramref name="Strategy"/> names the step of the ladder that actually worked
+/// (<c>SetForegroundWindow|AttachThreadInput|AltNudge</c>), null when none did; and
+/// <paramref name="Success"/> is re-read from <c>GetForegroundWindow</c> after the attempt
+/// (roadmap C11) — never assumed from a return code.
+/// </summary>
+public record ForegroundResult(
+    WindowInfo Window,
+    string MatchStrategy,
+    int Score,
+    bool Restored,
+    string? Strategy,
+    bool Success);
 
 /// <summary>
 /// A-1: how a top-level window is showing. <see cref="Minimized"/> wins over

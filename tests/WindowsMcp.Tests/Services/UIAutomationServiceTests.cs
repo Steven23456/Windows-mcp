@@ -11,6 +11,10 @@ using Xunit;
 namespace WindowsMcp.Tests.Services;
 
 [Trait("Category", "UIAutomation")]
+// Serialised with every other class that opens a Notepad window, moves the pointer or reads the
+// desktop (see DesktopCollection): two NotepadFixture instances launching at the same time each
+// see the other's new window in their inventory diff and pick the wrong one.
+[Collection(DesktopCollection.Name)]
 public class UIAutomationServiceTests : IClassFixture<NotepadFixture>
 {
     private readonly NotepadFixture _np;

@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
 using WindowsMcp.Abstractions;
+using WindowsMcp.Abstractions.Models;
+using WindowsMcp.Services;
 
 namespace WindowsMcp.Tools;
 
@@ -122,13 +124,18 @@ public sealed class ProcessTools
         return JsonSerializer.Serialize(detail);
     }
 
-    [McpServerTool, Description("Start a process detached from the MCP server. Returns the PID.")]
+    [McpServerTool, Description("Start a process detached from the MCP server. Either one command line (exe + args, split at the first space or after a quoted exe) or, with args_json, the executable plus a JSON array of arguments passed verbatim with no quoting; cwd sets the working directory and must exist; use_shell_execute launches through the shell. Returns {pid, executable, args, cwd}.")]
     public async Task<string> StartProcess(
-        [Description("Command line to execute (exe + args)")] string command,
+        [Description("Command line to execute (exe + args), or the executable alone when args_json is given")] string command,
+        [Description("Arguments as a JSON array of strings, e.g. [\"/c\",\"echo hi\"]; each item is passed verbatim, no quoting needed")] string? args_json = null,
+        [Description("Working directory for the new process; must exist")] string? cwd = null,
+        [Description("Launch through the shell (ShellExecute) instead of directly")] bool use_shell_execute = false,
         CancellationToken ct = default)
     {
-        int pid = await _process.StartDetachedAsync(command, ct);
-        return $"started (pid={pid})";
+        var args = ArgvJson.Parse(args_json);   // refused by name before anything is spawned
+        var spec = new ProcessStart(command, args, string.IsNullOrWhiteSpace(cwd) ? null : cwd, use_shell_execute);
+        int pid = await _process.StartDetachedAsync(spec, ct);
+        return JsonSerializer.Serialize(new { pid, executable = command, args = args ?? [], cwd = spec.Cwd });
     }
 
     [McpServerTool, Description("Manage Windows services. action: list|status|start|stop|restart. stop and restart require confirm:true.")]

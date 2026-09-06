@@ -22,7 +22,7 @@ namespace WindowsMcp.Tests.Services;
 /// </para>
 /// </summary>
 [Trait("Category", "UIAutomation")]
-[Collection(PointerAndPixelCollection.Name)]
+[Collection(DesktopCollection.Name)]
 public class ScreenshotWgcCaptureTests
 {
     /// <summary>Per-channel difference two captures of the same rect may show and still agree.</summary>

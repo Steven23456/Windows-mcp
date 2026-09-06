@@ -14,10 +14,10 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Tool Layer                                         │
-│                 (19 [McpServerToolType] classes, 65 tools)                   │
+│                 (19 [McpServerToolType] classes, 66 tools)                   │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐  │
 │  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │  │
-│  │  8 tools   │ │  9 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │  │
+│  │  9 tools   │ │  9 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │  │
 │  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘  │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐  │
 │  │ProcessTools│ │ScreenTools │ │  WebTools  │ │RegistryTls │ │NetworkTls  │  │
@@ -126,7 +126,7 @@ public sealed class InputTools
 
 | Tool Class | Tools | Services Injected |
 |------------|-------|------------------|
-| `InputTools` | 8 | `IInputService`, `IClipboardService` |
+| `InputTools` | 9 | `IInputService`, `IClipboardService` |
 | `UIAutomationTools` | 9 | `IUIAutomationService` |
 | `FileTools` | 9 | `IFileSystemService`, `IInputService`, `IFileStreamService` |
 | `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService` |
@@ -300,6 +300,9 @@ Windows-mcp.slnx
 │   │   │   ├── ScreenshotService.cs       (+ WgcCaptureBackend, Annotator, FlashOverlay, FlashGlow)
 │   │   │   ├── UiTree/                    (snapshot core: UiNode, UiClassifier, ElementBudget,
 │   │   │   │                               UiTraverser, SnapshotRenderer, DomCorrection)
+│   │   │   ├── WindowService.cs           (+ FuzzyMatch, WindowMatcher, ForegroundLadder and
+│   │   │   │                               Win32ForegroundNative — B-10's matcher and ladder)
+│   │   │   ├── ProcessService.cs          (+ ArgvJson — B-11's args_json parser)
 │   │   │   └── ...
 │   │   └── Startup/                       (startup-report renderer + approval decoding)
 │   └── WindowsMcp.Abstractions/           ← Contracts assembly

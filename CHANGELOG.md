@@ -2,6 +2,50 @@
 
 ### Added
 
+- **`start_process` takes an argv list, a working directory and a shell-execute flag** (parity
+  B-11). `start_process(command, args_json?, cwd?, use_shell_execute?)`: `args_json` is a JSON
+  array of strings whose items go to `ProcessStartInfo.ArgumentList` **verbatim** — no quoting,
+  no splitting, no escaping — so a path with spaces and quotes arrives intact, and with it
+  `command` is the executable only. `cwd` sets the working directory and a directory that does
+  not exist is a `DirectoryNotFoundException` naming it, raised before anything is spawned;
+  `use_shell_execute` launches through the shell. `command` alone keeps its old whole-command-line
+  meaning byte for byte (quoted exe, else the first space). New pure `Services/ArgvJson.cs`, the
+  `ProcessStart` DTO and `IProcessService.StartDetachedAsync(ProcessStart)`; the string overload
+  now forwards to it. Design note: `docs/design/B-11-start-process-argv.md`.
+- **`multi_monitor` reports work area, orientation, DPI and scale** (parity B-12). Each monitor
+  now also carries `WorkArea` (`GetMonitorInfo.rcWork` — the monitor minus the taskbar and any
+  docked appbars, in virtual-desktop pixels), `Orientation` (0/90/180/270 from the current
+  display mode), `EffectiveDpi` (`GetDpiForMonitor(MDT_EFFECTIVE_DPI)`) and `Scale`
+  (`EffectiveDpi / 96.0`), so a 150 % display reads `EffectiveDpi: 144, Scale: 1.5`. The four
+  fields are trailing and defaulted on `MonitorInfo`, and `WindowService` now reads
+  `MONITORINFOEXW` for the device name `EnumDisplaySettings` needs; both extra reads are guarded
+  and fall back to `96`/`0` rather than dropping a monitor, so A-8's region maths, the snapshot
+  header and `screenshot`'s metadata are untouched. Design note:
+  `docs/design/B-12-monitor-detail.md`.
+- **Fuzzy window matching and a real bring-to-foreground ladder** (parity B-10).
+  `switch_to_window`/`focus` take `title` *or* `hwnd` (from `window(action:"list")`, which wins
+  and never fuzzes) and match a title exact → substring → fuzzy (score ≥ 70), so
+  `switch_to_window("notepad")` finds `"Untitled - Notepad"`; ties inside one strategy go to the
+  frontmost window and minimised windows are candidates. A minimised target is restored, then the
+  tool climbs `SetForegroundWindow` → `AttachThreadInput` + `BringWindowToTop` → an ALT nudge,
+  re-reading `GetForegroundWindow` after every rung — Windows refuses a plain
+  `SetForegroundWindow` to a background process, so success is observed, not assumed. The four
+  acting `window` actions go through the same matcher and accept `hwnd` too, so
+  `window(action:"close", title:"notepad")` works. New pure `Services/FuzzyMatch.cs` (the three
+  `thefuzz` scorers, in-repo, no package) and `Services/WindowMatcher.cs`, plus
+  `Services/ForegroundLadder.cs` behind an `IForegroundNative` seam
+  (`Services/Win32ForegroundNative.cs`) so the ladder is testable with no desktop;
+  `ForegroundResult` DTO, `WindowAction` gained trailing `MatchStrategy`/`Score`/`Hwnd`, and
+  `AttachThreadInput`/`BringWindowToTop`/`GetCurrentThreadId`/`keybd_event` joined
+  `NativeMethods.txt` (roadmap C9). Design note: `docs/design/B-10-window-matching.md`.
+- **`wait` — a plain pause, without a PowerShell cold start** (parity B-5; 65 → 66 tools).
+  `wait(seconds)` delays in-process for more than 0 and at most 60 seconds (fractions allowed)
+  and returns `{"waited": seconds}`; anything outside that range — `0`, negative, NaN, infinity,
+  over 60 — is an `ArgumentException` naming the range and pointing at `wait_for` for a longer or
+  conditional wait. It honours the request's cancellation token and spawns nothing, replacing
+  `powershell("Start-Sleep")`, which paid a process cold start and took the PowerShell
+  serialization gate. Annotated `ReadOnly = true, Idempotent = true`. Lives on `InputTools`, next
+  to the verbs it is interleaved with. Design note: `docs/design/B-5-wait.md`.
 - **Browser DOM mode on `snapshot`, Chromium only** (parity A-5 phase 1). `snapshot(use_dom:true)`
   walks every browser window in scope (chrome/msedge/brave/opera/vivaldi) from the web page — the
   `RootWebArea` document — instead of the window, so the address bar and tab strip never appear
@@ -106,6 +150,37 @@
 
 ### Changed
 
+- **Test infrastructure: the Notepad fixture leaves nothing behind.** Modern Notepad is one
+  process hosting every window and persists every open tab as session state, so a fixture that
+  killed the process it launched left its window behind and the tab came back on the next
+  launch. `NotepadFixture` now tracks the window (or tab) it opened, closes exactly that on
+  dispose, answers the "Save changes?" flyout with *Don't save*, restores the tab-state folder
+  to what it was, and terminates Notepad only when it was the sole owner; 53 unit tests pin its
+  decisions and a desktop self-test proves the clean-up. The pointer-moving and foreground-
+  changing desktop classes share one xUnit collection.
+
+- **`switch_to_window` and `focus` return a result object, not a sentence.** They used to answer
+  `"switched to 'X'"` / `"window 'X' not found"`; they now return
+  `{Window, MatchStrategy (exact|substring|fuzzy|hwnd), Score, Restored, Strategy, Success}`,
+  where `Strategy` names the rung of the foreground ladder that worked (`null` when none did) and
+  `Success` is re-read from `GetForegroundWindow`. **Migration:** parse the JSON and read
+  `Success`/`Strategy` instead of matching on the string; a title that matches nothing is now an
+  error listing the open windows rather than a "not found" sentence. `title` is optional (give it
+  or `hwnd`), so callers that passed it positionally are unaffected.
+  `IWindowService.SwitchToAsync(title)` → `bool` was replaced by
+  `BringToFrontAsync(title?, hwnd?)` → `ForegroundResult`.
+- **`window(action: minimize|maximize|restore|close)` throws when nothing matches.** The title is
+  now matched exact → substring → fuzzy (and `hwnd` is accepted, winning over a title) instead of
+  `FindWindow`'s exact-only lookup, and a title that names no open window is a
+  `KeyNotFoundException` listing them — where it used to return `{"Success": false}` after doing
+  nothing. **Migration:** a caller that tested `Success` for "no such window" must catch the error
+  instead; `Success` is now always `true` on the acting path. The result also carries the matched
+  window's `Title`, `Hwnd`, `MatchStrategy` and `Score`, and the four actions accept `hwnd` in
+  place of `title`. `IWindowService.ExecuteAsync` gained an `hwnd` parameter.
+- **`start_process` returns JSON.** It used to answer `"started (pid=1234)"`; it now returns
+  `{pid, executable, args, cwd}` so a caller can confirm which executable, argv and working
+  directory were actually used. **Migration:** parse the JSON and read `pid` instead of scraping
+  the sentence.
 - **`get_state` is bounded by the element budget** (parity A-4). Same foreground root and
   three-level shape; when `--max-tree-elements` stops the walk the root carries `Truncated: true`
   and `ElementLimit` (absent otherwise, so the JSON is unchanged until a walk is cut short).

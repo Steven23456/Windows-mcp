@@ -222,6 +222,56 @@ Output: ClickResult { X=800, Y=400, Button="Right", Clicks=1 }
 
 ---
 
+## Bring-to-Front Data Flow (window matching + the foreground ladder)
+
+`switch_to_window`, `focus` and the four acting `window` actions share one target resolver and,
+for the two focus tools, one foreground ladder. Windows refuses `SetForegroundWindow` to a
+background process, so the outcome is re-read rather than assumed (roadmap C11).
+
+### Data Transformations
+
+```
+1. MCP Request
+   └─► switch_to_window(title?, hwnd?) | focus(title?, hwnd?)
+       WindowTools refuses "neither given" with an ArgumentException before
+       the inventory is read; window(action, title?, hwnd?) validates the
+       action first, then that one of title/hwnd is present
+
+2. WindowService.BringToFrontAsync(title, hwnd)  |  ExecuteAsync(action, title, hwnd)
+   └─► ListAsync(includeMinimized: true, includeHidden: false)   — A-1's inventory
+
+3. WindowMatcher.Match(inventory, title, hwnd)   — pure
+   ├─► hwnd given      → that window, Strategy="hwnd", Score=100 (never fuzzes)
+   ├─► exact title     → Strategy="exact",     Score=100   (OrdinalIgnoreCase)
+   ├─► substring       → Strategy="substring", Score=100
+   ├─► fuzzy           → max(FuzzyMatch.PartialRatio, TokenSetRatio) ≥ 70
+   └─► nothing matched → KeyNotFoundException listing up to 15 open titles
+       Ties inside one strategy go to the lowest ZOrder (the frontmost);
+       minimised windows are candidates
+
+4a. window(minimize|maximize|restore|close): ShowWindow / PostMessage(WM_CLOSE)
+    on the matched handle
+    └─► WindowAction { Action, Title (the matched window's), Success=true,
+                       MatchStrategy, Score, Hwnd }
+
+4b. ForegroundLadder.Bring(match, IForegroundNative)  — Win32ForegroundNative in
+    production, a recording fake in the tests
+    ├─► IsIconic → ShowWindow(SW_RESTORE)                    → Restored=true
+    ├─► rung 1: SetForegroundWindow                        → "SetForegroundWindow"
+    ├─► rung 2: AttachThreadInput + BringWindowToTop +
+    │           SetForegroundWindow + detach              → "AttachThreadInput"
+    │           (skipped whole when the attach is refused — elevated target)
+    ├─► rung 3: keybd_event(VK_MENU) down/up +
+    │           SetForegroundWindow                       → "AltNudge"
+    └─► GetForegroundWindow is re-read after every rung and is the only source
+        of Success/Strategy; SetForegroundWindow's return value is never consulted
+
+5. MCP Response: ForegroundResult { Window, MatchStrategy, Score, Restored,
+                                    Strategy (null when no rung worked), Success }
+```
+
+---
+
 ## Powershell Data Flow
 
 ```
@@ -669,6 +719,7 @@ Scrollable (1):
 |----------|----------|-------|
 | `WaitFor` | Polls every `interval_ms` (default 500ms) up to `timeout_ms` (default 10s); sleep clamped to the remaining budget, minimum 10ms | Only tool with a loop; a failed poll is retried, and every-poll-failed throws rather than reporting `null` |
 | `InputService` | No delays: clicks are back-to-back `SendInput`; the cursor is placed with `SetCursorPos` and read back before any button event | A clamped (off-monitor) point throws rather than clicking elsewhere |
+| `wait` (`InputTools`) | The only tool whose *job* is a delay: one `Task.Delay(seconds)` on the request's cancellation token, `seconds` in (0, 60] | Validated in the tool before the delay; outside the range is an `ArgumentException` naming it and pointing at `wait_for`. No process is spawned — it replaces `powershell("Start-Sleep")`, which paid a cold start and took the serialization gate |
 | `PowerShellService` | Async wait on process exit | 15-min execution backstop (armed after the serialization gate); caller cancellation kills the process tree |
 | `ShellTools` heartbeat | Progress notification every 10s during a foreground `powershell` call | Lets spec-compliant clients reset their request timeout |
 | `JobService` | Background jobs poll-based; per-job 60-min backstop | Runs outside the PowerShell serialization gate |

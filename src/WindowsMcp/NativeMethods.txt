@@ -66,3 +66,12 @@ MonitorFromPoint
 D3D11_SDK_VERSION
 IDXGIDevice
 ID3D11Texture2D
+AttachThreadInput
+BringWindowToTop
+GetCurrentThreadId
+keybd_event
+GetDpiForMonitor
+EnumDisplaySettings
+MONITORINFOEXW
+DEVMODEW
+VIRTUAL_KEY

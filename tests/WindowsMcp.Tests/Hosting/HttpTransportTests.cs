@@ -722,6 +722,90 @@ public class HttpTransportTests
         }
     }
 
+    // ---- B-5: wait ---------------------------------------------------------------------------
+
+    private static string ToolName(IEnumerable<McpClientTool> tools, string name) =>
+        tools.Single(t => t.Name.Replace("_", "").Equals(name, StringComparison.OrdinalIgnoreCase)).Name;
+
+    /// <summary>
+    /// B-5: the annotations are only worth setting if a client can see them. The attribute is
+    /// pinned by reflection in <c>InputToolsTests</c>; this is the same fact over the wire, where
+    /// the SDK has to have turned <c>ReadOnly</c>/<c>Idempotent</c> into the protocol's
+    /// <c>annotations.readOnlyHint</c>/<c>idempotentHint</c>.
+    /// </summary>
+    [Fact]
+    public async Task Wait_is_advertised_with_its_read_only_and_idempotent_hints()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var tools = await client.ListToolsAsync();
+        var wait = tools.Single(t => t.Name.Equals(ToolName(tools, "wait"), StringComparison.Ordinal));
+
+        wait.ProtocolTool.Annotations.Should().NotBeNull("the tool carries annotations to the client");
+        wait.ProtocolTool.Annotations!.ReadOnlyHint.Should().BeTrue();
+        wait.ProtocolTool.Annotations.IdempotentHint.Should().BeTrue();
+        wait.ProtocolTool.InputSchema.GetProperty("properties").TryGetProperty("seconds", out _)
+            .Should().BeTrue("'seconds' is the whole signature");
+    }
+
+    [Fact]
+    public async Task Wait_waits_over_the_wire_and_refuses_an_out_of_range_request()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var wait = ToolName(await client.ListToolsAsync(), "wait");
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var ok = await client.CallToolAsync(wait, new Dictionary<string, object?> { ["seconds"] = 0.2 });
+        stopwatch.Stop();
+
+        ok.IsError.Should().NotBe(true);
+        ok.Content.OfType<TextContentBlock>().Single().Text.Should().Contain("\"waited\"");
+        stopwatch.Elapsed.TotalMilliseconds.Should().BeGreaterThanOrEqualTo(200 - 16);
+
+        var refused = await client.CallToolAsync(wait, new Dictionary<string, object?> { ["seconds"] = 3600 });
+
+        refused.IsError.Should().BeTrue();
+        refused.Content.OfType<TextContentBlock>().Single().Text
+            .Should().Contain("60").And.Contain("wait_for");
+    }
+
+    // ---- B-12: multi_monitor detail over the wire ---------------------------------------------
+
+    /// <summary>
+    /// B-12 end to end with the real <c>WindowService</c>: the four new fields have to survive
+    /// serialisation, and their values have to be consistent with the bounds beside them.
+    /// Values, not just presence — <c>WorkArea: null, Scale: 1</c> on every monitor would satisfy
+    /// a presence-only check while telling the model nothing.
+    /// </summary>
+    [Fact]
+    public async Task Multi_monitor_over_http_carries_the_work_area_orientation_dpi_and_scale()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var multiMonitor = ToolName(await client.ListToolsAsync(), "multimonitor");
+
+        var result = await client.CallToolAsync(multiMonitor, new Dictionary<string, object?>());
+
+        var text = result.Content.OfType<TextContentBlock>().Should().ContainSingle().Subject.Text;
+        result.IsError.Should().NotBe(true, "the server said: {0}", text);
+        using var doc = JsonDocument.Parse(text);
+        var monitors = doc.RootElement.EnumerateArray().ToArray();
+        monitors.Should().NotBeEmpty("this session has at least one display");
+        foreach (var m in monitors)
+        {
+            var work = m.GetProperty("WorkArea");
+            work.ValueKind.Should().Be(JsonValueKind.Object, "every monitor reports its work area");
+            work.GetProperty("Height").GetInt32().Should().BePositive()
+                .And.BeLessThanOrEqualTo(m.GetProperty("Height").GetInt32());
+            m.GetProperty("Orientation").GetInt32().Should().BeOneOf(0, 90, 180, 270);
+            int dpi = m.GetProperty("EffectiveDpi").GetInt32();
+            dpi.Should().BeGreaterThanOrEqualTo(96);
+            m.GetProperty("Scale").GetDouble().Should().BeApproximately(dpi / 96.0, 1e-9);
+        }
+    }
+
     /// <summary>One window, one element, one scrollable - enough that a dropped block shows.</summary>
     private static SnapshotResult FixedSnapshot
     {
