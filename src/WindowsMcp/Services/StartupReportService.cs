@@ -178,7 +178,7 @@ public sealed class StartupReportService : IStartupReportService
         string[] files;
         // C-1: the startup folder scan keeps its full reach (every entry, hidden included) by
         // asking for hidden entries and projecting the FileEntry rows back to paths.
-        try { files = (await _fs.ListAsync(folder, null, false, true, ct)).Select(e => e.Path).ToArray(); }
+        try { files = (await _fs.ListAsync(folder, null, false, true, int.MaxValue, ct)).Entries.Select(e => e.Path).ToArray(); }
         catch { return; }
 
         foreach (var file in files)

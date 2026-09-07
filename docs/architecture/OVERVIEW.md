@@ -123,7 +123,7 @@ Windows-MCP exposes **69 MCP tools** across 19 tool classes:
 |------|---------|
 | `FileRead` | Read a file as text (`max_bytes`, `encoding`); `offset_lines`/`limit_lines` return a JSON line window instead (C-1) |
 | `FileWrite` | Write text to a file (`confirm:true`), `append` to it, and create the parent directory unless `create_parents:false` |
-| `FileManage` | Copy, move (`overwrite:true` to replace an existing destination), delete (`confirm:true`, plus `recursive:true` for a non-empty directory), or list `{Path, Name, IsDirectory, Size, Modified, Hidden}` entries (`pattern`, `recursive`, `include_hidden`) |
+| `FileManage` | Copy, move (`overwrite:true` replaces an existing destination — set aside first, removed only once the copy or move has landed, put back on any failure or cancel), delete (`confirm:true`, plus `recursive:true` for a non-empty directory; a junction is unlinked, a missing path says so), or list `{Entries:[{Path, Name, IsDirectory, Size, Modified, Hidden, IsLink}], Truncated, MaxEntries}` (`pattern`, `recursive`, `include_hidden`, `max_entries`). Volume roots, device paths and a destination inside its own source are refused before anything is touched |
 | `FileInfo` | Get file/directory metadata |
 | `FileSearch` | Search for files by pattern |
 | `FileHash` | Compute SHA256/SHA1/MD5 hex digest |

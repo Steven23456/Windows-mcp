@@ -22,13 +22,17 @@
   *file*. `file_write(…, append = false, create_parents = true)` adds to the end instead of
   replacing (the reply says `appended`) and creates a missing parent directory unless
   `create_parents: false` refuses it by name. `file_manage(…, overwrite = false,
-  recursive = false, pattern = null, include_hidden = false)`: `copy`/`move` take `overwrite`, a
+  recursive = false, pattern = null, include_hidden = false, max_entries = 1000)`: `copy`/`move`
+  take `overwrite`, a
   directory `copy` copies the tree and a cross-volume `move` falls back to copy-then-delete;
   `delete` takes `recursive`; and `list` returns
-  `[{Path, Name, IsDirectory, Size, Modified, Hidden}]` with a case-insensitive name glob
-  (`pattern`), optional recursion, and hidden/system entries skipped unless `include_hidden`
+  `{Entries: [{Path, Name, IsDirectory, Size, Modified, Hidden, IsLink}], Truncated, MaxEntries}`
+  with a case-insensitive name glob
+  (`pattern`), optional recursion, hidden/system entries skipped unless `include_hidden`, and the
+  walk stopped at `max_entries` (1–100000)
   (a skipped directory is not descended into, and an inaccessible entry is skipped rather than
-  failing the listing). New pure `Services/LineWindow.cs`, new `FileEntry` and `TextWindow` DTOs,
+  failing the listing). New pure `Services/LineWindow.cs`, new `FileEntry`, `FileListing` and
+  `TextWindow` DTOs,
   and `IFileSystemService.ReadLinesAsync` beside the flags on `WriteTextAsync` / `CopyAsync` /
   `MoveAsync` / `DeleteAsync` / `ListAsync`. No new service — the count stays 39. Design note:
   `docs/design/C-1-file-flags.md`.
@@ -384,21 +388,83 @@
   source is refused before anything is touched, whatever `overwrite` says. A cancelled copy of a
   tree stops before the next directory as well as before the next file (a tree of empty
   directories had nothing to stop it at).
-- **`file_manage(list)` returns file entries, not a string array of paths** (parity C-1 — a
-  contract break). It used to answer with `Directory.EnumerateFileSystemEntries`' bare paths, so
-  telling a directory from a file, or reading a size, cost a `file_info` call per entry. It now
-  returns `[{Path, Name, IsDirectory, Size, Modified, Hidden}]` (`Size` is `0` for a directory,
-  `Modified` is UTC). Hidden and system entries, which used to be listed, are now skipped unless
-  `include_hidden: true`. **Migration:** read `Path` out of each object instead of treating the
-  element as a string, and pass `include_hidden: true` where the old full listing mattered
-  (`startup_report`'s startup-folder scan does exactly that internally, so its reach is
+- **`file_manage(list)` returns a bounded listing object, not a string array of paths** (parity
+  C-1 — a contract break). It used to answer with `Directory.EnumerateFileSystemEntries`' bare
+  paths, so telling a directory from a file, or reading a size, cost a `file_info` call per
+  entry. It now returns
+  `{Entries: [{Path, Name, IsDirectory, Size, Modified, Hidden, IsLink}], Truncated, MaxEntries}`
+  (`Size` is `0` for a directory, `Modified` is UTC, `IsLink` marks a junction or symlink).
+  Hidden and system entries, which used to be listed, are now skipped unless
+  `include_hidden: true`. The walk is **always** bounded: it stops at `max_entries` (default
+  1000, range 1–100000 — `0` is not "all" here) and says `Truncated: true`, because a recursive
+  listing of `C:\Windows` was 160 000 entries and 42 MB in one response; and it never descends
+  into a reparse point, so a self-referencing junction is one `IsLink: true` row instead of a
+  walk into the path limit. A `pattern` holding a path separator is refused naming the parameter
+  (a pattern is a name glob; `recursive: true` is how you descend), and `list` of a file says so
+  rather than answering empty. **Migration:** read `Entries[].Path` instead of treating the
+  element as a string, check `Truncated` (or raise `max_entries`) where a full listing matters,
+  and pass `include_hidden: true` where the old full listing mattered (`startup_report`'s
+  startup-folder scan does exactly that internally, and is not capped, so its reach is
   unchanged).
-- **Every file tool refuses a relative path** (parity C-1 — a contract break). `file_read`,
-  `file_write`, `file_manage` (`src` **and** `dst`) and `file_search`'s `root` now require a
-  fully qualified path (`Path.IsPathFullyQualified`; UNC passes) and raise an `ArgumentException`
-  naming the parameter **before** the service is touched. A relative path used to resolve against
-  the server's working directory — whatever the MCP host happened to set, and nothing the caller
-  could see. **Migration:** pass absolute paths.
+- **Every file tool refuses a relative path, and the `\\?\` / `\\.\` device forms** (parity C-1 —
+  a contract break). `file_read`, `file_write`, `file_manage` (`src` **and** `dst`),
+  `file_search`'s `root`, `file_hash`, `file_info`, `file_streams` and `archive` (`src` **and**
+  `dst`) now require a fully qualified path (`Path.IsPathFullyQualified`; UNC passes) and raise
+  an `ArgumentException` naming the parameter **before** the service is touched. A relative path
+  used to resolve against the server's working directory — whatever the MCP host happened to set,
+  and nothing the caller could see. The extended-length and device spellings are refused by the
+  same check, in every mix of separators (`\\?\`, `\\.\`, `//?/`, `//./`, `\\?/`, `/\?\`),
+  because they bypass the normalisation the containment guards rely on and a model has no reason
+  to send them. **Migration:** pass plain absolute paths.
+- **`file_manage`'s `copy` and `move` verify before they touch anything, and put back what they
+  replaced** (parity C-1, review round 4 — the semantics of `overwrite`). A missing or locked
+  source is reported before the destination is disturbed. An existing destination is no longer
+  deleted up front: with `overwrite: true` it is moved aside to a sibling
+  `<dst>.replaced.<guid>`, the copy or move runs, and only on success is the aside removed; any
+  failure or cancellation removes the partial destination, puts the previous content back and
+  removes the parent directories the call had created. The put-back is best effort — when it
+  cannot happen the error says so and names where the previous content is sitting — and a
+  cross-volume move commits the destination *before* it removes the source, so a file is never in
+  zero places. A volume or share root is refused as source, destination or delete target; a
+  directory copy or a cross-volume move neither descends into nor recreates a junction or symlink
+  (they are dropped, and the description says so); `delete` of a junction removes the link only,
+  never enumerates through it, needs no `recursive`, and answers `removed link '<path>' (its
+  target is untouched)`; `delete` of a path that is not there answers `nothing at '<path>' to
+  delete` rather than claiming a delete; `delete` clears a read-only bit rather than treating it
+  as a second gate; and containment is judged on both the literal path and the volume's own
+  spelling of it (`GetFinalPathNameByHandle`), so a `subst` letter, a mapped drive or a junction
+  cannot smuggle a destination into its own source. A failed `file_write` no longer leaves its
+  `.tmp.` file beside the target, and a failed `archive(zip)` no longer leaves a valid **empty**
+  archive where the caller's previous one was — the zip is built beside the target and moved into
+  place only when it is complete. New internal `Services/PathCanonical.cs` behind the
+  `IFinalPathNative` / `Win32FinalPathNative` seam (`CreateFile` and `GetFinalPathNameByHandle`
+  added to `NativeMethods.txt`) and one `DeleteTree` remover shared by `delete recursive:true`,
+  the aside and the cross-volume source removal. No new service — the count stays 39. Design
+  note: `docs/design/C-1-file-flags.md` (rounds 4 … 4f).
+- **A tool's own answer reaches the client instead of "An error occurred invoking …"** (parity
+  C-1, review round 4). `ToolErrors.IsCallerFacing` — the host's call-tool filter in
+  `Hosting/WindowsMcpHost.cs` — gains `KeyNotFoundException`, `IOException` (so
+  `FileNotFoundException`, `DirectoryNotFoundException`, `PathTooLongException` and "the file is
+  in use"), `UnauthorizedAccessException` and `TimeoutException` beside `ArgumentException` and
+  `InvalidOperationException`. These are deliberate answers, not faults: the window matcher's
+  "Open windows: …", an element id no longer in the cache, `registry_get` on a missing key, an
+  app the catalog does not know, `scheduled_task`, `watch`, `wait_for`'s old overload and every
+  file tool's not-found / access-denied / path-too-long message with the path in it — all masked
+  until now. `NullReferenceException`, `IndexOutOfRangeException`, `OutOfMemoryException`,
+  `COMException` and `Win32Exception` keep the SDK's masking. Every surfaced message is capped at
+  2 000 characters by `ToolErrors.MessageFor`, cut on a whole character (never a lone surrogate)
+  and marked ` [cut: 2000-character limit] …`, so a path-too-long answer cannot be a 32 KB
+  response. **Migration:** none — a failing call still comes back as an MCP error result; its
+  text is now the message the server meant to send.
+- **`process(kill, graceful: true)` reports a late exit as graceful, and a cancelled wait kills
+  nothing** (parity C-3, review round 4). The grace timeout is re-checked against `HasExited`, so
+  a process that answered `WM_CLOSE` just as the clock ran out is reported
+  `exitedGracefully: true, forced: false` — it closed, late — instead of being counted as forced.
+  Cancelling the request during the wait rethrows without killing: the process has been asked to
+  close and is left to answer. `grace_ms` is per process on a name kill, and the tool description
+  now says both. `process(list)` refuses `includeLineage` **and** `groupByRoot` together naming
+  both rather than silently picking one, and `process(orphans)` refuses each of them by name — it
+  already carries the lineage columns.
 - **`file_read` returns JSON when it is windowed, and `file_write` is no longer `idempotentHint`**
   (parity C-1). A call with `offset_lines` and/or `limit_lines` answers with the
   `{path, totalLines, offset, returned, truncated, content}` object rather than raw text; a call

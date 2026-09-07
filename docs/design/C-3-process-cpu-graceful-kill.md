@@ -4,8 +4,9 @@
 **Roadmap:** [C-roadmap](C-roadmap.md) phase 2, last item — decisions R4 (two-sample CPU,
 substring filter kept, `limit` default all) and R5 (graceful kill is our definition, default
 off) ·
-**Status:** implemented 2026-09-06 (build clean, headless suite green — see CHANGELOG
-[Unreleased]; the Notepad graceful close is a desktop test) ·
+**Status:** implemented 2026-09-06, revised 2026-09-07 by the round-4 review below
+(build clean, headless suite green — see CHANGELOG [Unreleased]; the Notepad graceful close is
+a desktop test) ·
 **Effort:** ~3 h including the RED/GREEN passes.
 
 ## Problem
@@ -94,3 +95,21 @@ always `TerminateProcess`, which loses an editor's unsaved work with no chance t
 - `KillGuardedAsync` stays on the interface but the tool no longer calls it: a `startTime` kill
   rides in `KillOptions.ExpectedStartUtc` so it gets the same JSON result.
 - CPU on the lineage and group rows is a follow-up; only the plain list carries it.
+
+## Round 4 — the review-agent's findings (2026-09-07, implemented the same day)
+
+- **R4-9 Kill outcomes are exact.** After the grace period, a process that has exited on its own
+  by then is reported `exitedGracefully:true, forced:false` (it closed, late), not forced. A
+  caller cancellation during the grace wait rethrows without killing: the process has been asked
+  to close and is left to answer, and the description says so. `grace_ms` is per process on a
+  name kill, said in the description. (`Process.Kill()` on an exited process does not throw on
+  .NET 10 — verified with a scratch program — so no catch is needed around it.)
+- **R4-10 `groupByRoot` with `includeLineage`** is refused naming both, not silently resolved
+  in favour of one (a pre-existing gap the external review named).
+
+### Tests (round 4)
+
+| # | Requirement | Test(s) | Category |
+|---|---|---|---|
+| R4-9 | A window that closes just after the grace period expires → `exitedGracefully:true` (fake seam, a child that exits on its own at a known moment); cancel during the wait → `OperationCanceledException`, child alive, one `WM_CLOSE` posted, nothing killed; the description names the per-process `grace_ms` and the cancel behaviour | `ProcessServiceKillTests`, `ProcessToolsTests` | Integration / Unit |
+| R4-10 | Both flags → `ArgumentException` naming both; each alone unchanged | `ProcessToolsTests` | Unit |

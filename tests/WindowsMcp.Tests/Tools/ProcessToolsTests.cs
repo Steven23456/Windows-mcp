@@ -456,6 +456,33 @@ public class ProcessToolsTests
         json.Should().Be("[]");
     }
 
+    /// <summary>
+    /// C-1 R4b-7: <c>orphans</c> IS the lineage shape, so <c>includeLineage</c> and
+    /// <c>groupByRoot</c> are list-only options that mean nothing here. Ignoring them silently is
+    /// the same failure <c>sort_by</c>/<c>limit</c> are refused for: a caller who asked for trees
+    /// (<c>groupByRoot</c>) gets a flat list and cannot tell it apart from the trees they asked for.
+    /// </summary>
+    [Fact]
+    public async Task Process_orphans_refuses_the_list_only_shape_flags()
+    {
+        var mock = new Mock<IProcessService>();
+        mock.Setup(m => m.ListLineageAsync(It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(System.Array.Empty<ProcessLineageDto>());
+        mock.Setup(m => m.GroupByRootAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(System.Array.Empty<ProcessGroupDto>());
+        var tools = Make(mock.Object);
+
+        var withLineage = () => tools.Process("orphans", includeLineage: true);
+        var withGroup = () => tools.Process("orphans", groupByRoot: true);
+
+        (await withLineage.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("includeLineage", "the refusal names the flag the caller has to drop");
+        (await withGroup.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("groupByRoot");
+        mock.Verify(m => m.ListLineageAsync(It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        mock.Verify(m => m.GroupByRootAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -643,6 +670,52 @@ public class ProcessToolsTests
         foreach (var name in new[] { "sort_by", "limit", "graceful", "grace_ms" })
             method.GetParameters().Single(p => p.Name == name)
                 .GetCustomAttribute<DescriptionAttribute>().Should().NotBeNull($"'{name}' needs its own description");
+    }
+
+    // ---- C-3 R4-10: two list shapes cannot both be the answer ---------------------------------
+
+    /// <summary>
+    /// R4-10: <c>includeLineage</c> and <c>groupByRoot</c> are two different result shapes and the
+    /// tool silently picks the group one, so a caller who asked for lineage rows gets collapsed
+    /// trees and no hint that their flag was dropped. Refuse, naming both — the same rule the
+    /// tool already applies to sort_by/limit on those shapes.
+    /// </summary>
+    [Fact]
+    public async Task Process_list_refuses_includeLineage_together_with_groupByRoot_naming_both()
+    {
+        var mock = new Mock<IProcessService>();
+        mock.Setup(m => m.GroupByRootAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(System.Array.Empty<ProcessGroupDto>());
+        mock.Setup(m => m.ListLineageAsync(It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(System.Array.Empty<ProcessLineageDto>());
+        var tools = Make(mock.Object);
+
+        var act = () => tools.Process("list", includeLineage: true, groupByRoot: true);
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message
+            .Should().Contain("includeLineage").And.Contain("groupByRoot",
+                "a refusal that names only one of them leaves the caller guessing which to drop");
+        mock.Verify(m => m.GroupByRootAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        mock.Verify(m => m.ListLineageAsync(It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// C-3 R4-9: the two things about a graceful kill a caller cannot discover by trying it — that
+    /// <c>grace_ms</c> is spent per process on a name kill (five matches can take five times as
+    /// long), and that cancelling during the grace leaves the process running rather than killing
+    /// it. Both are decisions, and the description is where a model reads them.
+    /// </summary>
+    [Fact]
+    public void Process_describes_the_per_process_grace_and_what_cancelling_does()
+    {
+        var description = typeof(ProcessTools).GetMethod(nameof(ProcessTools.Process))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should().MatchEquivalentOf("*grace_ms*per process*",
+            "a name kill spends the grace period on each match, so the wall clock is grace_ms x matches");
+        description.Should().ContainEquivalentOf("cancel",
+            "cancelling mid-grace leaves the process alive to answer the close - the opposite of what "
+            + "a caller who cancels a 'kill' would assume");
     }
 
 }

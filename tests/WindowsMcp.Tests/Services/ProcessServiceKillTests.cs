@@ -245,6 +245,82 @@ public class ProcessServiceKillTests
         finally { KillQuietly(child); }
     }
 
+    // ---- C-3 R4-9: the outcome has to be exact ------------------------------------------------
+
+    /// <summary>
+    /// R4-9: a process that has gone by the time the grace period is up closed — late — and the
+    /// result has to say so. Reporting <c>forced:true</c> for a process TerminateProcess never
+    /// touched tells the caller their editor was killed with unsaved work when in fact it saved
+    /// and exited.
+    /// <para>
+    /// Deterministic by construction: the fake window answers the close by ending the child and
+    /// WAITING for it, so the child is provably gone before the service starts waiting, and
+    /// <c>GraceMs:0</c> means the grace period is provably over as well. The alternative — a child
+    /// that exits at a known moment near the grace expiry — is a coin flip between the exit
+    /// notification and the timeout, and a flaky test is worse than no test.
+    /// </para>
+    /// <para>
+    /// What this does NOT pin (GREEN round 4, measured): the exit is already visible to
+    /// <c>WaitForExitAsync</c> when the wait begins, so the service takes the fast path and the
+    /// post-wait re-check (<c>proc.Refresh(); exited = proc.HasExited;</c>) never changes the
+    /// answer here - deleting those lines leaves this class 11/11 green. The re-check covers the
+    /// process that exits BETWEEN the grace timing out and the kill, a window with no seam in it;
+    /// the outcome is identical either way, which is why the assertions below hold regardless.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Graceful_kill_of_a_process_gone_by_the_end_of_the_grace_is_not_reported_as_forced()
+    {
+        var windows = new FakeProcessWindows();
+        var child = StartWindowlessChild();
+        try
+        {
+            windows.GiveWindows(child.Id, 0x7777);
+            windows.OnPost = _ =>
+            {
+                child.Kill(entireProcessTree: true);
+                child.WaitForExit(10_000);
+            };
+
+            var result = await Make(windows).KillAsync(child.Id, new KillOptions(Graceful: true, GraceMs: 0));
+
+            windows.Posted.Should().Equal(new long[] { 0x7777 });
+            result.Graceful.Should().BeTrue();
+            result.ExitedGracefully.Should().BeTrue("the process closed on its own, however late");
+            result.Forced.Should().BeFalse("nothing was terminated, so the result must not claim it was");
+        }
+        finally { KillQuietly(child); }
+    }
+
+    /// <summary>
+    /// R4-9: the caller cancelling mid-grace is not "kill it now". The process has been asked to
+    /// close and may be showing a save prompt; the honest answer is to rethrow and leave it alone.
+    /// Cancelling from inside the fake's <c>PostClose</c> puts the cancellation exactly where the
+    /// requirement is about — after the close was sent, before the wait finished — with no race.
+    /// </summary>
+    [Fact]
+    public async Task Graceful_kill_cancelled_after_the_close_was_sent_rethrows_and_kills_nothing()
+    {
+        var windows = new FakeProcessWindows();
+        var child = StartWindowlessChild();
+        using var cts = new CancellationTokenSource();
+        try
+        {
+            windows.GiveWindows(child.Id, 0x8888);
+            windows.OnPost = _ => cts.Cancel();
+
+            var act = () => Make(windows).KillAsync(
+                child.Id, new KillOptions(Graceful: true, GraceMs: 30_000), cts.Token);
+
+            await act.Should().ThrowAsync<OperationCanceledException>(
+                "the caller's cancellation is not a licence to terminate the process");
+            windows.Posted.Should().Equal(new long[] { 0x8888 },
+                "the close was sent once; cancelling does not re-send it");
+            child.HasExited.Should().BeFalse("a cancelled graceful kill leaves the process to answer the close");
+        }
+        finally { KillQuietly(child); }
+    }
+
     // ---- R4: the same path through the REAL window seam ---------------------------------------
 
     /// <summary>

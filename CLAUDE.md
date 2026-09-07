@@ -196,6 +196,14 @@ failure modes, and each fix was scoped to the reported symptom.
   the transport is stateless; the bearer gate is an `app.Use` **before** `MapMcp` so it covers
   every path. Binding off-loopback without an API key is a startup **refusal**, not a warning —
   keep it that way. `HttpTransportTests` drives the real host in-process on an ephemeral port.
+- **Caller-facing errors:** a *deliberate* refusal or lookup miss must throw one of
+  `ArgumentException`, `InvalidOperationException`, `KeyNotFoundException`, `IOException` (incl.
+  `FileNotFound`/`DirectoryNotFound`/`PathTooLong`), `UnauthorizedAccessException` or
+  `TimeoutException` — `ToolErrors.IsCallerFacing`, checked by the call-tool filter in
+  `WindowsMcpHost.AddWindowsMcp`, which returns `ToolErrors.MessageFor(ex)` (the message, capped
+  at 2 000 characters). Anything else keeps the SDK's `"An error occurred invoking '<tool>'."`
+  masking, so a refusal thrown as a bare `Exception` is invisible to the caller. Put the path,
+  the name and the alternatives *in the message*; it is the answer.
 - **COM vtable gaps:** when declaring COM interfaces, use `_VtblGap1_N()` to skip unused slots,
   or declare only the leading methods you call (an `InterfaceIsIUnknown` interface binds declared
   methods from vtable slot 3). Never stub later methods with guessed signatures — silent stack

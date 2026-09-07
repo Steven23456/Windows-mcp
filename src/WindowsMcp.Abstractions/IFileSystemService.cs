@@ -28,8 +28,10 @@ public interface IFileSystemService
     Task DeleteAsync(string path, bool recursive, CancellationToken ct = default);
     /// <summary>C-1 R3: entries of a directory. <paramref name="pattern"/> is a name glob;
     /// hidden AND system entries are skipped unless <paramref name="includeHidden"/>, and
-    /// recursion does not descend into skipped directories.</summary>
-    Task<FileEntry[]> ListAsync(string path, string? pattern, bool recursive, bool includeHidden, CancellationToken ct = default);
+    /// recursion does not descend into skipped directories. C-1 R4-5: the walk observes
+    /// <paramref name="ct"/> per entry and stops at <paramref name="maxEntries"/>, reporting
+    /// <c>Truncated</c>.</summary>
+    Task<FileListing> ListAsync(string path, string? pattern, bool recursive, bool includeHidden, int maxEntries, CancellationToken ct = default);
     Task ZipAsync(string srcDir, string dstZip, CancellationToken ct = default);
     Task UnzipAsync(string srcZip, string dstDir, CancellationToken ct = default);
 }

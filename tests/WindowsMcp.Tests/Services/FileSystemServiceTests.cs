@@ -137,4 +137,52 @@ public class FileSystemServiceTests : IDisposable
         // The two accessible identical files are still found; the locked one is skipped, not fatal.
         dups.Select(d => d.Path).Should().BeEquivalentTo(new[] { f1, f2 });
     }
+
+    // ---- C-1 R4d-5: the failure sentence and the tail are two sentences -------------------------
+
+    /// <summary>
+    /// The second half of <c>Aside.NotRestored</c>'s message, quoted here as the caller sees it so
+    /// the join is asserted against a real tail rather than a placeholder.
+    /// </summary>
+    private const string Tail = "The destination 'C:\\dst' could not be put back as it was; its previous content is at 'C:\\dst.replaced.0'.";
+
+    /// <summary>
+    /// R4d-5: <c>NotRestored</c> glues the underlying failure's message to its own sentence. Most
+    /// framework messages end in a period, so the join reads correctly by luck; the ones that do
+    /// not — a Win32 message, or the very common "…the file 'C:\x'" that ends on a quote — run the
+    /// two sentences together into one unreadable line ("cannot access the file 'C:\x' The
+    /// destination…"). The cause is terminated when it does not terminate itself, and an empty
+    /// cause contributes nothing at all rather than a leading ". ".
+    /// <para>
+    /// A unit test rather than an integration one because the causes that need this are exactly
+    /// the ones a test cannot provoke on demand: the IOException a locked file produces
+    /// (<see cref="FileSystemServiceRound4Tests.A_restore_that_cannot_put_the_destination_back_says_where_the_previous_content_is"/>)
+    /// already ends in a period, so it exercises the first row only.
+    /// </para>
+    /// </summary>
+    [Theory]
+    [InlineData("boom", "boom. " + Tail)]
+    [InlineData("boom.", "boom. " + Tail)]
+    [InlineData("boom!", "boom! " + Tail)]
+    [InlineData("boom?", "boom? " + Tail)]
+    [InlineData("boom'", "boom'. " + Tail)]
+    [InlineData("  boom  ", "boom. " + Tail)]
+    [InlineData("", Tail)]
+    [InlineData("   ", Tail)]
+    public void TwoSentences_terminates_a_cause_that_does_not_terminate_itself(string cause, string expected)
+        => FileSystemService.TwoSentences(cause, Tail).Should().Be(expected);
+
+    /// <summary>
+    /// C-1 R4e-5: a cause that ends in a colon, a semicolon or an ellipsis already reads as the
+    /// end of a clause; the added period turns it into <c>":."</c> — which no message should ever
+    /// contain, and Win32 causes end in a colon often enough ("the process cannot access the file:")
+    /// for it to be the first thing a caller sees. Terminating punctuation is what
+    /// <see cref="FileSystemService.TwoSentences"/> is looking for, and these three are it.
+    /// </summary>
+    [Theory]
+    [InlineData("ends with colon:", "ends with colon: " + Tail)]
+    [InlineData("ends with semicolon;", "ends with semicolon; " + Tail)]
+    [InlineData("ends with an ellipsis…", "ends with an ellipsis… " + Tail)]
+    public void TwoSentences_adds_no_period_after_a_colon_semicolon_or_ellipsis(string cause, string expected)
+        => FileSystemService.TwoSentences(cause, Tail).Should().Be(expected);
 }

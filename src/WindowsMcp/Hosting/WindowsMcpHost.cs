@@ -126,7 +126,7 @@ internal static class WindowsMcpHost
                     return new CallToolResult
                     {
                         IsError = true,
-                        Content = [new TextContentBlock { Text = ex.Message }],
+                        Content = [new TextContentBlock { Text = ToolErrors.MessageFor(ex) }],
                     };
                 }
             }))

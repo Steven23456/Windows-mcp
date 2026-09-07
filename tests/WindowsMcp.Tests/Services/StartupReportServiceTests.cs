@@ -37,8 +37,10 @@ public class StartupReportServiceTests
             Tasks.Setup(x => x.ListDetailedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<ScheduledTaskDetailDto>());
             Fs.Setup(x => x.ReadTextAsync(It.IsAny<string>(), It.IsAny<long>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync("");
+            // C-1 R4-5: the listing is bounded now, so the startup scan takes FileListing.Entries.
             Fs.Setup(x => x.ListAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<bool>(),
-                It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<FileEntry>());
+                    It.IsAny<bool>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new FileListing(Array.Empty<FileEntry>(), false, int.MaxValue));
             Lsp.Setup(x => x.Enumerate()).Returns(Array.Empty<LspProviderDto>());
             Auth.Setup(x => x.Inspect(It.IsAny<string?>())).Returns(new AuthenticodeInfo(false, null));
             Shortcuts.Setup(x => x.ResolveTarget(It.IsAny<string>())).Returns<string>(p => p);
