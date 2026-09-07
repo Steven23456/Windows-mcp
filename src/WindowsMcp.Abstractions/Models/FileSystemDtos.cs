@@ -52,3 +52,17 @@ public record RegistryKeyDto(string Path, RegistryValueDto[] Values, string[] Su
 /// went with it (counted before the delete; the key itself is not counted).
 /// </summary>
 public record RegistryKeyDeleteResult(bool Existed, int SubKeysRemoved);
+
+/// <summary>
+/// One entry of a <c>file_manage(list)</c> listing (C-1 R3): the full path plus the type, size and
+/// hidden flag a caller would otherwise need a <c>file_info</c> round-trip per entry to learn.
+/// <see cref="Size"/> is 0 for a directory.
+/// </summary>
+public record FileEntry(string Path, string Name, bool IsDirectory, long Size, DateTime Modified, bool Hidden);
+
+/// <summary>
+/// A line window of a text file (C-1): <see cref="Offset"/> is 1-based like upstream,
+/// <see cref="Returned"/> is how many lines <see cref="Content"/> holds (joined with <c>\n</c>),
+/// and <see cref="Truncated"/> says lines remain past the window.
+/// </summary>
+public record TextWindow(int TotalLines, int Offset, int Returned, bool Truncated, string Content);

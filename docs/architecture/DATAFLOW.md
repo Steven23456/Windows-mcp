@@ -496,6 +496,19 @@ expectedStartUtc when given, then walks descendants leaves-first. Before killing
 re-reads the live start time and compares it to that PID's snapshot CreationUtc, skipping any
 mismatch — so a PID reused between the snapshot and the kill is not an innocent bystander (guards
 PID reuse mid-walk). A snapshot row with no CIM date cannot be validated and is killed as-is.
+
+Plain list (C-3): ListAsync(ProcessListOptions) does not use WMI at all — Process.GetProcesses(),
+one TotalProcessorTime reading timestamped per process, a 250 ms wait, a second reading, then
+CpuSample.Percent per process (normalised across all cores) and CpuSample.SortAndLimit for
+sort_by/limit. The lineage, group and orphan shapes above carry no CPU column, which is why
+sort_by and limit are refused rather than ignored with them. ListAsync(nameFilter) — the overload
+the name kill and startup_report use — keeps its old shape and does not sample.
+
+Graceful kill (C-3): KillAsync(pid, KillOptions) runs the start-time guard first when one is
+given, then posts WM_CLOSE through IProcessWindowNative to every visible top-level window the pid
+owns, waits for the exit bounded by GraceMs, and calls Kill() only if it is still alive. Nothing
+to post to = forced at once, WaitedMs 0. Output: {killed:[{pid, name, graceful, exitedGracefully,
+forced, waitedMs}]} for a pid or name kill; the tree kill keeps its text count.
 ```
 
 ---
@@ -869,6 +882,8 @@ Scrollable (1):
 | `wait` (`InputTools`) | The only tool whose *job* is a delay: one `Task.Delay(seconds)` on the request's cancellation token, `seconds` in (0, 60] | Validated in the tool before the delay; outside the range is an `ArgumentException` naming it and pointing at `wait_for`. No process is spawned — it replaces `powershell("Start-Sleep")`, which paid a cold start and took the serialization gate |
 | `launch`'s window wait | `LaunchWait.ForWindowAsync` reads the inventory immediately, then every 250 ms until `timeout_ms` (default 10 000, max 60 000); the last sleep is clamped to the remaining budget | A timeout is `WindowDetected:false` with the pid, never an exception — a packaged app or a browser may hand its window to another process |
 | `AppCatalogService` | The catalog is read from the Start Menu and the package manager at most once per 5 minutes; a resolve miss forces one extra refresh | Enumerating a few hundred packages costs ~1 s cold, which is why it is cached rather than read per `launch` |
+| `ProcessService.ListAsync(ProcessListOptions)` | One 250 ms window (`CpuSampleWindow`) between the two `TotalProcessorTime` readings of every plain `process(list)` | Each reading is timestamped per process, so a walk of a few hundred processes does not over-credit the ones read first. `orphans`, `includeLineage`, `groupByRoot` and the `ListAsync(nameFilter)` overload do not sample and pay nothing; the delay is injected, so the unit tests do not pay it either |
+| `ProcessService.KillAsync(pid, KillOptions)` | `graceful:true` waits up to `GraceMs` (default 3000, range 0–60000) after posting `WM_CLOSE` before forcing the process | A pid with no visible window is forced at once (`waitedMs:0`); a hard kill (`graceful:false`) waits nothing at all |
 | `PowerShellService` | Async wait on process exit | 15-min execution backstop (armed after the serialization gate); caller cancellation kills the process tree |
 | `ShellTools` heartbeat | Progress notification every 10s during a foreground `powershell` call | Lets spec-compliant clients reset their request timeout |
 | `JobService` | Background jobs poll-based; per-job 60-min backstop | Runs outside the PowerShell serialization gate |

@@ -8,8 +8,158 @@ namespace WindowsMcp.Services;
 public sealed class ProcessService : IProcessService
 {
     private readonly IWmiService _wmi;
+    private readonly IProcessWindowNative _windows;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
 
-    public ProcessService(IWmiService wmi) => _wmi = wmi;
+    /// <summary>C-3 (roadmap R4): the window between the two CPU-time readings of a plain list.</summary>
+    internal static readonly TimeSpan CpuSampleWindow = TimeSpan.FromMilliseconds(250);
+
+    public ProcessService(IWmiService wmi) : this(wmi, Win32ProcessWindowNative.Instance) { }
+
+    /// <summary>
+    /// C-3: the testable constructor — the window seam the graceful kill posts through and the
+    /// delay the CPU sample uses, so neither needs a desktop or a real 250 ms.
+    /// </summary>
+    internal ProcessService(IWmiService wmi, IProcessWindowNative windows, Func<TimeSpan, CancellationToken, Task>? delay = null)
+    {
+        _wmi = wmi;
+        _windows = windows;
+        _delay = delay ?? Task.Delay;
+    }
+
+    /// <summary>
+    /// C-3: the plain list with a CPU column — two <c>TotalProcessorTime</c> readings across one
+    /// <see cref="CpuSampleWindow"/>, normalised by <see cref="CpuSample.Percent"/> — sorted and
+    /// capped by the options. A process that exits between the readings reads 0. The old
+    /// <c>ListAsync(nameFilter)</c> overload does not sample (a name kill enumerates through it
+    /// and must not pay the window).
+    /// </summary>
+    public async Task<ProcessDto[]> ListAsync(ProcessListOptions options, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var processes = Process.GetProcesses();
+        try
+        {
+            IEnumerable<Process> q = processes;
+            if (!string.IsNullOrWhiteSpace(options.NameFilter))
+                q = q.Where(p => p.ProcessName.Contains(options.NameFilter, StringComparison.OrdinalIgnoreCase));
+            var candidates = q.ToArray();
+
+            // Each reading is timestamped per process: walking a few hundred processes takes
+            // tens of milliseconds at either end, so one shared elapsed time would credit the
+            // processes read first with CPU time from a longer window than it divides by.
+            var before = new Dictionary<int, (TimeSpan Cpu, long At)>(candidates.Length);
+            foreach (var p in candidates)
+            {
+                try { before[p.Id] = (p.TotalProcessorTime, Stopwatch.GetTimestamp()); }
+                catch { /* exited, or a protected process: no CPU column for it */ }
+            }
+
+            await _delay(CpuSampleWindow, ct);
+
+            var percent = new Dictionary<int, double>(candidates.Length);
+            int cores = Environment.ProcessorCount;
+            foreach (var p in candidates)
+            {
+                if (!before.TryGetValue(p.Id, out var first)) continue;
+                try
+                {
+                    p.Refresh();
+                    var after = p.TotalProcessorTime;
+                    var elapsed = Stopwatch.GetElapsedTime(first.At);
+                    percent[p.Id] = CpuSample.Percent(first.Cpu, after, elapsed, cores);
+                }
+                catch { /* exited between the readings */ }
+            }
+
+            var rows = new List<ProcessDto>(candidates.Length);
+            foreach (var p in candidates)
+            {
+                try
+                {
+                    double cpu = percent.GetValueOrDefault(p.Id);
+                    string? path = null;
+                    try { path = p.MainModule?.FileName; }
+                    catch { /* system/protected processes throw on MainModule access */ }
+                    rows.Add(new ProcessDto(p.Id, p.ProcessName, path, p.WorkingSet64 / 1024 / 1024, cpu));
+                }
+                catch (InvalidOperationException)
+                {
+                    // Gone since the snapshot; a row for a process that no longer exists helps no one.
+                }
+            }
+            return CpuSample.SortAndLimit(rows, options.SortBy, options.Limit);
+        }
+        finally
+        {
+            foreach (var p in processes)
+                p.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// C-3 (roadmap R5): the start-time guard first when given (a mismatch kills nothing); then,
+    /// when graceful, <c>WM_CLOSE</c> to every visible top-level window of the pid through the
+    /// seam, a bounded wait for the exit, and <c>Kill()</c> only if it is still there. A process
+    /// with nothing to close is killed at once and the result says so.
+    /// </summary>
+    public async Task<KillResult> KillAsync(int pid, KillOptions options, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        using var proc = Process.GetProcessById(pid);   // ArgumentException if gone
+        string? name = null;
+        try { name = proc.ProcessName; } catch { /* exited */ }
+
+        if (options.ExpectedStartUtc is DateTime expected)
+        {
+            DateTime actual;
+            try { actual = proc.StartTime.ToUniversalTime(); }
+            catch { throw new InvalidOperationException($"cannot read start time of pid {pid} to verify"); }
+            if (Math.Abs((actual - expected).TotalSeconds) > 1.5)
+                throw new InvalidOperationException(
+                    $"pid {pid} start time {actual:o} != expected {expected:o}; aborting (possible PID reuse)");
+        }
+
+        if (!options.Graceful)
+        {
+            proc.Kill();
+            return new KillResult(pid, name, false, false, true, 0);
+        }
+
+        int posted = 0;
+        foreach (var hwnd in _windows.TopLevelWindowsOf(pid))
+        {
+            if (_windows.PostClose(hwnd)) posted++;
+        }
+        if (posted == 0)
+        {
+            proc.Kill();
+            return new KillResult(pid, name, true, false, true, 0);
+        }
+
+        var clock = Stopwatch.StartNew();
+        bool exited;
+        using (var grace = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            grace.CancelAfter(Math.Max(options.GraceMs, 0));
+            try
+            {
+                await proc.WaitForExitAsync(grace.Token);
+                exited = true;
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                exited = false;
+            }
+        }
+        int waited = (int)clock.ElapsedMilliseconds;
+        if (exited)
+            return new KillResult(pid, name, true, true, false, waited);
+
+        try { proc.Kill(); }
+        catch (InvalidOperationException) { /* exited between the wait and the kill */ }
+        return new KillResult(pid, name, true, false, true, waited);
+    }
 
     public Task<ProcessDto[]> ListAsync(string? nameFilter = null, CancellationToken ct = default)
     {

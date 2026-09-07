@@ -327,7 +327,11 @@ Windows-mcp.slnx
 │   │   │   ├── AppCatalogService.cs       (+ AppCatalog, LaunchWait, IAppActivator and
 │   │   │   │                               Win32AppActivator — B-8's catalog, window wait
 │   │   │   │                               and activation)
-│   │   │   ├── ProcessService.cs          (+ ArgvJson — B-11's args_json parser)
+│   │   │   ├── ProcessService.cs          (+ ArgvJson — B-11's args_json parser;
+│   │   │   │                               CpuSample, IProcessWindowNative and
+│   │   │   │                               Win32ProcessWindowNative — C-3's CPU sample,
+│   │   │   │                               sort/limit and graceful-kill window seam)
+│   │   │   ├── FileSystemService.cs       (+ LineWindow — C-1's pure file_read window)
 │   │   │   ├── RegistryService.cs         (+ RegistryGuard — C-2's pure root denylist)
 │   │   │   ├── NotificationService.cs     (+ IToastSink and WinRtToastSink — C-4's
 │   │   │   │                               in-process WinRT toast seam)

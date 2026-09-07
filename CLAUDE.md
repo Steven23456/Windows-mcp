@@ -113,11 +113,13 @@ and the plugin entry shows as disconnected — expected, not a bug. Register `bu
 directly (README "Register with Claude Code"); plugin delivery from a clone still needs either a
 build step before install or a changed manifest (see `todo.md`).
 
-## Test-first workflow (`test-agent`)
+## Test-first workflow (`test-agent`, `review-agent`)
 
-Tests come **before** the implementation. `.claude/agents/test-agent.md` is an Opus subagent that
-owns `tests/WindowsMcp.Tests`; use it for every feature, fix, parity item, and refactor, not just
-the large ones:
+Tests come **before** the implementation, and an adversarial review comes **after** it.
+`.claude/agents/test-agent.md` is an Opus subagent that owns `tests/WindowsMcp.Tests`;
+`.claude/agents/review-agent.md` is an Opus subagent that reads the finished diff cold and hunts
+for the inputs the tests never named. Use both for every feature, fix, parity item, and refactor,
+not just the large ones:
 
 1. **RED — before writing any production code**, delegate to `test-agent` with the requirements
    (the user's ask, the `docs/design/<ID>-*.md` note, the parity-checklist item's "Tests." /
@@ -131,11 +133,21 @@ the large ones:
    the changed files, closes every open row in the matrix, checks the tests bite (a deliberate
    one-line break must turn something red), and flags mocked-only paths that need an
    `Integration` sibling.
-4. Then `docs-agent` for the doc surfaces, then commit.
+4. **REVIEW — after GREEN, before the PR**, delegate the diff (`git diff main...HEAD` plus the
+   working tree) to `review-agent`. It enumerates, per changed behaviour, the inputs the
+   specification never mentioned — existing state at the target, containment and aliasing in
+   every direction, cancellation in every loop, refusals that must run before any mutation,
+   partial failure, changed defaults, error types the client never sees — and reports concrete
+   input → wrong outcome findings with their sibling cases. Every finding goes back to
+   `test-agent` as a RED row, then through steps 2–3 again; **fix the family, not the reported
+   case**. "Nothing found, every family examined" is a valid outcome and the normal one.
+5. Then `docs-agent` for the doc surfaces, then commit and the PR.
 
-The agent never writes feature logic, never edits this file, and never commits. Skipping RED is
-the exception, not the default, and needs a stated reason (a pure doc change, a rename with no
-behaviour, a one-line typo).
+The agents never write feature logic, never edit this file, and never commit. Skipping RED or
+REVIEW is the exception, not the default, and needs a stated reason (a pure doc change, a rename
+with no behaviour, a one-line typo). The review step exists because PR #25 went through three
+external review rounds after a green suite: the tests proved the design note, not the code's
+failure modes, and each fix was scoped to the reported symptom.
 
 ## Conventions (enforced)
 
@@ -168,8 +180,8 @@ behaviour, a one-line typo).
    auto-register; both transports pick it up from there). A process-level option from
    `ServerOptions` crosses into the tool layer as a registered public options record (see
    `ScreenshotOptions`, `UiTreeOptions`), never read from the environment inside a service.
-5. `test-agent` again for the coverage close-out, then `docs-agent` for `docs/architecture/*`
-   counts and `CHANGELOG.md` under `## [Unreleased]`.
+5. `test-agent` again for the coverage close-out, `review-agent` on the diff, then `docs-agent`
+   for `docs/architecture/*` counts and `CHANGELOG.md` under `## [Unreleased]`.
 
 ## Key technical notes (still true in C#)
 

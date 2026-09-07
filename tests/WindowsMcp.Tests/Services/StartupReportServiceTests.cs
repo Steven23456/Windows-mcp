@@ -37,7 +37,8 @@ public class StartupReportServiceTests
             Tasks.Setup(x => x.ListDetailedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<ScheduledTaskDetailDto>());
             Fs.Setup(x => x.ReadTextAsync(It.IsAny<string>(), It.IsAny<long>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync("");
-            Fs.Setup(x => x.ListAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<string>());
+            Fs.Setup(x => x.ListAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<bool>(),
+                It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(Array.Empty<FileEntry>());
             Lsp.Setup(x => x.Enumerate()).Returns(Array.Empty<LspProviderDto>());
             Auth.Setup(x => x.Inspect(It.IsAny<string?>())).Returns(new AuthenticodeInfo(false, null));
             Shortcuts.Setup(x => x.ResolveTarget(It.IsAny<string>())).Returns<string>(p => p);

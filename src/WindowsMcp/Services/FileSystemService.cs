@@ -18,6 +18,13 @@ public sealed class FileSystemService : IFileSystemService
         return await File.ReadAllTextAsync(path, enc, ct);
     }
 
+    /// <summary>C-1: the file decoded as <see cref="ReadTextAsync"/> does, then cut by <see cref="LineWindow"/>.</summary>
+    public async Task<TextWindow> ReadLinesAsync(string path, long maxBytes, string encoding, int offsetLines, int limitLines, CancellationToken ct = default)
+    {
+        var text = await ReadTextAsync(path, maxBytes, encoding, ct);
+        return LineWindow.Slice(text, offsetLines, limitLines);
+    }
+
     public async Task<byte[]> ReadBytesAsync(string path, long maxBytes, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -27,7 +34,7 @@ public sealed class FileSystemService : IFileSystemService
         return await File.ReadAllBytesAsync(path, ct);
     }
 
-    public async Task WriteTextAsync(string path, string content, string encoding, CancellationToken ct = default)
+    public async Task WriteTextAsync(string path, string content, string encoding, bool append, bool createParents, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         var enc = encoding.ToLowerInvariant() switch
@@ -36,6 +43,25 @@ public sealed class FileSystemService : IFileSystemService
             "ascii"  => Encoding.ASCII,
             _        => new UTF8Encoding(false)   // utf-8, no BOM
         };
+
+        // C-1: the parent directory is created unless the caller said not to, in which case a
+        // missing one is refused naming the flag that would allow it.
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        {
+            if (!createParents)
+                throw new DirectoryNotFoundException(
+                    $"Directory '{directory}' does not exist; pass create_parents:true to create it");
+            Directory.CreateDirectory(directory);
+        }
+
+        if (append)
+        {
+            // An append must not rewrite the file, so no temp-file rename here.
+            await File.AppendAllTextAsync(path, content, enc, ct);
+            return;
+        }
+
         var tmp = path + ".tmp." + Guid.NewGuid().ToString("N");
         await File.WriteAllTextAsync(tmp, content, enc, ct);
         // Atomic rename with retry on Windows EBUSY. On any final failure
@@ -146,32 +172,146 @@ public sealed class FileSystemService : IFileSystemService
         }
     }
 
-    public Task CopyAsync(string src, string dst, CancellationToken ct = default)
+    // C-1 (roadmap R2): copy and move refuse an existing destination unless told to replace it;
+    // delete refuses a non-empty directory unless told to take the tree. Each refusal names the
+    // flag that would allow it, so the caller fixes the call instead of guessing.
+
+    public Task CopyAsync(string src, string dst, bool overwrite, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        File.Copy(src, dst, overwrite: true);
+        RefuseSelfContainment(src, dst);
+        RefuseExistingDestination(dst, overwrite);
+        // overwrite:true means "replace", not "merge into": an existing destination — a tree
+        // with stale files, or a file where a directory is going — is cleared first.
+        ClearDestination(dst);
+        if (Directory.Exists(src))
+            CopyDirectory(src, dst, ct);
+        else
+            File.Copy(src, dst, overwrite: true);
         return Task.CompletedTask;
     }
 
-    public Task MoveAsync(string src, string dst, CancellationToken ct = default)
+    public Task MoveAsync(string src, string dst, bool overwrite, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        File.Move(src, dst, overwrite: true);
+        RefuseSelfContainment(src, dst);
+        RefuseExistingDestination(dst, overwrite);
+        if (!Directory.Exists(src))
+        {
+            File.Move(src, dst, overwrite: true);   // handles a cross-volume move itself
+            return Task.CompletedTask;
+        }
+
+        // Directory.Move cannot replace an existing target and refuses a different volume.
+        ClearDestination(dst);
+        try
+        {
+            Directory.Move(src, dst);
+        }
+        catch (IOException) when (!string.Equals(Path.GetPathRoot(Path.GetFullPath(src)), Path.GetPathRoot(Path.GetFullPath(dst)), StringComparison.OrdinalIgnoreCase))
+        {
+            CopyDirectory(src, dst, ct);
+            Directory.Delete(src, recursive: true);
+        }
         return Task.CompletedTask;
     }
 
-    public Task DeleteAsync(string path, CancellationToken ct = default)
+    public Task DeleteAsync(string path, bool recursive, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-        else File.Delete(path);
+        if (Directory.Exists(path))
+        {
+            if (!recursive && Directory.EnumerateFileSystemEntries(path).Any())
+                throw new InvalidOperationException(
+                    $"'{path}' is a directory that is not empty; pass recursive:true to delete the whole tree");
+            Directory.Delete(path, recursive);
+        }
+        else
+        {
+            File.Delete(path);
+        }
         return Task.CompletedTask;
     }
 
-    public Task<string[]> ListAsync(string path, CancellationToken ct = default)
+    /// <summary>
+    /// The first check on every copy and move, before existence or <c>overwrite</c> are looked
+    /// at: the same path, a destination inside the source (a copy into its own subtree recurses
+    /// into what it just created until the path length runs out; with <c>overwrite</c> the
+    /// clear-first step would delete part of the source), or a destination that contains the
+    /// source (clearing it would delete what is being copied). Compared segment-wise on full
+    /// paths, so <c>pre</c> and <c>prefix</c> are unrelated.
+    /// </summary>
+    private static void RefuseSelfContainment(string src, string dst)
+    {
+        var srcFull = Path.TrimEndingDirectorySeparator(Path.GetFullPath(src));
+        var dstFull = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dst));
+        if (srcFull.Equals(dstFull, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"'{src}' and '{dst}' are the same path");
+        if (dstFull.StartsWith(srcFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"'{dst}' is inside the source '{src}'; a copy or move into its own subtree is refused");
+        if (srcFull.StartsWith(dstFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"'{dst}' contains the source '{src}'; replacing it would delete what is being copied");
+    }
+
+    /// <summary>Removes whatever is at <paramref name="dst"/> so a replace is a replace (after <see cref="RefuseSelfContainment"/>).</summary>
+    private static void ClearDestination(string dst)
+    {
+        if (Directory.Exists(dst)) Directory.Delete(dst, recursive: true);
+        else if (File.Exists(dst)) File.Delete(dst);
+    }
+
+    private static void RefuseExistingDestination(string dst, bool overwrite)
+    {
+        if (!overwrite && (File.Exists(dst) || Directory.Exists(dst)))
+            throw new InvalidOperationException($"'{dst}' already exists; pass overwrite:true to replace it");
+    }
+
+    private static void CopyDirectory(string src, string dst, CancellationToken ct)
+    {
+        // Observed before every directory as well as every file: a tree of empty directories
+        // has no file copy to stop at (PR #25 review). The cross-volume move shares this path.
+        ct.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(dst);
+        foreach (var file in Directory.EnumerateFiles(src))
+        {
+            ct.ThrowIfCancellationRequested();
+            File.Copy(file, Path.Combine(dst, Path.GetFileName(file)), overwrite: true);
+        }
+        foreach (var dir in Directory.EnumerateDirectories(src))
+            CopyDirectory(dir, Path.Combine(dst, Path.GetFileName(dir)), ct);
+    }
+
+    /// <summary>
+    /// C-1 (roadmap R3): the entries with their type and size. <paramref name="pattern"/> is a
+    /// name glob (<c>*</c>, <c>?</c>, case-insensitive) applied to files and directories alike;
+    /// hidden and system entries are skipped unless asked for, and a skipped directory is not
+    /// descended into; an inaccessible entry is skipped rather than failing the listing.
+    /// </summary>
+    public Task<FileEntry[]> ListAsync(string path, string? pattern, bool recursive, bool includeHidden, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        return Task.FromResult(Directory.EnumerateFileSystemEntries(path).ToArray());
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = recursive,
+            AttributesToSkip = includeHidden ? 0 : FileAttributes.Hidden | FileAttributes.System,
+            IgnoreInaccessible = true,
+            MatchCasing = MatchCasing.CaseInsensitive,
+            MatchType = MatchType.Simple,
+        };
+        const FileAttributes HiddenOrSystem = FileAttributes.Hidden | FileAttributes.System;
+        var entries = new DirectoryInfo(path)
+            .EnumerateFileSystemInfos(string.IsNullOrWhiteSpace(pattern) ? "*" : pattern, options)
+            .Select(info => new FileEntry(
+                info.FullName,
+                info.Name,
+                info is DirectoryInfo,
+                info is FileInfo file ? file.Length : 0,
+                info.LastWriteTimeUtc,
+                (info.Attributes & HiddenOrSystem) != 0))
+            .ToArray();
+        return Task.FromResult(entries);
     }
 
     public Task ZipAsync(string srcDir, string dstZip, CancellationToken ct = default)

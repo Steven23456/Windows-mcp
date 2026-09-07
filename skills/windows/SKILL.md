@@ -54,7 +54,7 @@ If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mc
 
 **System (7)** — machine-level inspection and power control: `system_info`, `wmi_query`, `env`, `reliability`, `event_log`, `driver_list`, `power_action`
 
-**Files (7)** — read, write, search, and forensically inspect files: `file_read`, `file_write`, `file_manage`, `file_search`, `file_info`, `file_hash`, `file_streams`
+**Files (7)** — read, write, search, and forensically inspect files: `file_read`, `file_write`, `file_manage`, `file_search`, `file_info`, `file_hash`, `file_streams`. Absolute paths only — a relative one is refused naming the parameter. `file_read` pages a large file with `offset_lines`/`limit_lines` instead of raising `max_bytes`; `file_write` takes `append`; `file_manage` refuses an existing copy/move destination without `overwrite: true` and a non-empty directory delete without `recursive: true`, and its `list` returns `{Path, Name, IsDirectory, Size, Modified, Hidden}` entries (`pattern` glob, `recursive`, `include_hidden`)
 
 **Disk / storage (2)** — usage vs. drive health: `disk_inspect`, `storage_health`
 
@@ -89,11 +89,12 @@ startup_report
 
 ```
 process (action: orphans)                     — recycle-aware orphans + signals, one call
+  → (or) process (action: list, sort_by: "cpu", limit: 20)   — what is eating the CPU, top 20
   → (or) process (action: list, groupByRoot: true)   — see which root spawned a pile
-  → process (action: kill, pid, confirm: true[, tree: true][, startTime])
+  → process (action: kill, pid, confirm: true[, graceful: true][, tree: true][, startTime])
 ```
 
-Prefer `action: orphans` (or `list` with `includeLineage: true`) over the old `list → process_inspect` dance — it returns parent lineage, command line, `ageMinutes`, `runtimeKind`, `orphaned`, and `isSystemAdjacent` for every process in a single call, so you can rank candidates without inspecting each one. `groupByRoot: true` collapses processes under their root ancestor — the fast way to see, e.g., five stale sessions each holding a server fleet. **Read the signals, don't trust the label:** `orphaned` is COMMON and by-design on Windows (`explorer.exe` and anything launched from a since-closed shell are orphaned) — it is NOT a leak signal; `isSystemAdjacent: true` flags the boot/session processes to leave alone. **Hard rail:** never terminate `csrss`, `wininit`, `winlogon`, `services`, `lsass`, `explorer`, or any user-facing application. To reap a stale session and its whole fleet in one guarded call, use `kill` with `tree: true` (kills the pid + its descendants, each re-validated before killing) and pass `startTime` to guard against PID reuse. Always confirm the kill list with the user; `confirm: true` is required.
+Prefer `action: orphans` (or `list` with `includeLineage: true`) over the old `list → process_inspect` dance — it returns parent lineage, command line, `ageMinutes`, `runtimeKind`, `orphaned`, and `isSystemAdjacent` for every process in a single call, so you can rank candidates without inspecting each one. `groupByRoot: true` collapses processes under their root ancestor — the fast way to see, e.g., five stale sessions each holding a server fleet. **Read the signals, don't trust the label:** `orphaned` is COMMON and by-design on Windows (`explorer.exe` and anything launched from a since-closed shell are orphaned) — it is NOT a leak signal; `isSystemAdjacent: true` flags the boot/session processes to leave alone. **Hard rail:** never terminate `csrss`, `wininit`, `winlogon`, `services`, `lsass`, `explorer`, or any user-facing application. To reap a stale session and its whole fleet in one guarded call, use `kill` with `tree: true` (kills the pid + its descendants, each re-validated before killing) and pass `startTime` to guard against PID reuse. Always confirm the kill list with the user; `confirm: true` is required. **Prefer `graceful: true` for anything with a window** — it posts `WM_CLOSE` to the process's visible windows, waits `grace_ms` (default 3000, max 60000) and only then forces it, so an editor gets to raise its "save changes?" prompt; the result says `exitedGracefully` or `forced` per pid, a windowless process is forced at once, and `graceful` cannot be combined with `tree`. For "what is eating the CPU", the plain `list` carries `CpuPercent` (normalised across all cores, like Task Manager) with `sort_by: "cpu"` and `limit` — neither applies to `orphans`/`includeLineage`/`groupByRoot`, which refuse them.
 
 ### 3. Security audit sweep
 

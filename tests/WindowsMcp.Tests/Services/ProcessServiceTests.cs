@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Moq;
 using WindowsMcp.Abstractions;
+using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Services;
 using Xunit;
 
@@ -145,4 +146,110 @@ public class ProcessServiceTests
         var act = () => System.Diagnostics.Process.GetProcessById(pid);
         act.Should().Throw<System.ArgumentException>(); // root gone
     }
+    // ---- C-3 R2: the CPU column, the order and the cap, on the live process table --------------
+
+    [Fact]
+    public async Task ListAsync_with_options_reports_a_cpu_percent_in_range_for_every_row()
+    {
+        var svc = Make();
+
+        var rows = await svc.ListAsync(new ProcessListOptions());
+
+        rows.Should().NotBeEmpty();
+        rows.Should().OnlyContain(p => p.CpuPercent >= 0 && p.CpuPercent <= 100);
+        rows.Sum(p => p.CpuPercent).Should().BeLessThanOrEqualTo(125,
+            "the percentage is normalised across ALL cores, so the whole box sums to about 100 - "
+            + "forgetting the core count would put this near 100 x cores; the headroom is for the "
+            + "skew between per-process sample windows");
+    }
+
+    [Fact]
+    public async Task ListAsync_measures_a_busy_process_above_zero_and_sorts_the_busiest_first()
+    {
+        // A thread spinning inside THIS process for the sample window: no child to spawn, no
+        // PowerShell to wait for, and the row we assert on is the one we made busy.
+        var svc = Make();
+        using var stop = new CancellationTokenSource();
+        var spinner = new Thread(() => { while (!stop.IsCancellationRequested) { } }) { IsBackground = true };
+        spinner.Start();
+
+        WindowsMcp.Abstractions.Models.ProcessDto[] rows;
+        try { rows = await svc.ListAsync(new ProcessListOptions(SortBy: ProcessSort.Cpu)); }
+        finally { stop.Cancel(); spinner.Join(TimeSpan.FromSeconds(5)); }
+
+        var self = rows.Should().ContainSingle(r => r.Pid == System.Environment.ProcessId).Subject;
+        self.CpuPercent.Should().BeGreaterThan(0, "a core was busy in this process for the whole sample window");
+        rows.Select(r => r.CpuPercent).Should().BeInDescendingOrder("sort_by:cpu is descending");
+    }
+
+    /// <summary>
+    /// C-3 deviation, pinned: the old <c>ListAsync(nameFilter)</c> overload does NOT sample CPU.
+    /// The name kill and the startup report enumerate through it, and neither may pay the 250 ms
+    /// window — so every row it returns carries the default 0, filter and all.
+    /// </summary>
+    [Fact]
+    public async Task ListAsync_with_a_name_filter_still_filters_and_does_not_sample_cpu()
+    {
+        var svc = Make();
+        var selfName = System.Diagnostics.Process.GetCurrentProcess().ProcessName;
+
+        var rows = await svc.ListAsync(selfName);
+
+        rows.Should().NotBeEmpty();
+        rows.Should().Contain(r => r.Pid == System.Environment.ProcessId);
+        rows.Should().OnlyContain(r => r.Name.Contains(selfName, StringComparison.OrdinalIgnoreCase),
+            "the substring filter on the name is unchanged");
+        rows.Should().OnlyContain(r => r.CpuPercent == 0,
+            "the non-sampling overload leaves the CPU column at its default - measuring here would "
+            + "put a 250 ms window in front of every name kill and every startup report");
+    }
+
+    [Fact]
+    public async Task ListAsync_with_a_limit_returns_that_many_rows_after_the_sort()
+    {
+        var svc = Make();
+
+        var all = await svc.ListAsync(new ProcessListOptions());
+        var capped = await svc.ListAsync(new ProcessListOptions(Limit: 3));
+
+        all.Length.Should().BeGreaterThan(3, "a live box runs more than three processes");
+        capped.Should().HaveCount(3);
+        capped.Select(r => r.MemoryMb).Should().BeInDescendingOrder("memory is the default order");
+    }
+
+    [Fact]
+    public async Task ListAsync_options_keeps_the_substring_name_filter()
+    {
+        var svc = Make();
+        var selfName = System.Diagnostics.Process.GetCurrentProcess().ProcessName;
+
+        var rows = await svc.ListAsync(new ProcessListOptions(NameFilter: selfName));
+
+        rows.Should().NotBeEmpty();
+        rows.Should().Contain(r => r.Pid == System.Environment.ProcessId);
+        rows.Should().OnlyContain(r => r.Name.Contains(selfName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// C-3 R4: the two samples are taken around ONE injected wait, so a future unit test does not
+    /// have to sleep 250 ms - and the wait is the ~250 ms budget the roadmap accepted, not a
+    /// second of latency added to every process(list).
+    /// </summary>
+    [Fact]
+    public async Task ListAsync_samples_cpu_across_a_single_injected_delay()
+    {
+        var delays = new List<TimeSpan>();
+        var svc = new ProcessService(
+            new Mock<IWmiService>().Object,
+            new ProcessServiceKillTests.FakeProcessWindows(),
+            (d, _) => { delays.Add(d); return Task.CompletedTask; });
+
+        var rows = await svc.ListAsync(new ProcessListOptions(Limit: 5));
+
+        var wait = delays.Should().ContainSingle("one wait separates the before and after readings").Subject;
+        wait.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(100));
+        wait.Should().BeLessThanOrEqualTo(TimeSpan.FromSeconds(1), "R4 budgeted ~250 ms per plain list");
+        rows.Should().HaveCount(5);
+    }
+
 }

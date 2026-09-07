@@ -7,7 +7,12 @@ public interface IProcessService
     /// <summary>All processes, optionally filtered by a case-insensitive substring of the name.
     /// (Name only — a ProcessDto carries no command line; use ListLineageAsync to match on that.)</summary>
     Task<ProcessDto[]> ListAsync(string? nameFilter = null, CancellationToken ct = default);
+    /// <summary>C-3 R4: the plain list with a CPU column, an order and a cap. The nameFilter
+    /// overload does not sample CPU (a name kill enumerates through it and must not pay the window).</summary>
+    Task<ProcessDto[]> ListAsync(ProcessListOptions options, CancellationToken ct = default);
     Task KillAsync(int pid, CancellationToken ct = default);
+    /// <summary>C-3 R5: kill one pid, optionally asking its windows to close first.</summary>
+    Task<KillResult> KillAsync(int pid, KillOptions options, CancellationToken ct = default);
     Task<int> StartDetachedAsync(string command, CancellationToken ct = default);
 
     /// <summary>

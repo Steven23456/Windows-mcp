@@ -210,7 +210,8 @@ public class ToolInventoryTests
         nameof(JobTools.Job),
         nameof(SystemTools.SystemInfo), nameof(SystemTools.WmiQuery), nameof(SystemTools.Env),
         nameof(SystemTools.Reliability), nameof(SystemTools.DriverList), nameof(SystemTools.Audio),
-        nameof(FileTools.FileRead), nameof(FileTools.FileWrite), nameof(FileTools.FileSearch),
+        // C-1: file_write left this set - `append: true` twice is not the same state twice.
+        nameof(FileTools.FileRead), nameof(FileTools.FileSearch),
         nameof(FileTools.FileInfo), nameof(FileTools.FileHash), nameof(FileTools.FileStreams),
         nameof(FileTools.Archive),
         nameof(DiskTools.DiskInspect), nameof(StorageTools.StorageHealth),
@@ -378,5 +379,20 @@ public class ToolInventoryTests
             "registry_delete removes keys behind confirm: true - run docs-agent");
         Skill().Should().Contain("registry_delete",
             "the skill playbook lists the registry verbs and the confirm-gated tools - run docs-agent");
+    }
+
+    /// <summary>
+    /// C-1 R4: the file tools' safer defaults are a behaviour change a model only survives if the
+    /// playbook names the flag to pass. docs-agent owns the edit; this is what tells it to.
+    /// </summary>
+    [Fact]
+    public void The_skill_names_the_new_file_flags()
+    {
+        var skill = Skill();
+
+        skill.Should().Contain("overwrite",
+            "copy/move now refuse an existing destination - the playbook has to name the flag - run docs-agent");
+        skill.Should().Contain("offset_lines",
+            "a 5 MB log is readable a window at a time only if the playbook says so - run docs-agent");
     }
 }

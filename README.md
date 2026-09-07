@@ -239,6 +239,34 @@ verbatim (no quoting) and returns `{pid, executable, args, cwd}`. `multi_monitor
 monitor's `WorkArea`, `Orientation` (0/90/180/270), `EffectiveDpi` and `Scale` alongside its
 bounds and primary flag.
 
+`process(action: "list")` rows carry `CpuPercent` beside `Pid`, `Name`, `Path` and `MemoryMb` —
+two `TotalProcessorTime` readings 250 ms apart, normalised across **all** cores, so a process
+saturating one of eight reads `12.5`, as Task Manager shows. `sort_by`
+(`memory` default | `cpu` | `name` | `pid`) and `limit` (`0` = all) order and cap that plain
+list; both are refused with `includeLineage`, `groupByRoot` or `orphans`, which have their own
+shapes and no CPU column. `process(action: "kill", …, graceful?, grace_ms?)` asks first: it posts
+`WM_CLOSE` to every visible top-level window of the pid, waits up to `grace_ms` (default 3000,
+max 60000) and only then forces the process, so an editor can show its save prompt. A process
+with no window is forced at once and says so; `graceful` cannot be combined with `tree`. Kills by
+pid or name return `{killed:[{pid, name, graceful, exitedGracefully, forced, waitedMs}]}` (the
+tree kill keeps its text count).
+
+Every file tool takes **absolute** paths — `file_read`, `file_write`, `file_manage`'s `src` and
+`dst`, and `file_search`'s `root` refuse a relative one naming the parameter, since the server's
+working directory is not the caller's. `file_read(path, max_bytes?, encoding?, offset_lines?,
+limit_lines?)` returns plain text by default and a JSON window
+`{path, totalLines, offset, returned, truncated, content}` when either window parameter is given
+(`offset_lines` is 1-based, `limit_lines: 0` runs to the end) — the way to page a large log,
+since `max_bytes` bounds the file, not the window. `file_write(…, append?, create_parents?)`
+appends instead of replacing and creates a missing parent directory unless `create_parents:
+false` refuses it. `file_manage(action, src, dst?, confirm?, overwrite?, recursive?, pattern?,
+include_hidden?)`: `copy`/`move` refuse an existing destination unless `overwrite: true` (a
+directory is copied as a tree, a cross-volume move is a copy then a delete), `delete` refuses a
+non-empty directory unless `recursive: true`, and `list` returns
+`[{Path, Name, IsDirectory, Size, Modified, Hidden}]` — `pattern` is a case-insensitive name
+glob, `recursive` descends, and hidden or system entries are skipped unless
+`include_hidden: true`.
+
 `registry_get(hive, path)` without `value_name` returns the whole key —
 `{Path, Values: [{Path, Name, Data, Kind}], SubKeys: [...]}`, an empty path listing the hive
 root — instead of the value names joined with commas; with a `value_name` it is unchanged.
@@ -272,6 +300,11 @@ Destructive tools require `confirm: true` as an argument and throw
 - `power_action`
 - `firewall(action="add"|"remove")`
 - `env(action="set")`
+
+Beyond the confirm gate, the destructive file actions ask for the specific permission they need:
+a copy or a move over an existing destination needs `overwrite: true`, and deleting a non-empty
+directory needs `recursive: true`. Neither used to be asked for — both defaults now refuse rather
+than destroy data the caller did not name.
 
 `env(get|list)` redacts values for variables whose name contains
 `KEY/TOKEN/SECRET/PASSWORD/AUTH/CREDENTIAL/PRIVATE/PAT` (case-insensitive).
