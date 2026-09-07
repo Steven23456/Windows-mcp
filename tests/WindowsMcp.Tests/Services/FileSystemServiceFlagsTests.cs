@@ -153,6 +153,66 @@ public class FileSystemServiceFlagsTests : IDisposable
         Directory.Exists(src).Should().BeTrue("a copy leaves the source alone");
     }
 
+    /// <summary>
+    /// PR #25 review finding: overwrite:true means REPLACE, on copy exactly as it already does on
+    /// move (<see cref="MoveAsync_of_a_directory_with_overwrite_replaces_an_existing_directory"/>).
+    /// A tree copied over an existing directory must leave the source's entries and nothing else -
+    /// a file that existed only in the destination surviving the copy is a silent merge, and the
+    /// caller reading the result would attribute that stale file to the source.
+    /// </summary>
+    [Fact]
+    public async Task CopyAsync_of_a_directory_with_overwrite_replaces_an_existing_directory()
+    {
+        var src = Dir("crep");
+        File_(Path.Combine("crep", "new.txt"), "new");
+        var dst = Dir("crep-dst");
+        File_(Path.Combine("crep-dst", "stale.txt"), "stale");
+
+        await Svc().CopyAsync(src, dst, overwrite: true);
+
+        (await File.ReadAllTextAsync(Path.Combine(dst, "new.txt"))).Should().Be("new");
+        File.Exists(Path.Combine(dst, "stale.txt")).Should()
+            .BeFalse("the destination was replaced, not merged into");
+        Directory.EnumerateFileSystemEntries(dst, "*", SearchOption.AllDirectories)
+            .Select(p => Path.GetRelativePath(dst, p))
+            .Should().BeEquivalentTo(new[] { "new.txt" }, "exactly the source's tree is left behind");
+        Directory.Exists(src).Should().BeTrue("a copy leaves the source alone");
+    }
+
+    [Fact]
+    public async Task CopyAsync_of_a_directory_with_overwrite_replaces_an_existing_file()
+    {
+        // Directory.CreateDirectory cannot create over a file, so overwrite:true has to clear the
+        // file first rather than let an IOException out - MoveAsync already does exactly this.
+        var src = Dir("cfile");
+        File_(Path.Combine("cfile", "inside.txt"), "inside");
+        var dst = File_("cfile-dst", "a file standing where the directory should go");
+
+        await Svc().CopyAsync(src, dst, overwrite: true);
+
+        Directory.Exists(dst).Should().BeTrue("the file gave way to the directory");
+        (await File.ReadAllTextAsync(Path.Combine(dst, "inside.txt"))).Should().Be("inside");
+        Directory.Exists(src).Should().BeTrue("a copy leaves the source alone");
+    }
+
+    [Fact]
+    public async Task CopyAsync_of_a_file_with_overwrite_replaces_an_existing_directory()
+    {
+        // The mirror image: File.Copy cannot write over a directory, so overwrite:true has to
+        // remove the directory first. Refusing here while MoveAsync accepts it is an inconsistency
+        // no caller can predict from the tool description.
+        var src = File_("cf-src.txt", "source");
+        var dst = Dir("cf-dst");
+        File_(Path.Combine("cf-dst", "stale.txt"), "stale");
+
+        await Svc().CopyAsync(src, dst, overwrite: true);
+
+        File.Exists(dst).Should().BeTrue("the directory gave way to the file");
+        Directory.Exists(dst).Should().BeFalse("nothing of the old destination tree is left");
+        (await File.ReadAllTextAsync(dst)).Should().Be("source");
+        File.Exists(src).Should().BeTrue("a copy leaves the source alone");
+    }
+
     // ---- MoveAsync ---------------------------------------------------------------------------
 
     [Fact]

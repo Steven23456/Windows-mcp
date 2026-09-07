@@ -61,7 +61,7 @@ public sealed class ProcessTools
         [Description("list: group processes under their root ancestor")] bool groupByRoot = false,
         [Description("kill: also kill the target's descendants")] bool tree = false,
         [Description("kill: ISO-8601 start time guard against PID reuse")] string? startTime = null,
-        [Description("list (plain only): memory (default), cpu, name, or pid")] string? sort_by = null,
+        [Description("list (plain only): memory (default), cpu, name, or pid; blank is the same as omitted")] string? sort_by = null,
         [Description("list (plain only): at most this many rows after the sort; 0 = all")] int limit = 0,
         [Description("kill: ask the process to close before forcing it (not with tree)")] bool graceful = false,
         [Description("kill: how long a graceful close may take before the process is forced, 0-60000 ms")] int grace_ms = 3000,
@@ -151,7 +151,8 @@ public sealed class ProcessTools
     /// <summary>The lineage, group and orphan shapes have no CPU column and their own order: refuse rather than ignore.</summary>
     private static void RefusePlainListOptions(string? sortBy, int limit, string shape)
     {
-        if (sortBy is not null)
+        // Blank means "not given", exactly as ParseSort reads it for the plain list.
+        if (!string.IsNullOrWhiteSpace(sortBy))
             throw new ArgumentException($"'sort_by' applies to the plain list only, not with {shape}", nameof(sortBy));
         if (limit != 0)
             throw new ArgumentException($"'limit' applies to the plain list only, not with {shape}", nameof(limit));

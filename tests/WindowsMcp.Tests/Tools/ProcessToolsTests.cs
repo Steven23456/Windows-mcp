@@ -416,6 +416,62 @@ public class ProcessToolsTests
         mock.Verify(m => m.GroupByRootAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    /// <summary>
+    /// PR #25 review finding: the refusal above must fire on a sort_by the caller actually gave,
+    /// not on the empty string an MCP client sends for an argument it is leaving out. The plain
+    /// list's own parser already reads "" and whitespace as "not given"
+    /// (<see cref="Process_list_forwards_each_sort_by_name"/> pins that), so the lineage, group and
+    /// orphan shapes have to read them the same way - otherwise the identical call is accepted on
+    /// one path and refused on another, and the refusal names a flag the caller never set.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Process_list_includeLineage_treats_a_blank_sort_by_as_not_given(string sortBy)
+    {
+        var mock = new Mock<IProcessService>();
+        mock.Setup(m => m.ListLineageAsync(false, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(System.Array.Empty<ProcessLineageDto>());
+        var tools = Make(mock.Object);
+
+        var json = await tools.Process("list", includeLineage: true, sort_by: sortBy);
+
+        mock.Verify(m => m.ListLineageAsync(false, null, It.IsAny<CancellationToken>()), Times.Once);
+        json.Should().Be("[]");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Process_list_groupByRoot_treats_a_blank_sort_by_as_not_given(string sortBy)
+    {
+        var mock = new Mock<IProcessService>();
+        mock.Setup(m => m.GroupByRootAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(System.Array.Empty<ProcessGroupDto>());
+        var tools = Make(mock.Object);
+
+        var json = await tools.Process("list", groupByRoot: true, sort_by: sortBy);
+
+        mock.Verify(m => m.GroupByRootAsync(null, It.IsAny<CancellationToken>()), Times.Once);
+        json.Should().Be("[]");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Process_orphans_treats_a_blank_sort_by_as_not_given(string sortBy)
+    {
+        var mock = new Mock<IProcessService>();
+        mock.Setup(m => m.ListLineageAsync(true, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(System.Array.Empty<ProcessLineageDto>());
+        var tools = Make(mock.Object);
+
+        var json = await tools.Process("orphans", sort_by: sortBy);
+
+        mock.Verify(m => m.ListLineageAsync(true, null, It.IsAny<CancellationToken>()), Times.Once);
+        json.Should().Be("[]");
+    }
+
     [Fact]
     public async Task Process_kill_by_pid_returns_the_kill_result_as_json()
     {

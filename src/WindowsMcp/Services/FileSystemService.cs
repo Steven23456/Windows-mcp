@@ -180,6 +180,9 @@ public sealed class FileSystemService : IFileSystemService
     {
         ct.ThrowIfCancellationRequested();
         RefuseExistingDestination(dst, overwrite);
+        // overwrite:true means "replace", not "merge into": an existing destination — a tree
+        // with stale files, or a file where a directory is going — is cleared first.
+        ClearDestination(src, dst);
         if (Directory.Exists(src))
             CopyDirectory(src, dst, ct);
         else
@@ -198,8 +201,7 @@ public sealed class FileSystemService : IFileSystemService
         }
 
         // Directory.Move cannot replace an existing target and refuses a different volume.
-        if (Directory.Exists(dst)) Directory.Delete(dst, recursive: true);
-        else if (File.Exists(dst)) File.Delete(dst);
+        ClearDestination(src, dst);
         try
         {
             Directory.Move(src, dst);
@@ -227,6 +229,23 @@ public sealed class FileSystemService : IFileSystemService
             File.Delete(path);
         }
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Removes whatever is at <paramref name="dst"/> so a replace is a replace. Refuses when the
+    /// destination contains the source (or is it): clearing it would delete what is being copied.
+    /// </summary>
+    private static void ClearDestination(string src, string dst)
+    {
+        if (!Directory.Exists(dst) && !File.Exists(dst)) return;
+        var srcFull = Path.TrimEndingDirectorySeparator(Path.GetFullPath(src));
+        var dstFull = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dst));
+        if (srcFull.Equals(dstFull, StringComparison.OrdinalIgnoreCase)
+            || srcFull.StartsWith(dstFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"'{dst}' contains the source '{src}'; replacing it would delete what is being copied");
+        if (Directory.Exists(dst)) Directory.Delete(dst, recursive: true);
+        else File.Delete(dst);
     }
 
     private static void RefuseExistingDestination(string dst, bool overwrite)

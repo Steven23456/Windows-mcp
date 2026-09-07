@@ -83,6 +83,13 @@ against the server's working directory, which the caller cannot see.
   slashes comes back with backslashes — Windows' own normalisation, not ours.
 - `TextWindow.Offset` echoes `max(offset_lines, 1)` even past the end of the file, so the caller
   sees the window it asked for beside `totalLines`.
+- **`overwrite:true` replaces, never merges** (review finding on PR #25): an existing
+  destination — a directory tree with stale files, or a file where a directory is going, or a
+  directory where a file is going — is cleared before the copy, as `move` already did. A
+  destination that contains the source (or is it) is refused instead, since clearing it would
+  delete what is being copied.
+- A blank `sort_by` on `process` is "not given" everywhere (the same review): the lineage,
+  group and orphan shapes refuse only a real value.
 - Service flags are required, not defaulted (see Decision); the roadmap's phrasing is
   superseded.
 - `file_search` gains only the absolute-path check; its `pattern`/`recursive` semantics are

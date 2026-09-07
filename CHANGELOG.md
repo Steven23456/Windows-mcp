@@ -366,7 +366,10 @@
   `recursive` (a file and an empty directory still need only `confirm`). **Migration:** pass
   `overwrite: true` to keep the old copy/move behaviour and `recursive: true` to keep the old
   delete behaviour — both are opt-in on purpose, since the old defaults destroyed data the
-  caller had not named.
+  caller had not named. With `overwrite: true` a copy **replaces** the destination — an
+  existing directory tree (stale files included) or a file where a directory is going is
+  cleared first, never merged into — and a destination that contains the source is refused
+  rather than deleted from under it.
 - **`file_manage(list)` returns file entries, not a string array of paths** (parity C-1 — a
   contract break). It used to answer with `Directory.EnumerateFileSystemEntries`' bare paths, so
   telling a directory from a file, or reading a size, cost a `file_info` call per entry. It now
