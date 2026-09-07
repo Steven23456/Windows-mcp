@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using FluentAssertions;
 using WindowsMcp.Services;
 using Xunit;
@@ -19,7 +20,7 @@ public class FileSystemServiceFlagsTests : IDisposable
     public FileSystemServiceFlagsTests() => Directory.CreateDirectory(_tmp);
     public void Dispose()
     {
-        try { Directory.Delete(_tmp, true); } catch { /* best effort */ }
+        ForceDelete(_tmp);
         GC.SuppressFinalize(this);
     }
 
@@ -509,5 +510,183 @@ public class FileSystemServiceFlagsTests : IDisposable
 
         entries.Select(e => e.Name).Should().BeEquivalentTo(new[] { "visible.txt" },
             "a skipped directory is not descended into either, or its children leak into the listing");
+    }
+
+    // ---- Copy/Move into the source's own subtree (PR #25 review finding) ----------------------
+
+    /// <summary>
+    /// The directory a copy is pointed at inside its own source. The name is long on purpose:
+    /// until the containment check exists, <c>CopyDirectory</c> creates it, the lazy
+    /// <c>EnumerateDirectories</c> of the source then picks it up and recurses into
+    /// sub\sub\sub... until the path limit stops it. This box has LongPathsEnabled=1, so a
+    /// three-letter name would bottom out thousands of levels down; ~126 characters per level
+    /// bottoms out in a couple of hundred, which is fast and leaves a chain
+    /// <see cref="ForceDelete"/> can still remove.
+    /// </summary>
+    private const string SubtreeName =
+        "sub-a-copy-must-never-descend-into-" +
+        "and-this-name-is-long-so-the-runaway-bottoms-out-in-a-few-hundred-levels-not-a-few-thousand";
+
+    /// <summary>
+    /// PR #25 review finding, the runaway: a directory copied into a destination *inside itself*
+    /// has no fixed point - every file copied in becomes another file to copy. The service has to
+    /// refuse before it creates anything, naming both paths.
+    /// </summary>
+    [Fact]
+    public async Task CopyAsync_refuses_a_destination_inside_the_source_tree()
+    {
+        var src = Dir("runaway");
+        File_(Path.Combine("runaway", "one.txt"), "one");
+        File_(Path.Combine("runaway", "two.txt"), "two");
+        var dst = Path.Combine(src, SubtreeName);
+
+        var act = () => Svc().CopyAsync(src, dst, overwrite: false);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>(
+                "a copy into the source's own subtree can never terminate"))
+            .Which.Message.Should().Contain(src).And.Contain(dst,
+                "the refusal names both paths so the caller can see the containment");
+        Directory.Exists(dst).Should().BeFalse("a refusal creates nothing");
+        Directory.EnumerateFileSystemEntries(src, "*", SearchOption.AllDirectories)
+            .Select(p => Path.GetRelativePath(src, p))
+            .Should().BeEquivalentTo(new[] { "one.txt", "two.txt" }, "the source is left exactly as it was");
+    }
+
+    /// <summary>
+    /// The degenerate case of the same finding: source and destination are the same directory.
+    /// Refused whatever <c>overwrite</c> says and whatever trailing separator the caller wrote -
+    /// and the refusal must not offer <c>overwrite:true</c> as the way through, because it is not.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "", "")]
+    [InlineData(true, "", "")]
+    [InlineData(false, "\\", "")]
+    [InlineData(true, "", "\\")]
+    public async Task CopyAsync_refuses_a_destination_that_is_the_source(bool overwrite, string srcSuffix, string dstSuffix)
+    {
+        var name = $"same-{overwrite}-{srcSuffix.Length}{dstSuffix.Length}";
+        var dir = Dir(name);
+        File_(Path.Combine(name, "keep.txt"), "keep");
+
+        var act = () => Svc().CopyAsync(dir + srcSuffix, dir + dstSuffix, overwrite);
+
+        var message = (await act.Should().ThrowAsync<InvalidOperationException>(
+                "a directory cannot be copied onto itself")).Which.Message;
+        message.Should().Contain(dir, "the refusal names the path it is talking about");
+        message.Should().NotContain("overwrite:true",
+            "the refusal holds regardless of overwrite, so offering that flag as the remedy would be false");
+        Directory.EnumerateFileSystemEntries(dir, "*", SearchOption.AllDirectories)
+            .Select(p => Path.GetRelativePath(dir, p))
+            .Should().BeEquivalentTo(new[] { "keep.txt" }, "nothing was created or removed");
+        (await File.ReadAllTextAsync(Path.Combine(dir, "keep.txt"))).Should().Be("keep");
+    }
+
+    /// <summary>
+    /// The same containment, with the destination already there and <c>overwrite:true</c>. The
+    /// existing check in <c>ClearDestination</c> only catches a destination that *contains* the
+    /// source; this is the other direction, and clearing the destination here deletes a subtree
+    /// of the very thing being copied before the runaway even starts.
+    /// </summary>
+    [Fact]
+    public async Task CopyAsync_with_overwrite_refuses_an_existing_destination_inside_the_source_tree()
+    {
+        var src = Dir("runaway-existing");
+        File_(Path.Combine("runaway-existing", "one.txt"), "one");
+        var dst = Path.Combine(src, SubtreeName);
+        Directory.CreateDirectory(dst);
+        await File.WriteAllTextAsync(Path.Combine(dst, "already-there.txt"), "already there");
+
+        var act = () => Svc().CopyAsync(src, dst, overwrite: true);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message
+            .Should().Contain(dst);
+        (await File.ReadAllTextAsync(Path.Combine(dst, "already-there.txt"))).Should()
+            .Be("already there", "a refusal removes nothing - clearing this destination deletes part of the source");
+        Directory.EnumerateFileSystemEntries(src, "*", SearchOption.AllDirectories)
+            .Select(p => Path.GetRelativePath(src, p))
+            .Should().BeEquivalentTo(new[] { "one.txt", SubtreeName, Path.Combine(SubtreeName, "already-there.txt") });
+    }
+
+    /// <summary>
+    /// A move into the source's own subtree is the same refusal with the same exception type.
+    /// Windows refuses it too, but with an <see cref="IOException"/> a caller cannot tell apart
+    /// from a disk error, so the service has to refuse it first.
+    /// </summary>
+    [Fact]
+    public async Task MoveAsync_refuses_a_destination_inside_the_source_tree()
+    {
+        var src = Dir("mv-into-self");
+        File_(Path.Combine("mv-into-self", "one.txt"), "one");
+        var dst = Path.Combine(src, "sub");
+
+        var act = () => Svc().MoveAsync(src, dst, overwrite: false);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>(
+                "a directory cannot be moved inside itself"))
+            .Which.Message.Should().Contain(src).And.Contain(dst);
+        Directory.Exists(dst).Should().BeFalse("a refusal creates nothing");
+        (await File.ReadAllTextAsync(Path.Combine(src, "one.txt"))).Should().Be("one", "nothing moved");
+    }
+
+    /// <summary>
+    /// The guard on the guard: containment is about path *segments*, not string prefixes.
+    /// C:\tmp\ab -> C:\tmp\abc shares a prefix and contains nothing, so it must still be copied.
+    /// A check written as a bare StartsWith would refuse this.
+    /// </summary>
+    [Fact]
+    public async Task CopyAsync_allows_a_file_whose_destination_merely_shares_a_prefix()
+    {
+        var src = File_("ab", "prefix source");
+        var dst = Path.Combine(_tmp, "abc");
+
+        await Svc().CopyAsync(src, dst, overwrite: false);
+
+        (await File.ReadAllTextAsync(dst)).Should().Be("prefix source");
+        File.Exists(src).Should().BeTrue("a copy leaves the source alone");
+    }
+
+    /// <summary>The same look-alike between two directories, where the containment check bites.</summary>
+    [Fact]
+    public async Task CopyAsync_allows_a_directory_whose_destination_merely_shares_a_prefix()
+    {
+        var src = Dir("pre");
+        File_(Path.Combine("pre", "inside.txt"), "inside");
+        var dst = Path.Combine(_tmp, "prefix");
+
+        await Svc().CopyAsync(src, dst, overwrite: false);
+
+        (await File.ReadAllTextAsync(Path.Combine(dst, "inside.txt"))).Should().Be("inside");
+        Directory.Exists(src).Should().BeTrue("a copy leaves the source alone");
+    }
+
+    /// <summary>
+    /// The runaway cases can leave a chain of nested directories tens of thousands of characters
+    /// deep, which a plain recursive delete cannot always remove (PathTooLongException). Falls
+    /// back to the extended-length form, then to a robocopy mirror from an empty directory, which
+    /// is long-path native. Nothing outside the caller's temp directory is touched.
+    /// </summary>
+    private static void ForceDelete(string path)
+    {
+        if (!Directory.Exists(path)) return;
+        try { Directory.Delete(path, true); return; } catch { /* too deep for the plain form */ }
+        try { Directory.Delete(@"\\?\" + Path.GetFullPath(path), true); return; } catch { /* still too deep */ }
+
+        var empty = Path.Combine(Path.GetTempPath(), "wmcp-fs-empty-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(empty);
+            using var robocopy = Process.Start(new ProcessStartInfo("robocopy",
+                $"\"{empty}\" \"{path}\" /MIR /NJH /NJS /NP /NFL /NDL /R:0 /W:0")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            });
+            robocopy?.WaitForExit(120_000);
+            Directory.Delete(path, true);
+        }
+        catch { /* best effort: Dispose must not throw; a leftover under %TEMP% is reported instead */ }
+        finally { try { Directory.Delete(empty, true); } catch { /* best effort */ } }
     }
 }

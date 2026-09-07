@@ -179,10 +179,11 @@ public sealed class FileSystemService : IFileSystemService
     public Task CopyAsync(string src, string dst, bool overwrite, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        RefuseSelfContainment(src, dst);
         RefuseExistingDestination(dst, overwrite);
         // overwrite:true means "replace", not "merge into": an existing destination — a tree
         // with stale files, or a file where a directory is going — is cleared first.
-        ClearDestination(src, dst);
+        ClearDestination(dst);
         if (Directory.Exists(src))
             CopyDirectory(src, dst, ct);
         else
@@ -193,6 +194,7 @@ public sealed class FileSystemService : IFileSystemService
     public Task MoveAsync(string src, string dst, bool overwrite, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        RefuseSelfContainment(src, dst);
         RefuseExistingDestination(dst, overwrite);
         if (!Directory.Exists(src))
         {
@@ -201,7 +203,7 @@ public sealed class FileSystemService : IFileSystemService
         }
 
         // Directory.Move cannot replace an existing target and refuses a different volume.
-        ClearDestination(src, dst);
+        ClearDestination(dst);
         try
         {
             Directory.Move(src, dst);
@@ -232,20 +234,32 @@ public sealed class FileSystemService : IFileSystemService
     }
 
     /// <summary>
-    /// Removes whatever is at <paramref name="dst"/> so a replace is a replace. Refuses when the
-    /// destination contains the source (or is it): clearing it would delete what is being copied.
+    /// The first check on every copy and move, before existence or <c>overwrite</c> are looked
+    /// at: the same path, a destination inside the source (a copy into its own subtree recurses
+    /// into what it just created until the path length runs out; with <c>overwrite</c> the
+    /// clear-first step would delete part of the source), or a destination that contains the
+    /// source (clearing it would delete what is being copied). Compared segment-wise on full
+    /// paths, so <c>pre</c> and <c>prefix</c> are unrelated.
     /// </summary>
-    private static void ClearDestination(string src, string dst)
+    private static void RefuseSelfContainment(string src, string dst)
     {
-        if (!Directory.Exists(dst) && !File.Exists(dst)) return;
         var srcFull = Path.TrimEndingDirectorySeparator(Path.GetFullPath(src));
         var dstFull = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dst));
-        if (srcFull.Equals(dstFull, StringComparison.OrdinalIgnoreCase)
-            || srcFull.StartsWith(dstFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        if (srcFull.Equals(dstFull, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"'{src}' and '{dst}' are the same path");
+        if (dstFull.StartsWith(srcFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                $"'{dst}' is inside the source '{src}'; a copy or move into its own subtree is refused");
+        if (srcFull.StartsWith(dstFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException(
                 $"'{dst}' contains the source '{src}'; replacing it would delete what is being copied");
+    }
+
+    /// <summary>Removes whatever is at <paramref name="dst"/> so a replace is a replace (after <see cref="RefuseSelfContainment"/>).</summary>
+    private static void ClearDestination(string dst)
+    {
         if (Directory.Exists(dst)) Directory.Delete(dst, recursive: true);
-        else File.Delete(dst);
+        else if (File.Exists(dst)) File.Delete(dst);
     }
 
     private static void RefuseExistingDestination(string dst, bool overwrite)

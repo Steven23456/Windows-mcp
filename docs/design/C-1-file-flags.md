@@ -85,9 +85,12 @@ against the server's working directory, which the caller cannot see.
   sees the window it asked for beside `totalLines`.
 - **`overwrite:true` replaces, never merges** (review finding on PR #25): an existing
   destination — a directory tree with stale files, or a file where a directory is going, or a
-  directory where a file is going — is cleared before the copy, as `move` already did. A
-  destination that contains the source (or is it) is refused instead, since clearing it would
-  delete what is being copied.
+  directory where a file is going — is cleared before the copy, as `move` already did.
+- **Self-containment is refused first** (the second review round): the same path, a destination
+  inside the source, or a destination that contains the source, checked segment-wise on full
+  paths before existence or `overwrite` are looked at. A copy into its own subtree used to
+  recurse into the directory it had just created until the path length ran out, and with
+  `overwrite:true` the clear-first step deleted part of the source before that.
 - A blank `sort_by` on `process` is "not given" everywhere (the same review): the lineage,
   group and orphan shapes refuse only a real value.
 - Service flags are required, not defaulted (see Decision); the roadmap's phrasing is

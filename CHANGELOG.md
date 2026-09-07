@@ -368,8 +368,10 @@
   delete behaviour — both are opt-in on purpose, since the old defaults destroyed data the
   caller had not named. With `overwrite: true` a copy **replaces** the destination — an
   existing directory tree (stale files included) or a file where a directory is going is
-  cleared first, never merged into — and a destination that contains the source is refused
-  rather than deleted from under it.
+  cleared first, never merged into. A copy or move whose destination is the source, is inside
+  the source (a copy into its own subtree recursed into what it had just created until the path
+  length ran out, and with `overwrite: true` first deleted part of the source), or contains the
+  source is refused before anything is touched, whatever `overwrite` says.
 - **`file_manage(list)` returns file entries, not a string array of paths** (parity C-1 — a
   contract break). It used to answer with `Directory.EnumerateFileSystemEntries`' bare paths, so
   telling a directory from a file, or reading a size, cost a `file_info` call per entry. It now
