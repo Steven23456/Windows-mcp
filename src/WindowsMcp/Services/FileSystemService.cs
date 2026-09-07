@@ -270,6 +270,9 @@ public sealed class FileSystemService : IFileSystemService
 
     private static void CopyDirectory(string src, string dst, CancellationToken ct)
     {
+        // Observed before every directory as well as every file: a tree of empty directories
+        // has no file copy to stop at (PR #25 review). The cross-volume move shares this path.
+        ct.ThrowIfCancellationRequested();
         Directory.CreateDirectory(dst);
         foreach (var file in Directory.EnumerateFiles(src))
         {

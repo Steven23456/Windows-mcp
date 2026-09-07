@@ -2,6 +2,16 @@
 
 ### Added
 
+- **`review-agent` subagent (dev infrastructure).** `.claude/agents/review-agent.md` — an
+  Opus-model Claude Code subagent that runs after the GREEN pass and before the PR. It reads the
+  finished diff cold and hunts, per changed behaviour, for the inputs the tests never named:
+  existing state at the target, containment and aliasing in every direction, cancellation in
+  every loop, refusals that must run before any mutation, partial failure, changed defaults, error
+  types the client never sees. Each finding names a concrete input, the wrong outcome, the
+  `file:line` and the sibling cases in its family, and goes back to `test-agent` as a RED row.
+  Added because PR #25 needed three external review rounds after a green suite: the tests proved
+  the design note, not the code's failure modes, and each fix was scoped to the reported symptom.
+  `CLAUDE.md`'s workflow gains step 4, REVIEW. It never edits and never commits.
 - **`file_read` pages a large file, `file_write` appends, `file_manage` gained the flags that
   make its defaults safe** (parity C-1, roadmap phase 2). `file_read(path, max_bytes, encoding,
   offset_lines = 0, limit_lines = 0)` returns the same plain text as before when neither window
@@ -371,7 +381,9 @@
   cleared first, never merged into. A copy or move whose destination is the source, is inside
   the source (a copy into its own subtree recursed into what it had just created until the path
   length ran out, and with `overwrite: true` first deleted part of the source), or contains the
-  source is refused before anything is touched, whatever `overwrite` says.
+  source is refused before anything is touched, whatever `overwrite` says. A cancelled copy of a
+  tree stops before the next directory as well as before the next file (a tree of empty
+  directories had nothing to stop it at).
 - **`file_manage(list)` returns file entries, not a string array of paths** (parity C-1 — a
   contract break). It used to answer with `Directory.EnumerateFileSystemEntries`' bare paths, so
   telling a directory from a file, or reading a size, cost a `file_info` call per entry. It now

@@ -659,6 +659,53 @@ public class FileSystemServiceFlagsTests : IDisposable
         Directory.Exists(src).Should().BeTrue("a copy leaves the source alone");
     }
 
+    // ---- Cancellation during the directory walk (PR #25 review finding) -----------------------
+
+    /// <summary>
+    /// PR #25 review finding: <c>CopyDirectory</c> checks the token before each FILE copy, but
+    /// not before <c>Directory.CreateDirectory</c> and not before recursing, so a cancelled copy
+    /// of a tree made of empty directories keeps creating destination directories until it meets
+    /// a file - and a tree with no files at all is copied to completion after cancellation.
+    ///
+    /// Getting the cancel to land where it matters, deterministically: <c>CopyAsync</c> already
+    /// throws at its own entry for an ALREADY-cancelled token, so cancelling before the call
+    /// proves nothing about the walk. The handshake here is the destination ROOT appearing -
+    /// only <c>CopyDirectory</c> creates it, so once it exists the entry check has been passed
+    /// and the copy is inside the walk; the cancel below can therefore only be observed by a
+    /// check the walk itself makes. The source has NO files anywhere, so the file-loop check
+    /// that exists today can never fire: today's code cannot throw at all, whatever the timing.
+    /// Thousands of directories (against a sub-millisecond cancel) leave the fix room to stop
+    /// early, which is why the assertion is "the tree is incomplete" rather than "the root was
+    /// never created" - the root is already made by the time cancellation can be requested.
+    /// </summary>
+    [Fact]
+    public async Task CopyAsync_cancelled_during_the_walk_stops_before_making_more_directories()
+    {
+        const int Count = 4000;
+        var src = Dir("cancel-walk-src");
+        for (var i = 0; i < Count; i++) Directory.CreateDirectory(Path.Combine(src, $"d{i:D4}"));
+        var dst = Path.Combine(_tmp, "cancel-walk-dst");
+
+        using var cts = new CancellationTokenSource();
+        var copy = Task.Run(() => Svc().CopyAsync(src, dst, overwrite: false, cts.Token));
+
+        var spin = Stopwatch.StartNew();
+        while (!Directory.Exists(dst) && !copy.IsCompleted && spin.Elapsed < TimeSpan.FromSeconds(30))
+            Thread.SpinWait(20);
+        cts.Cancel();
+
+        var act = () => copy;
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "a cancelled copy must observe the token before it creates the next destination directory, "
+            + "not only before the next file - a tree of empty directories has no file to stop it");
+
+        var created = Directory.Exists(dst)
+            ? Directory.EnumerateDirectories(dst, "*", SearchOption.AllDirectories).Count()
+            : 0;
+        created.Should().BeLessThan(Count,
+            "cancellation has to abandon the rest of the tree, not mirror all {0} directories first", Count);
+    }
+
     /// <summary>
     /// The runaway cases can leave a chain of nested directories tens of thousands of characters
     /// deep, which a plain recursive delete cannot always remove (PathTooLongException). Falls
