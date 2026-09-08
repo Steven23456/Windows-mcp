@@ -114,6 +114,18 @@ stdio without touching the registered server — spawn the exe, `initialize` →
   installed as a plugin until either a build step precedes install or the manifest points at
   another delivery mechanism (release asset, remote host). Meanwhile register
   `bundle/WindowsMcp.exe` directly (README "Register with Claude Code").
+- [ ] **A redirect can still reach a private address (`scrape`, `http_request`).** The
+  private-address check runs on the URL as given and `HttpClient` follows redirects, so a public
+  host that answers `302 → http://192.168.1.1/` is fetched anyway: the SSRF guard is one hop deep.
+  Both web tools share it (recorded by C-5's review round, 2026-09-08, as pre-existing). The fix
+  is re-checking every hop — a redirect handler, or `AllowAutoRedirect:false` plus a checked loop.
+- [ ] **`SnapshotRequest` has no `Hwnd`, so `scrape(source:"dom")` resolves the window twice.**
+  The tool picks the frontmost Chromium window out of the A-1 inventory and then names it to
+  `SnapshotAsync` by *title*, which re-resolves it (exact, then substring) against an inventory
+  that also holds minimised windows. Two windows with the same exact title, or a `window:`
+  substring that matches a non-browser walked first, can yield the wrong page or an element budget
+  spent before the browser is reached (C-5 review, F3). The fix is a snapshot contract change —
+  an `Hwnd` on `SnapshotRequest` — and belongs to its own item.
 - [ ] **`.claude/settings.json` hooks are Python-era.** The `PostToolUse` hook runs `ruff` on every
   Edit/Write; it is a silent no-op on `.cs` files but spawns a process each time. Replace with
   `dotnet format` on `*.cs`, or drop it.
@@ -129,6 +141,11 @@ stdio without touching the registered server — spawn the exe, `initialize` →
   untrusted-third-party vs missing-target vs MS-file-missing, instead of a flat list. Nice-to-have.
 - [ ] **Dependabot dev-dep advisories** in `tools/*` (JS). Banner 12→4 after `npm audit fix`;
   remaining need major bumps — let Dependabot PRs handle them.
+
+- [ ] **`UIAutomationService.WaitLoopAsync` spins in its last millisecond.** The loop clamps its
+  10 ms floor to the remaining budget, so the final poll interval shrinks to 0 and the loop spins
+  until the deadline; `WaitForServiceTests.Wait_loop_floors_a_zero_interval_at_ten_milliseconds`
+  flakes on it. Floor the interval at 10 ms regardless of what remains (found in PR #26).
 
 ## ⚪ Deliberately out of scope (decisions, not todos)
 
@@ -153,3 +170,8 @@ stdio without touching the registered server — spawn the exe, `initialize` →
   the UIAutomation tests — not a regression.
 - `PowerShellServiceTests` — real `powershell.exe` cold-starts under Defender scanning; minutes, not
   a regression (see `CLAUDE.md`).
+- Live-desktop flakes that pass alone and fail only under the parallel full suite (a foreground or
+  window-inventory race with the real-process PowerShell tests spawning consoles):
+  `VirtualDesktopServiceIntegrationTests.GetWindowDesktopIdAsync_returns_exactly_the_id_the_com_object_reported`,
+  `WaitForFindPathIntegrationTests.The_pre_B6_overload_still_throws_a_timeout_when_every_poll_failed`,
+  `WindowServiceTests.ListAsync_without_minimized_windows_is_a_subset_with_no_minimized_state`.

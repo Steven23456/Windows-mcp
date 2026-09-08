@@ -85,7 +85,7 @@ $env:WINDOWSMCP_API_KEY = "<a long random secret>"
 | `--cert-thumbprint <hex>` | `WINDOWSMCP_CERT_THUMBPRINT` | — | Certificate in `LocalMachine\My` or `CurrentUser\My`; makes the port **HTTPS only** |
 | `--api-key <key>` | `WINDOWSMCP_API_KEY` | — | Bearer token (≥ 16 printable ASCII chars). **Required** unless `--bind` is loopback |
 | `--screenshot-scale <0.1-1.0>` | `WINDOWSMCP_SCREENSHOT_SCALE` | `1.0` | Multiplies every `screenshot` call's own `scale`; also applies to **stdio** |
-| `--max-tree-elements <n>` | `WINDOWSMCP_MAX_TREE_ELEMENTS` | `500` | Element budget for `snapshot`/`get_state` when a call names none; also applies to **stdio** |
+| `--max-tree-elements <n>` | `WINDOWSMCP_MAX_TREE_ELEMENTS` | `500` | Element budget for `snapshot`/`get_state`, and for `scrape(source:"dom")`'s page walk, when a call names none; also applies to **stdio** |
 | `--flash <on\|off>` | `WINDOWSMCP_FLASH` | `on` | Orange glow around the captured area for ~3.5 s after every `screenshot` — the signal to a person at the machine; also applies to **stdio** |
 | `--profile-snapshot <on\|off>` | `WINDOWSMCP_PROFILE_SNAPSHOT` | `off` | Per-stage timings on `snapshot`/`screenshot` results, also logged to stderr; also applies to **stdio** |
 | `--screenshot-backend <auto\|gdi\|wgc>` | `WINDOWSMCP_SCREENSHOT_BACKEND` | `auto` | Which backend reads the screen when a `screenshot` call says `auto`: `wgc` = Windows.Graphics.Capture, `gdi` = the classic screen copy; also applies to **stdio** |
@@ -94,6 +94,12 @@ $env:WINDOWSMCP_API_KEY = "<a long random secret>"
 `--max-tree-elements`, `--flash`, `--profile-snapshot` and `--screenshot-backend` under a
 "Capture options (both transports)" heading, since none of them is HTTP-only). No arguments =
 stdio, unchanged.
+
+One tool behaves differently on this transport: `scrape(summarize: true)` asks *your* client's
+model through MCP sampling, which needs a session for the answer to come back on, and the
+Streamable HTTP transport is stateless by design (a fresh server per request). Over HTTP the
+client is never asked — `scrape` returns the page text with a `Note` naming the transport. Run
+the server over stdio when you want the summary.
 
 **Security model.** Every tool — `powershell`, `file_write`, `registry_set`,
 `process kill`, … — is reachable on that port. So the server refuses to start on a
@@ -165,7 +171,7 @@ operations. See [`skills/windows/SKILL.md`](skills/windows/SKILL.md).
 | Screen | `screenshot`, `ocr` |
 | Window | `window`, `switch_to_window`, `launch`, `focus`, `multi_monitor` |
 | UI Automation | `snapshot`, `get_state`, `find_element`, `get_element`, `get_text`, `assert_element`, `interact_element`, `get_table`, `wait_for` |
-| Process / Shell | `process`, `process_inspect`, `start_process`, `powershell` (with `background: true` for jobs), `job`, `service`, `scheduled_task`, `event_log` |
+| Process / Shell | `process`, `process_inspect`, `start_process`, `powershell` (with `background: true` for jobs, `timeout_seconds` to bound one call), `job`, `service`, `scheduled_task`, `event_log` |
 | File | `file_search`, `file_manage`, `file_dialog`, `file_read`, `file_write`, `file_info`, `file_hash`, `file_streams`, `archive` |
 | Disk | `disk_inspect`, `storage_health` |
 | System | `system_info`, `audio`, `notification`, `security_audit`, `reliability`, `driver_list`, `wmi_query`, `env`, `power_action` |
@@ -173,7 +179,7 @@ operations. See [`skills/windows/SKILL.md`](skills/windows/SKILL.md).
 | Startup | `startup_report` |
 | Network | `network`, `firewall` |
 | Registry | `registry_get`, `registry_set`, `registry_delete` |
-| Web | `scrape`, `http_request` |
+| Web | `scrape` (a URL, or the page open in the browser), `http_request` |
 | Monitoring | `integrity` (file-integrity tripwire), `fs_changes` (NTFS USN journal), `watch` (live directory watch) |
 
 `click`, `type`, `scroll` and `drag` take a target the same way: `x` and `y` in virtual-desktop
@@ -300,6 +306,27 @@ there is `existed: false` rather than an error. It returns
 registered or Windows drops the toast. Returns `{shown, appId, registered, note?}`, where a
 dropped toast is `shown: false` with the reason in `note`.
 
+`powershell(command, background?, timeout_seconds?)` passes the script whole. `timeout_seconds`
+(1–900) bounds one call: on expiry the child tree is killed and the result comes back with
+`TimedOut: true`, `ExitCode: -1` and whatever stdout the script wrote before it hung, rather than
+an error. `0` (the default) leaves the 15-minute execution backstop as the only clock, and the
+parameter cannot be combined with `background: true` — a job runs until it finishes or
+`job(cancel)` stops it. Each foreground stream is capped at 1 000 000 characters with the most
+recent tail kept, as a job's output already was; `StdoutTrimmedChars`/`StderrTrimmedChars` say how
+much was dropped.
+
+`scrape(url?, query?, source?, summarize?, max_chars?, window?)` returns
+`{Source, Url, Title, Chars, Truncated, Content, Summarized, Model, Note}`. `source: "http"`
+(the default) fetches `url` and converts the HTML to markdown, reporting the URL it ended up at
+after any redirect; `source: "dom"` reads the page already open in a Chromium browser (Edge,
+Chrome, Brave, Opera, Vivaldi — not Firefox, which exposes no page to UI Automation): the window
+named by `window`, else the frontmost one, ending with a scroll hint saying whether there is more
+of the page above or below. `Chars` is the size before `max_chars` (default 100 000, max
+1 000 000) cut the text, and `Truncated` covers both that cut and a page walk the element budget
+stopped early — `Note` then names `--max-tree-elements`. `summarize: true` hands the text to
+*your* client's model through MCP sampling, with `query` as the question to answer from it, and
+falls back to the plain text with a `Note` whenever the client cannot or will not answer.
+
 Every tool also carries MCP annotations — a title plus `readOnlyHint`, `destructiveHint`,
 `idempotentHint` and `openWorldHint` — so a client can auto-approve reads and confirm the
 destructive ones without a per-tool allowlist.
@@ -337,9 +364,10 @@ Unexpected faults (a null reference, a COM or Win32 failure) stay masked.
 `KEY/TOKEN/SECRET/PASSWORD/AUTH/CREDENTIAL/PRIVATE/PAT` (case-insensitive).
 Pass `include_secrets: true` to opt out.
 
-`scrape` and `http_request` reject private IP ranges (RFC1918, link-local,
-loopback, IPv6 `fc00::/7` + `fe80::/10`) including via DNS rebinding —
-public URLs only by default.
+`scrape` and `http_request` fetch **http and https only** — any other scheme (`ftp:`, `file:`,
+`data:`, `ws:`, `javascript:`) is refused by name before anything is resolved — and they reject
+private IP ranges (RFC1918, link-local, loopback, IPv6 `fc00::/7` + `fe80::/10`) including via
+DNS rebinding: public URLs only by default.
 
 ## Performance notes
 

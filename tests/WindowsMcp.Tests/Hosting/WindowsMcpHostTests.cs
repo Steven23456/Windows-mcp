@@ -246,6 +246,71 @@ public class WindowsMcpHostTests
 
         provider.GetService<IFlashOverlay>().Should().NotBeNull();
     }
+    // ---- C-5 (R8): the transport fact the scrape tool needs -----------------------------------
+    // Sampling is a server->client request, so it needs a session. BuildHttpApp runs Streamable
+    // HTTP stateless by an earlier decision, and a per-request server has no session; the tool has
+    // to be told, because it cannot ask the transport. Registered here so both modes get the truth
+    // about themselves from the one place they share.
+
+    [Fact]
+    public void AddWindowsMcp_registers_a_session_keeping_transport_for_stdio()
+    {
+        using var provider = Build(ServerOptions.Stdio);
+
+        provider.GetRequiredService<TransportOptions>().Stateless.Should().BeFalse(
+            "stdio keeps one session for the life of the process, so sampling can cross it");
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_a_stateless_transport_for_http()
+    {
+        using var provider = Build(ServerOptions.Stdio with { Transport = TransportKind.Http });
+
+        provider.GetRequiredService<TransportOptions>().Stateless.Should().BeTrue(
+            "BuildHttpApp sets Stateless on the Streamable HTTP transport, so there is no session "
+            + "for a sampling reply to come back on");
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_transport_options_as_a_singleton()
+    {
+        using var provider = Build(ServerOptions.Stdio);
+
+        provider.GetRequiredService<TransportOptions>()
+            .Should().BeSameAs(provider.GetRequiredService<TransportOptions>());
+    }
+
+    [Fact]
+    public void TransportOptions_Stdio_keeps_its_session()
+        => TransportOptions.Stdio.Stateless.Should().BeFalse(
+            "the default a tool built without an injected record assumes is the session-keeping one");
+
+    /// <summary>
+    /// C-5: <c>WebTools</c>'s <c>TransportOptions</c> parameter is optional so the unit tests can
+    /// omit it — which means a missing registration would not fail DI, it would silently make every
+    /// HTTP <c>summarize:true</c> ask a client that can never answer. This asserts the resolved tool
+    /// holds the record the container was configured with.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false)]   // stdio: a session that lasts the process
+    [InlineData(true, true)]     // http:  a fresh server per request
+    public void AddWindowsMcp_gives_the_web_tool_the_transport_it_registered(bool http, bool stateless)
+    {
+        using var provider = Build(ServerOptions.Stdio with
+        {
+            Transport = http ? TransportKind.Http : TransportKind.Stdio,
+        });
+
+        var tools = ActivatorUtilities.CreateInstance<WindowsMcp.Tools.WebTools>(provider);
+
+        var field = typeof(WindowsMcp.Tools.WebTools)
+            .GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            .SingleOrDefault(f => f.FieldType == typeof(TransportOptions));
+        field.Should().NotBeNull("the tool has to hold the transport it was given, not re-read it per call");
+        field!.GetValue(tools).Should().BeSameAs(provider.GetRequiredService<TransportOptions>());
+        ((TransportOptions)field.GetValue(tools)!).Stateless.Should().Be(stateless);
+    }
+
     // ---- A-10 (R1/R6): the capture backend crosses into the tool layer, and the service is owned --
     // The backend rides the SAME ScreenshotOptions record the earlier items introduced (roadmap C7).
     // What is new is that ScreenshotService now holds a D3D device, so the container has to be the

@@ -23,8 +23,9 @@ MCP protocol  →  Tool classes  →  Service abstractions  →  Service impleme
   service as a singleton and holds the MCP wiring both transports share (`AddWindowsMcp`) plus
   the Kestrel host factory (`BuildHttpApp`); `Hosting/CertificateLocator.cs` resolves
   `--cert-thumbprint`; `Hosting/EnvironmentRepair.cs` runs first in `Main` and repairs a
-  host-stripped environment (`PATHEXT`, `ProgramData`, missing `Path`) before anything spawns a
-  child. `Tools/*.cs` are the tool surface; `Services/*.cs` are the implementations.
+  host-stripped environment (`PATHEXT`, `ProgramData`, a missing `Path` — or, since C-6, one
+  set without a `System32` entry, which gets the registry's machine then user `Path` appended by
+  the pure `Hosting/PathMerge.cs`, never reordered or trimmed) before anything spawns a child. `Tools/*.cs` are the tool surface; `Services/*.cs` are the implementations.
 - **`src/WindowsMcp.Abstractions/`** — `IXxxService` interfaces (one per file) and DTO records
   under `Models/`. Tools and services depend on these interfaces (testability).
 - **`tests/WindowsMcp.Tests/`** — xUnit + Moq + FluentAssertions.
@@ -179,7 +180,8 @@ failure modes, and each fix was scoped to the reported symptom.
 4. Register any **new** service singleton in `Hosting/WindowsMcpHost.AddWindowsMcp` (tools
    auto-register; both transports pick it up from there). A process-level option from
    `ServerOptions` crosses into the tool layer as a registered public options record (see
-   `ScreenshotOptions`, `UiTreeOptions`), never read from the environment inside a service.
+   `ScreenshotOptions`, `UiTreeOptions`, `TransportOptions`), never read from the environment
+   inside a service.
 5. `test-agent` again for the coverage close-out, `review-agent` on the diff, then `docs-agent`
    for `docs/architecture/*` counts and `CHANGELOG.md` under `## [Unreleased]`.
 

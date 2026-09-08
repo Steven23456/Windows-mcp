@@ -382,6 +382,19 @@ public class ToolInventoryTests
     }
 
     /// <summary>
+    /// C-6: the design note's "Changes" list names <c>skills/windows/SKILL.md</c>'s "long jobs"
+    /// paragraph — a per-call timeout the playbook never mentions is a timeout the model will not
+    /// use, and it will reach for <c>background:true</c> for a five-second bound instead.
+    /// docs-agent owns the edit; this is what tells it to.
+    /// </summary>
+    [Fact]
+    public void The_skill_names_the_powershell_timeout()
+    {
+        Skill().Should().Contain("timeout_seconds",
+            "the playbook's long-jobs paragraph gains the parameter (C-6) - run docs-agent");
+    }
+
+    /// <summary>
     /// C-1 R4: the file tools' safer defaults are a behaviour change a model only survives if the
     /// playbook names the flag to pass. docs-agent owns the edit; this is what tells it to.
     /// </summary>

@@ -77,7 +77,7 @@ The MCP SDK (`ModelContextProtocol.Server`) handles all protocol concerns:
 
 - **Transport** — selected by `Hosting/ServerOptions` from the command line (`WINDOWSMCP_*` env fallbacks):
   - **stdio** (default, no arguments): `WithStdioServerTransport()` — JSON-RPC on stdin/stdout, for hosts that spawn the exe.
-  - **Streamable HTTP** (`--transport http`): `WithHttpTransport(o => o.Stateless = true)` + `MapMcp("/mcp")` on Kestrel, built by `Hosting/WindowsMcpHost.BuildHttpApp`. `--port`/`--bind` choose the endpoint, `--cert-thumbprint` (resolved by `Hosting/CertificateLocator`) makes it HTTPS-only, and `--api-key` installs a constant-time bearer gate ahead of every route. Stateless because no tool issues server→client requests, and a restart then stays invisible to clients.
+  - **Streamable HTTP** (`--transport http`): `WithHttpTransport(o => o.Stateless = true)` + `MapMcp("/mcp")` on Kestrel, built by `Hosting/WindowsMcpHost.BuildHttpApp`. `--port`/`--bind` choose the endpoint, `--cert-thumbprint` (resolved by `Hosting/CertificateLocator`) makes it HTTPS-only, and `--api-key` installs a constant-time bearer gate ahead of every route. Stateless so a restart stays invisible to clients — the one tool that would use a session, `scrape(summarize:true)`'s sampling request, is told so by the `TransportOptions` record and returns the page text with a note instead (C-5).
 - **Tool Discovery**: `WithToolsFromAssembly()` — discovers all `[McpServerTool]` methods, registering them with their parameter schemas automatically
 - **Server Info**: `ServerInfo = new() { Name = "Windows-mcp", Version = Program.ServerVersion }` — the version comes from `<Version>` in `Directory.Build.props`
 - **Shared wiring**: `WindowsMcpHost.AddWindowsMcp(options)` holds the service registrations, server identity, caller-facing error filter and tool discovery, so both transports are configured identically; only the transport call differs.
@@ -86,7 +86,8 @@ The MCP SDK (`ModelContextProtocol.Server`) handles all protocol concerns:
 **Critical startup requirements** (handled in `Program.cs` before host build):
 ```csharp
 // First thing in Main: fill in a host-stripped environment (PATHEXT, ProgramData, ...) so every
-// child process we spawn inherits a usable one. Host-set values are never overwritten.
+// child process we spawn inherits a usable one. Host-set values are never overwritten, except
+// PATHEXT and — C-6 — a Path with no System32 entry, which the registry's is appended to.
 EnvironmentRepair.Apply();
 
 // stdio mode only: prevent JSON-RPC response buffering on Windows (cp1252 default encoding)
@@ -142,7 +143,7 @@ public sealed class InputTools
 | `WindowTools` | 5 | `IWindowService`, `IVirtualDesktopService` |
 | `ProcessTools` | 6 | `IProcessService`, `IServiceControlService`, `ITaskSchedulerService`, `IEventLogService` |
 | `ScreenTools` | 2 | `IScreenshotService`, `IOcrService`, `IWindowService`, `IInputService`, `IUIAutomationService`, `IFlashOverlay` (+ the `ScreenshotOptions` record) |
-| `WebTools` | 2 | `IWebService` |
+| `WebTools` | 2 | `IWebService`, `IUIAutomationService` (C-5: the `source:"dom"` page walk), `IWindowService` (the frontmost Chromium window) (+ the `TransportOptions` record) |
 | `RegistryTools` | 3 | `IRegistryService` |
 | `NetworkTools` | 2 | `INetworkService`, `IFirewallService` |
 | `ShellTools` | 1 | `IPowerShellService`, `IJobService` |
@@ -190,7 +191,7 @@ public interface IInputService
 
 ### 4. Service Implementation Layer
 
-All 39 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as two options records — `ScreenshotOptions` (read by the screen tools) and `UiTreeOptions` (injected into `UIAutomationService`):
+All 39 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as three options records — `ScreenshotOptions` (read by the screen tools), `UiTreeOptions` (injected into `UIAutomationService`) and `TransportOptions` (read by `WebTools`, which cannot sample the client over the stateless HTTP transport):
 
 ```csharp
 // --screenshot-scale, --flash, --profile-snapshot, --screenshot-backend
@@ -198,6 +199,8 @@ services.AddSingleton(new ScreenshotOptions(options.ScreenshotScale, options.Fla
     options.ProfileSnapshot, options.ScreenshotBackend));
 // --max-tree-elements, --profile-snapshot
 services.AddSingleton(new UiTreeOptions(options.MaxTreeElements, options.ProfileSnapshot));
+// C-5: --transport http is stateless, so a sampling request has no session to travel on
+services.AddSingleton(new TransportOptions(Stateless: options.Transport == TransportKind.Http));
 services.AddSingleton<IFlashOverlay, FlashOverlay>();   // always registered; the tool gates on ScreenshotOptions.Flash
 services.AddSingleton<IInputService, InputService>();
 services.AddSingleton<IScreenshotService, ScreenshotService>();
@@ -289,7 +292,8 @@ Windows-mcp.slnx
 │   ├── WindowsMcp/                        ← Main project
 │   │   ├── WindowsMcp.csproj              (targets net10.0-windows10.0.19041)
 │   │   ├── Program.cs                     (entry: env repair, AUMID + DPI setup, parse options, pick transport)
-│   │   ├── Hosting/                       (ServerOptions, WindowsMcpHost, CertificateLocator, EnvironmentRepair)
+│   │   ├── Hosting/                       (ServerOptions, WindowsMcpHost, CertificateLocator,
+│   │   │                                   EnvironmentRepair + PathMerge — C-6's pure Path merge)
 │   │   ├── Tools/                         (19 tool classes)
 │   │   │   ├── InputTools.cs
 │   │   │   ├── UIAutomationTools.cs
@@ -339,6 +343,8 @@ Windows-mcp.slnx
 │   │   │   ├── RegistryService.cs         (+ RegistryGuard — C-2's pure root denylist)
 │   │   │   ├── NotificationService.cs     (+ IToastSink and WinRtToastSink — C-4's
 │   │   │   │                               in-process WinRT toast seam)
+│   │   │   ├── WebService.cs              (+ DomPage, ScrapeSummary, TextCap — C-5's pure
+│   │   │   │                               page render, sampling prompt and text cut)
 │   │   │   └── ...
 │   │   └── Startup/                       (startup-report renderer + approval decoding)
 │   └── WindowsMcp.Abstractions/           ← Contracts assembly
@@ -370,6 +376,6 @@ The `Program.cs` static `Main` returns `Task<int>`. It parses `ServerOptions` fi
 ## Security Considerations
 
 1. **Transport exposure** — by default (stdio) no network port is opened; only the MCP client process can communicate. `--transport http` deliberately opens one, and every tool is reachable through it, so: the server refuses to start on a non-loopback bind without `--api-key`/`WINDOWSMCP_API_KEY` (constant-time bearer check applied to every path, 401 otherwise); `--cert-thumbprint` makes the port HTTPS-only; plain HTTP off-loopback is allowed but warned about at startup. Kestrel endpoints are configured explicitly, so `ASPNETCORE_URLS` cannot add an unauthenticated listener.
-2. **PowerShell execution guards** — there is no command blocklist. `PowerShellService` serializes foreground calls through a gate, kills the process tree at a 15-minute execution backstop, redirects and closes stdin, and passes scripts whole via `-EncodedCommand`. Destructive *tools* are gated by `confirm:true` (README "Safety rails"); `scrape`/`http_request` reject private address ranges.
+2. **PowerShell execution guards** — there is no command blocklist. `PowerShellService` serializes foreground calls through a gate, kills the process tree at the earlier of the caller's `timeout_seconds` (C-6, 1–900 s) and the 15-minute execution backstop, bounds each captured stream at 1 000 000 characters, redirects and closes stdin, and passes scripts whole via `-EncodedCommand`. Destructive *tools* are gated by `confirm:true` (README "Safety rails"); `scrape`/`http_request` fetch http/https only and reject private address ranges.
 3. **DPI-aware coordinates** — `SetProcessDpiAwarenessContext` ensures coordinates are in physical pixels, preventing misclicks on HiDPI displays
 4. **Concurrency** — services are singletons shared across concurrent tool calls; the ones that hold state (`UIAutomationService` STA queue, `PowerShellService` gate, `JobService`/`WatchService` registries) synchronize internally

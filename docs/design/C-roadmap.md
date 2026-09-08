@@ -260,6 +260,16 @@ archive; the caller-facing exception set widened and capped) and
 - **Done when.** `powershell("Start-Sleep 60", timeout_seconds:5)` comes back in five seconds
   with `timedOut:true`, and a server launched with `Path=C:\nothing` still finds `git` from a
   `powershell` call.
+- **Shipped as** (2026-09-08, [design note](C-6-powershell-timeout-path.md)): as planned, with
+  two deviations the review round forced. The backstop folds into `TimedOut:true` only for the
+  two-argument overload the `powershell` tool calls; the one-argument overload every internal
+  caller uses throws a caller-facing `TimeoutException` instead, because none of those callers
+  read `Success` and `AudioService` would have answered "volume 50" from a partial stdout.
+  Foreground output is bounded at 1 000 000 characters per stream (`StdoutTrimmedChars` /
+  `StderrTrimmedChars` on `PSResult`) after a flooding script handed the client 100 MB in six
+  seconds. `Path` is repaired by a pure `Hosting/PathMerge` with a stock-four fallback for an
+  empty registry. Only stdout survives a kill: PowerShell 5.1 buffers its CLIXML stderr records
+  until host shutdown.
 
 #### C-5 — `scrape`: DOM source, query focus, sampling summary  `P2 · M · ~4 h`
 
@@ -287,6 +297,20 @@ archive; the caller-facing exception set widened and capped) and
 - **Done when.** `scrape(source:"dom")` on the open Edge tab returns its text with a scroll
   hint, and `scrape(url, summarize:true)` from Claude Code returns the raw markdown with
   `summarized:false` and the reason.
+- **Shipped as** (2026-09-08, [design note](C-5-scrape-dom-summary.md)): as planned, with
+  three things the plan did not know. The SDK (2.2.0) marks MCP sampling obsolete
+  (`MCP9005`, SEP-2577) — suppressed narrowly, the seam is the one place to re-home it. The
+  HTTP transport is stateless by the earlier decision, so a per-request server never knows the
+  client's capabilities and `summarize:true` over HTTP returns the text with a note naming the
+  transport; the end-to-end sampling proof runs over an in-process `StreamServerTransport`
+  instead of `HttpTransportTests` (`TransportOptions` registered by the host, the
+  `ScreenshotOptions` pattern). The `dom` source picks Chromium windows only (Firefox exposes no
+  page document), takes the first page with a document, and reports a walk the element budget
+  cut short as `Truncated` with a note — and tells the sampled model the text is partial. The
+  review round also added: http/https-only schemes for both web tools, a 300-level nesting bound
+  before the converter (which overflowed the stack at ~900 and killed the server), the
+  document's own title via AngleSharp, credentials stripped from the reported URL, and a
+  120-second bound on the sampling call.
 
 ## 5. Effort and sequencing summary
 

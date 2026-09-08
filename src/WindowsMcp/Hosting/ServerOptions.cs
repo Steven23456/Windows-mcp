@@ -92,7 +92,8 @@ internal sealed record ServerOptions(
           --screenshot-scale <0.1-1.0>
                                     Multiply every screenshot's own scale by this (default 1.0):
                                     a cheap way to shrink what the model sees on a 4K desktop.
-          --max-tree-elements <n>   Element budget for snapshot and get_state when a call does not
+          --max-tree-elements <n>   Element budget for snapshot, get_state and scrape(source:dom)
+                                    when a call does not
                                     name its own (default 500, at least 1); the walk stops there and
                                     says so.
           --flash <on|off>          Draw an orange glow around the captured area for ~3.5 s after

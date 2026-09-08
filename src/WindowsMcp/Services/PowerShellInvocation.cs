@@ -72,7 +72,17 @@ internal static class PowerShellInvocation
         // UTF-8 *with BOM* — Windows PowerShell 5.1 assumes the ANSI codepage for a BOM-less
         // file and mangles non-ASCII (the em-dash parse trap).
         var path = Path.Combine(Path.GetTempPath(), $"winmcp-{Guid.NewGuid():N}.ps1");
-        await File.WriteAllTextAsync(path, payload, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), token);
+        try
+        {
+            await File.WriteAllTextAsync(path, payload, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true), token);
+        }
+        catch (OperationCanceledException)
+        {
+            // C-6 (review F14): a write cut short leaves a partial script nobody will ever delete —
+            // the caller only learns the path from the return value it never gets.
+            try { File.Delete(path); } catch { /* best-effort */ }
+            throw;
+        }
         return ($"{CommonFlags} -File \"{path}\"", path);
     }
 
