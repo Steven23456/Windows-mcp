@@ -12,6 +12,7 @@ namespace WindowsMcp.Tests.Services;
 /// target, a recursive delete). Nothing outside <c>_tmp</c> is touched.
 /// </summary>
 [Trait("Category", "Integration")]
+[Collection(FileSystemVolumesCollection.Name)]
 public class FileSystemServiceFlagsTests : IDisposable
 {
     private readonly string _tmp = Path.Combine(Path.GetTempPath(), "wmcp-fs-" + Guid.NewGuid().ToString("N"));
@@ -408,7 +409,7 @@ public class FileSystemServiceFlagsTests : IDisposable
         var sub = Dir(Path.Combine("entries", "child"));
         var root = Path.Combine(_tmp, "entries");
 
-        var entries = await Svc().ListAsync(root, null, recursive: false, includeHidden: false);
+        var entries = (await Svc().ListAsync(root, null, recursive: false, includeHidden: false, maxEntries: 1000)).Entries;
 
         var one = entries.Should().ContainSingle(e => e.Name == "one.txt").Subject;
         one.Path.Should().Be(file);
@@ -435,7 +436,7 @@ public class FileSystemServiceFlagsTests : IDisposable
         File_(Path.Combine("norm", "n.txt"));
         var rootWithForwardSlashes = _tmp + "/norm";
 
-        var entries = await Svc().ListAsync(rootWithForwardSlashes, null, recursive: false, includeHidden: false);
+        var entries = (await Svc().ListAsync(rootWithForwardSlashes, null, recursive: false, includeHidden: false, maxEntries: 1000)).Entries;
 
         var entry = entries.Should().ContainSingle().Subject;
         entry.Path.Should().Be(Path.Combine(_tmp, "norm", "n.txt"))
@@ -450,7 +451,7 @@ public class FileSystemServiceFlagsTests : IDisposable
         File_("glob/c.log");
         Dir(Path.Combine("glob", "d.txt"));   // the pattern matches directories too
 
-        var entries = await Svc().ListAsync(Path.Combine(_tmp, "glob"), "*.txt", recursive: false, includeHidden: false);
+        var entries = (await Svc().ListAsync(Path.Combine(_tmp, "glob"), "*.txt", recursive: false, includeHidden: false, maxEntries: 1000)).Entries;
 
         entries.Select(e => e.Name).Should().BeEquivalentTo(new[] { "a.txt", "b.TXT", "d.txt" });
     }
@@ -461,7 +462,7 @@ public class FileSystemServiceFlagsTests : IDisposable
         File_("rec/top.txt");
         File_("rec/sub/deep.txt");
 
-        var entries = await Svc().ListAsync(Path.Combine(_tmp, "rec"), null, recursive: false, includeHidden: false);
+        var entries = (await Svc().ListAsync(Path.Combine(_tmp, "rec"), null, recursive: false, includeHidden: false, maxEntries: 1000)).Entries;
 
         entries.Select(e => e.Name).Should().BeEquivalentTo(new[] { "top.txt", "sub" });
     }
@@ -472,7 +473,7 @@ public class FileSystemServiceFlagsTests : IDisposable
         File_("rec2/top.txt");
         File_("rec2/sub/deep.txt");
 
-        var entries = await Svc().ListAsync(Path.Combine(_tmp, "rec2"), "*.txt", recursive: true, includeHidden: false);
+        var entries = (await Svc().ListAsync(Path.Combine(_tmp, "rec2"), "*.txt", recursive: true, includeHidden: false, maxEntries: 1000)).Entries;
 
         entries.Select(e => e.Name).Should().BeEquivalentTo(new[] { "top.txt", "deep.txt" });
     }
@@ -487,8 +488,8 @@ public class FileSystemServiceFlagsTests : IDisposable
         File.SetAttributes(hidden, File.GetAttributes(hidden) | FileAttributes.Hidden);
         File.SetAttributes(system, File.GetAttributes(system) | FileAttributes.System);
 
-        var without = await Svc().ListAsync(root, null, recursive: false, includeHidden: false);
-        var with = await Svc().ListAsync(root, null, recursive: false, includeHidden: true);
+        var without = (await Svc().ListAsync(root, null, recursive: false, includeHidden: false, maxEntries: 1000)).Entries;
+        var with = (await Svc().ListAsync(root, null, recursive: false, includeHidden: true, maxEntries: 1000)).Entries;
 
         without.Select(e => e.Name).Should().BeEquivalentTo(new[] { "plain.txt" },
             "hidden AND system are skipped - that is what keeps $RECYCLE.BIN out of a root listing");
@@ -506,7 +507,7 @@ public class FileSystemServiceFlagsTests : IDisposable
         File_("skipdir/secret/inside.txt");
         File.SetAttributes(hiddenDir, File.GetAttributes(hiddenDir) | FileAttributes.Hidden);
 
-        var entries = await Svc().ListAsync(root, null, recursive: true, includeHidden: false);
+        var entries = (await Svc().ListAsync(root, null, recursive: true, includeHidden: false, maxEntries: 1000)).Entries;
 
         entries.Select(e => e.Name).Should().BeEquivalentTo(new[] { "visible.txt" },
             "a skipped directory is not descended into either, or its children leak into the listing");

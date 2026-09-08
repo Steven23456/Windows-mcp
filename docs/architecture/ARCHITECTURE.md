@@ -81,6 +81,7 @@ The MCP SDK (`ModelContextProtocol.Server`) handles all protocol concerns:
 - **Tool Discovery**: `WithToolsFromAssembly()` — discovers all `[McpServerTool]` methods, registering them with their parameter schemas automatically
 - **Server Info**: `ServerInfo = new() { Name = "Windows-mcp", Version = Program.ServerVersion }` — the version comes from `<Version>` in `Directory.Build.props`
 - **Shared wiring**: `WindowsMcpHost.AddWindowsMcp(options)` holds the service registrations, server identity, caller-facing error filter and tool discovery, so both transports are configured identically; only the transport call differs.
+- **Caller-facing errors**: the call-tool filter returns `ToolErrors.MessageFor(ex)` — the exception's own message, capped at 2 000 characters — for `ArgumentException`, `InvalidOperationException`, `KeyNotFoundException`, `IOException`, `UnauthorizedAccessException` and `TimeoutException` (`ToolErrors.IsCallerFacing`), the deliberate answers a caller must be able to read. Everything else keeps the SDK's `"An error occurred invoking '<tool>'."` masking. See `DATAFLOW.md` → "Which exception the caller sees".
 
 **Critical startup requirements** (handled in `Program.cs` before host build):
 ```csharp
@@ -331,7 +332,10 @@ Windows-mcp.slnx
 │   │   │   │                               CpuSample, IProcessWindowNative and
 │   │   │   │                               Win32ProcessWindowNative — C-3's CPU sample,
 │   │   │   │                               sort/limit and graceful-kill window seam)
-│   │   │   ├── FileSystemService.cs       (+ LineWindow — C-1's pure file_read window)
+│   │   │   ├── FileSystemService.cs       (+ LineWindow — C-1's pure file_read window;
+│   │   │   │                               PathCanonical, IFinalPathNative and
+│   │   │   │                               Win32FinalPathNative — C-1 round 4's alias-proof
+│   │   │   │                               containment check)
 │   │   │   ├── RegistryService.cs         (+ RegistryGuard — C-2's pure root denylist)
 │   │   │   ├── NotificationService.cs     (+ IToastSink and WinRtToastSink — C-4's
 │   │   │   │                               in-process WinRT toast seam)

@@ -75,3 +75,5 @@ EnumDisplaySettings
 MONITORINFOEXW
 DEVMODEW
 VIRTUAL_KEY
+CreateFile
+GetFinalPathNameByHandle

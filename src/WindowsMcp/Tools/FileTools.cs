@@ -42,12 +42,21 @@ public sealed class FileTools
     }
 
     [McpServerTool(Title = "Manage files", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false),
-     Description("File operations: copy, move, delete, list. Paths must be absolute. copy/move refuse an existing " +
-                 "destination unless overwrite:true (a directory is copied as a tree; a move across volumes is a " +
-                 "copy then a delete). delete requires confirm:true and refuses a non-empty directory unless " +
-                 "recursive:true. list returns [{Path, Name, IsDirectory, Size, Modified, Hidden}] — pattern is a " +
-                 "name glob ('*.txt', case-insensitive, files and directories), recursive descends, and hidden or " +
-                 "system entries are skipped unless include_hidden:true.")]
+     Description("File operations: copy, move, delete, list. Paths must be absolute (plain form, no \\\\?\\ prefix). " +
+                 "copy/move refuse an existing destination unless overwrite:true, which REPLACES it — whatever was " +
+                 "there, a file or a whole directory tree, is deleted once the copy or move has succeeded; a " +
+                 "failure or a cancel puts it back (best effort: if it cannot, the error says so and the previous " +
+                 "content is beside the destination under its .replaced. name). A missing destination parent " +
+                 "directory is created. A directory " +
+                 "is copied as a tree without descending into junctions or symlinks; a move across volumes is a " +
+                 "copy then a delete, and links inside the tree are not carried across volumes (dropped). A volume root, the same " +
+                 "path, a destination inside the source or one that contains it are refused. delete requires " +
+                 "confirm:true and refuses a non-empty directory unless recursive:true; deleting a junction removes " +
+                 "the link only. list returns {Entries:[{Path, Name, IsDirectory, Size, Modified, Hidden, IsLink}], " +
+                 "Truncated, MaxEntries} — pattern is a name glob ('*.txt', case-insensitive, files and " +
+                 "directories), recursive descends but never into a junction or symlink (listed with IsLink:true), " +
+                 "hidden or system entries are skipped unless include_hidden:true, and the walk stops at " +
+                 "max_entries (default 1000) with Truncated:true.")]
     public async Task<string> FileManage(
         [Description("Action: copy, move, delete, list")] string action,
         [Description("Source path (absolute)")] string src,
@@ -57,6 +66,7 @@ public sealed class FileTools
         [Description("delete: remove a non-empty directory and everything under it (default false: refused); list: descend into sub-directories")] bool recursive = false,
         [Description("list: name glob such as '*.log' (case-insensitive); default every entry")] string? pattern = null,
         [Description("list: include hidden and system entries (default false)")] bool include_hidden = false,
+        [Description("list: stop after this many entries (1-100000, default 1000) and say Truncated:true")] int max_entries = 1000,
         CancellationToken ct = default)
     {
         RequireAbsolute(src, "src");
@@ -79,12 +89,25 @@ public sealed class FileTools
             case "delete":
                 if (!confirm)
                     throw new ArgumentException("'confirm: true' is required for delete");
+                // Round 4: the reply tells the truth — a link is unlinked (its target untouched),
+                // a path that was never there is not "deleted". Read-only metadata, checked here.
+                bool existed = Directory.Exists(src) || File.Exists(src);
+                bool isLink = existed && (File.GetAttributes(src) & FileAttributes.ReparsePoint) != 0;
                 await _fs.DeleteAsync(src, recursive, ct);
-                return $"deleted '{src}'";
+                if (isLink) return $"removed link '{src}' (its target is untouched)";
+                return existed ? $"deleted '{src}'" : $"nothing at '{src}' to delete";
 
             case "list":
-                var entries = await _fs.ListAsync(src, pattern, recursive, include_hidden, ct);
-                return JsonSerializer.Serialize(entries);
+                if (pattern is not null && pattern.IndexOfAny(['\\', '/']) >= 0)
+                    throw new ArgumentException(
+                        $"'pattern' is a name glob such as '*.txt', got '{pattern}'; a path separator is not allowed — pass recursive:true to descend",
+                        nameof(pattern));
+                if (max_entries is < 1 or > 100_000)
+                    throw new ArgumentException(
+                        $"'max_entries' must be between 1 and 100000, got {max_entries} (0 is not 'all' here: a listing is always bounded)",
+                        nameof(max_entries));
+                var listing = await _fs.ListAsync(src, pattern, recursive, include_hidden, max_entries, ct);
+                return JsonSerializer.Serialize(listing);
 
             default:
                 throw new ArgumentException($"Unknown action '{action}'; expected copy|move|delete|list");
@@ -166,31 +189,41 @@ public sealed class FileTools
             throw new ArgumentException(
                 $"'{name}' must be an absolute path (got '{value}'); relative paths are refused because the " +
                 "server's working directory is not the caller's", name);
+        // Round 4: the extended-length and device forms bypass path normalisation (and so the
+        // containment checks); a caller has no reason to send them. Every spelling counts —
+        // GetFullPath turns //?/ into \\?\ too (round 4b).
+        var trimmed = value.TrimStart().Replace('/', '\\');
+        if (trimmed.StartsWith(@"\\?\", StringComparison.Ordinal) || trimmed.StartsWith(@"\\.\", StringComparison.Ordinal))
+            throw new ArgumentException(
+                $"'{name}' must be a plain absolute path (got '{value}'); the \\\\?\\ and \\\\.\\ device forms are refused", name);
     }
 
     [McpServerTool(Title = "Hash file", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Compute a file's hash digest for integrity checks or IOC lookups (e.g. VirusTotal). algorithm: sha256 (default), sha1, or md5. Returns the lowercase hex digest.")]
     public async Task<string> FileHash(
-        [Description("File path to hash")] string path,
+        [Description("File path to hash (absolute)")] string path,
         [Description("Hash algorithm: sha256, sha1, or md5")] string algorithm = "sha256",
         CancellationToken ct = default)
     {
+        RequireAbsolute(path, "path");
         return await _fs.HashFileAsync(path, algorithm, ct);
     }
 
     [McpServerTool(Title = "File streams", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("List NTFS alternate data streams (e.g. Zone.Identifier or hidden payloads) on a file, and the reparse target if the path is a symlink/junction. Forensic checks that file_info doesn't surface.")]
     public async Task<string> FileStreams(
-        [Description("File or directory path to inspect")] string path,
+        [Description("File or directory path to inspect (absolute)")] string path,
         CancellationToken ct = default)
     {
+        RequireAbsolute(path, "path");
         var streams = await _streams.GetStreamsAsync(path, ct);
         return JsonSerializer.Serialize(streams);
     }
 
     [McpServerTool(Title = "File info", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Get metadata for a file or directory.")]
     public async Task<string> FileInfo(
-        [Description("Path to inspect")] string path,
+        [Description("Path to inspect (absolute)")] string path,
         CancellationToken ct = default)
     {
+        RequireAbsolute(path, "path");
         var info = await _fs.GetInfoAsync(path, ct);
         return JsonSerializer.Serialize(info);
     }
@@ -198,10 +231,12 @@ public sealed class FileTools
     [McpServerTool(Title = "Zip or unzip", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false), Description("Zip or unzip an archive. action: zip|unzip.")]
     public async Task<string> Archive(
         [Description("Action: zip or unzip")] string action,
-        [Description("Source path (directory to zip, or zip file to unzip)")] string src,
-        [Description("Destination path (zip file to create, or directory to extract to)")] string dst,
+        [Description("Source path (absolute; directory to zip, or zip file to unzip)")] string src,
+        [Description("Destination path (absolute; zip file to create, or directory to extract to)")] string dst,
         CancellationToken ct = default)
     {
+        RequireAbsolute(src, "src");
+        RequireAbsolute(dst, "dst");
         switch (action.ToLowerInvariant())
         {
             case "zip":

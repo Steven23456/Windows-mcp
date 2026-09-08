@@ -186,7 +186,9 @@ seed (what `test-agent` should be handed), and the done-when bar.
 - **Shipped as** ([note](C-1-file-flags.md)): as planned, with the service flags required
   rather than defaulted (`FileTools` is the only caller), the windowed `file_read` result
   carrying no `encoding` key, and R3's entry fields serialised PascalCase
-  (`{Path, Name, IsDirectory, Size, Modified, Hidden}`) like the other DTO-returning tools.
+  (`{Path, Name, IsDirectory, Size, Modified, Hidden}`) like the other DTO-returning tools —
+  then reshaped in round 4 (below) to the bounded `{Entries, Truncated, MaxEntries}` listing
+  with `max_entries` and `FileEntry.IsLink`.
 
 #### C-3 — Process list CPU %, sort, limit; graceful kill  `P2 · M · ~3 h`
 
@@ -215,7 +217,23 @@ seed (what `test-agent` should be handed), and the done-when bar.
   `ListAsync(nameFilter)` overload does not sample (the name kill goes through it), the CPU
   readings are timestamped per process (one shared window over-counted by half), and the
   graceful path posts `WM_CLOSE` to every visible window through the seam instead of
-  `CloseMainWindow()`.
+  `CloseMainWindow()` — with round 4 (below) making a late exit `exitedGracefully`, not forced.
+
+#### Round 4 — what review cost this phase
+
+Phase 2's two items took **nine** review rounds after the suite was green: three external ones
+on PR #25 (the containment refusals, the same-volume/self-copy cases, the cancelled directory
+copy), then six `review-agent` passes — one on the finished phase-2 diff and one on each of its
+own fixes. Their findings are the round-4 sections of the two notes and are the reason phase 2
+is the largest diff in section C:
+[C-1 rounds 4, 4b, 4c, 4d, 4e, 4f](C-1-file-flags.md#round-4--the-review-agents-findings-2026-09-07)
+(verify before mutating; the aside/commit/restore replacement; roots, junctions, device paths
+and drive aliases refused; the bounded, link-safe listing; no orphaned temp file or empty
+archive; the caller-facing exception set widened and capped) and
+[C-3 round 4](C-3-process-cpu-graceful-kill.md#round-4--the-review-agents-findings-2026-09-07-implemented-the-same-day)
+(the exit re-check after the grace timeout, a cancelled wait that kills nothing,
+`includeLineage` + `groupByRoot` refused). The lesson recorded in `CHANGELOG.md` and
+`CLAUDE.md`'s step 4: a green suite proves the design note, not the code's failure modes.
 
 ### Phase 3 — shell and web
 

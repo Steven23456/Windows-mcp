@@ -56,9 +56,18 @@ public record RegistryKeyDeleteResult(bool Existed, int SubKeysRemoved);
 /// <summary>
 /// One entry of a <c>file_manage(list)</c> listing (C-1 R3): the full path plus the type, size and
 /// hidden flag a caller would otherwise need a <c>file_info</c> round-trip per entry to learn.
-/// <see cref="Size"/> is 0 for a directory.
+/// <see cref="Size"/> is 0 for a directory. <see cref="IsLink"/> (C-1 R4b-6) marks a junction or
+/// symlink: it is listed, never descended into, so a self-referencing junction cannot run the walk
+/// into the path limit.
 /// </summary>
-public record FileEntry(string Path, string Name, bool IsDirectory, long Size, DateTime Modified, bool Hidden);
+public record FileEntry(string Path, string Name, bool IsDirectory, long Size, DateTime Modified, bool Hidden, bool IsLink = false);
+
+/// <summary>
+/// C-1 R4-5: a bounded <c>file_manage(list)</c> listing. <see cref="Truncated"/> is true when the
+/// walk stopped at <see cref="MaxEntries"/> with entries left behind, so a caller can tell a
+/// complete listing from a capped one.
+/// </summary>
+public record FileListing(FileEntry[] Entries, bool Truncated, int MaxEntries);
 
 /// <summary>
 /// A line window of a text file (C-1): <see cref="Offset"/> is 1-based like upstream,

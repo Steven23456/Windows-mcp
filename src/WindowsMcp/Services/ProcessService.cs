@@ -153,11 +153,17 @@ public sealed class ProcessService : IProcessService
             }
         }
         int waited = (int)clock.ElapsedMilliseconds;
+        if (!exited)
+        {
+            // Round 4: the wait timed out, but the process may have answered the close in the
+            // meantime. A process that is gone now closed late; it was not forced.
+            proc.Refresh();
+            exited = proc.HasExited;
+        }
         if (exited)
             return new KillResult(pid, name, true, true, false, waited);
 
-        try { proc.Kill(); }
-        catch (InvalidOperationException) { /* exited between the wait and the kill */ }
+        proc.Kill();   // does not throw for a process that exited meanwhile (verified on .NET 10)
         return new KillResult(pid, name, true, false, true, waited);
     }
 

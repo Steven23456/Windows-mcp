@@ -818,6 +818,33 @@ WaitFor — timeout path (B-6):
   Tool serialises it — a timeout is an outcome, never an exception and never "null"
 ```
 
+### Which exception the caller sees (`ToolErrors`, the call-tool filter)
+
+```
+tool method throws
+        │
+        ▼
+WindowsMcpHost.AddWindowsMcp → WithRequestFilters(AddCallToolFilter(...))
+        │
+  ToolErrors.IsCallerFacing(ex)?
+        │
+  ┌─────┴───────────────────────────────────────────────┐
+  │ yes                                                 │ no
+  ▼                                                     ▼
+CallToolResult{IsError=true,                    the SDK's masking:
+  Text = ToolErrors.MessageFor(ex)}             "An error occurred invoking '<tool>'."
+  = ex.Message, cut at 2000 chars on a          (NullReference, IndexOutOfRange,
+  whole character with " [cut: 2000-character    OutOfMemory, COMException,
+  limit] …" appended                             Win32Exception, …)
+
+Caller-facing: ArgumentException, InvalidOperationException, KeyNotFoundException,
+IOException (FileNotFound / DirectoryNotFound / PathTooLong / "in use"),
+UnauthorizedAccessException, TimeoutException.
+The last four joined in C-1's round 4 — a refused parameter combination, the PID-reuse guard,
+the window matcher's "Open windows: …", a stale element id, a missing registry key, an unknown
+app, and every file tool's own not-found / access-denied answer with the path in it.
+```
+
 ---
 
 ## Response Format
@@ -883,7 +910,7 @@ Scrollable (1):
 | `launch`'s window wait | `LaunchWait.ForWindowAsync` reads the inventory immediately, then every 250 ms until `timeout_ms` (default 10 000, max 60 000); the last sleep is clamped to the remaining budget | A timeout is `WindowDetected:false` with the pid, never an exception — a packaged app or a browser may hand its window to another process |
 | `AppCatalogService` | The catalog is read from the Start Menu and the package manager at most once per 5 minutes; a resolve miss forces one extra refresh | Enumerating a few hundred packages costs ~1 s cold, which is why it is cached rather than read per `launch` |
 | `ProcessService.ListAsync(ProcessListOptions)` | One 250 ms window (`CpuSampleWindow`) between the two `TotalProcessorTime` readings of every plain `process(list)` | Each reading is timestamped per process, so a walk of a few hundred processes does not over-credit the ones read first. `orphans`, `includeLineage`, `groupByRoot` and the `ListAsync(nameFilter)` overload do not sample and pay nothing; the delay is injected, so the unit tests do not pay it either |
-| `ProcessService.KillAsync(pid, KillOptions)` | `graceful:true` waits up to `GraceMs` (default 3000, range 0–60000) after posting `WM_CLOSE` before forcing the process | A pid with no visible window is forced at once (`waitedMs:0`); a hard kill (`graceful:false`) waits nothing at all |
+| `ProcessService.KillAsync(pid, KillOptions)` | `graceful:true` waits up to `GraceMs` (default 3000, range 0–60000) after posting `WM_CLOSE` before forcing the process; the budget is **per process**, so a name kill matching five of them can wait five times over | A pid with no visible window is forced at once (`waitedMs:0`); a hard kill (`graceful:false`) waits nothing at all. When the wait times out, `HasExited` is read once more — a process that answered late is `exitedGracefully:true, forced:false`, not forced (round 4); a caller cancellation during the wait rethrows and kills nothing |
 | `PowerShellService` | Async wait on process exit | 15-min execution backstop (armed after the serialization gate); caller cancellation kills the process tree |
 | `ShellTools` heartbeat | Progress notification every 10s during a foreground `powershell` call | Lets spec-compliant clients reset their request timeout |
 | `JobService` | Background jobs poll-based; per-job 60-min backstop | Runs outside the PowerShell serialization gate |

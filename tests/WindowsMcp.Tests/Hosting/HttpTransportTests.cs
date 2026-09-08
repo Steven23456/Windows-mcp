@@ -1481,6 +1481,140 @@ public class HttpTransportTests
         schema.GetProperty("grace_ms").GetProperty("default").GetInt32().Should().Be(3000);
     }
 
+    // ---- C-1 round 4: the cap on the wire, and the refusals that stopped being readable --------
+
+    /// <summary>C-1 R4-5: the cap has to be visible, and its default has to be the safe one.</summary>
+    [Fact]
+    public async Task File_manage_advertises_the_listing_cap_with_a_thousand_row_default()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var (properties, _) = SchemaOf(await client.ListToolsAsync(), "filemanage");
+
+        ShouldAdvertise(properties, "max_entries");
+        properties.GetProperty("max_entries").GetProperty("default").GetInt32().Should().Be(1000,
+            "a recursive listing of C:\\Windows was 160 000 entries in one response");
+    }
+
+    /// <summary>
+    /// C-1 R4-7: <c>file_write(create_parents:false)</c> refuses a missing directory by naming the
+    /// flag that would create it — a DirectoryNotFoundException, which the CallTool filter masks
+    /// today as "An error occurred invoking 'file_write'". The message is the entire value of the
+    /// refusal, so this is the test that says it must arrive.
+    /// </summary>
+    [Fact]
+    public async Task File_write_refusing_a_missing_parent_reaches_the_client_naming_the_flag()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+        var directory = Path.Combine(Path.GetTempPath(), "wmcp-http-parents-" + Guid.NewGuid().ToString("N"));
+
+        var result = await client.CallToolAsync(ToolName(tools, "filewrite"), new Dictionary<string, object?>
+        {
+            ["path"] = Path.Combine(directory, "note.txt"),
+            ["content"] = "must never be written",
+            ["confirm"] = true,
+            ["create_parents"] = false,
+        });
+
+        result.IsError.Should().BeTrue();
+        result.Content.OfType<TextContentBlock>().Single().Text
+            .Should().Contain("create_parents", "a caller that cannot read the refusal cannot act on it");
+        Directory.Exists(directory).Should().BeFalse("create_parents:false means create nothing");
+    }
+
+    /// <summary>C-1 R4-7: registry_get's "not found" is an answer, not a fault.</summary>
+    [Fact]
+    public async Task Registry_get_on_a_missing_key_reaches_the_client_verbatim()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        var result = await client.CallToolAsync(ToolName(tools, "registryget"), new Dictionary<string, object?>
+        {
+            ["hive"] = "HKCU",
+            ["path"] = @"Software\WindowsMcpTests\does-not-exist",
+        });
+
+        result.IsError.Should().BeTrue();
+        result.Content.OfType<TextContentBlock>().Single().Text
+            .Should().Contain("Registry path not found",
+                "the tool's own description promises 'a missing key is an error naming the path'");
+    }
+
+    /// <summary>
+    /// C-1 R4-7: the window matcher answers a miss with the list of what IS open, which is the
+    /// caller's next move. Read-only — it enumerates the desktop's windows and refuses before
+    /// touching any of them, so it is Integration rather than UIAutomation.
+    /// </summary>
+    [Fact]
+    public async Task Switch_to_window_with_no_match_reaches_the_client_listing_the_open_windows()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        var result = await client.CallToolAsync(ToolName(tools, "switchtowindow"), new Dictionary<string, object?>
+        {
+            ["title"] = "no-such-window-" + Guid.NewGuid().ToString("N"),
+        });
+
+        result.IsError.Should().BeTrue();
+        result.Content.OfType<TextContentBlock>().Single().Text
+            .Should().Contain("Open windows", "the miss is only actionable with the inventory beside it");
+    }
+
+    /// <summary>C-1 R4-7: and the commonest one of all — a file that is not there.</summary>
+    [Fact]
+    public async Task File_read_of_a_missing_file_reaches_the_client_naming_the_path()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+        var missing = Path.Combine(Path.GetTempPath(), "wmcp-http-missing-" + Guid.NewGuid().ToString("N") + ".txt");
+
+        var result = await client.CallToolAsync(ToolName(tools, "fileread"), new Dictionary<string, object?>
+        {
+            ["path"] = missing,
+        });
+
+        result.IsError.Should().BeTrue();
+        result.Content.OfType<TextContentBlock>().Single().Text
+            .Should().Contain(missing, "'An error occurred invoking file_read' does not say which file");
+    }
+
+    /// <summary>
+    /// C-1 R4b-6: a refusal quotes what the caller sent, and R4-7 now sends those refusals back
+    /// verbatim — so the size of the answer is whatever the caller made it. The filter caps a
+    /// caller-facing message at 2 000 characters (<c>ToolErrors.MessageFor</c>): 3 000 characters
+    /// of registry path is not an answer, it is the same path handed back.
+    /// </summary>
+    [Fact]
+    public async Task A_refusal_that_quotes_a_huge_path_is_capped_before_it_reaches_the_client()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+        // Twenty segments of 150 characters: each is inside the registry's 255-character limit, so
+        // the key is simply not there — and "Registry path not found: HKCU\…" quotes all 3 019.
+        var path = string.Join("\\", Enumerable.Repeat(new string('k', 150), 20));
+
+        var result = await client.CallToolAsync(ToolName(tools, "registryget"), new Dictionary<string, object?>
+        {
+            ["hive"] = "HKCU",
+            ["path"] = path,
+        });
+
+        result.IsError.Should().BeTrue();
+        var text = result.Content.OfType<TextContentBlock>().Single().Text;
+        text.Should().Contain("Registry path not found", "the answer is still the answer");
+        text.Length.Should().BeLessThanOrEqualTo(2100,
+            "the filter caps a caller-facing message at 2 000 characters, whatever the caller sent");
+    }
+
 }
 
 

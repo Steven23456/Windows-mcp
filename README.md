@@ -247,25 +247,41 @@ list; both are refused with `includeLineage`, `groupByRoot` or `orphans`, which 
 shapes and no CPU column. `process(action: "kill", …, graceful?, grace_ms?)` asks first: it posts
 `WM_CLOSE` to every visible top-level window of the pid, waits up to `grace_ms` (default 3000,
 max 60000) and only then forces the process, so an editor can show its save prompt. A process
-with no window is forced at once and says so; `graceful` cannot be combined with `tree`. Kills by
+with no window is forced at once and says so; `graceful` cannot be combined with `tree`, and
+`includeLineage` cannot be combined with `groupByRoot`. `grace_ms` applies **per process** on a
+name kill; a process that answers just as the clock runs out is reported
+`exitedGracefully: true, forced: false`, and cancelling the request during the wait leaves the
+process asked to close but not killed. Kills by
 pid or name return `{killed:[{pid, name, graceful, exitedGracefully, forced, waitedMs}]}` (the
 tree kill keeps its text count).
 
-Every file tool takes **absolute** paths — `file_read`, `file_write`, `file_manage`'s `src` and
-`dst`, and `file_search`'s `root` refuse a relative one naming the parameter, since the server's
-working directory is not the caller's. `file_read(path, max_bytes?, encoding?, offset_lines?,
-limit_lines?)` returns plain text by default and a JSON window
+Every file tool takes **plain absolute** paths — `file_read`, `file_write`, `file_manage`'s `src`
+and `dst`, `file_search`'s `root`, `file_hash`, `file_info`, `file_streams` and `archive` refuse
+a relative one naming the parameter, since the server's working directory is not the caller's,
+and refuse the `\\?\` / `\\.\` device forms in every spelling, since they bypass the
+normalisation the containment guards rely on. `file_read(path, max_bytes?, encoding?,
+offset_lines?, limit_lines?)` returns plain text by default and a JSON window
 `{path, totalLines, offset, returned, truncated, content}` when either window parameter is given
 (`offset_lines` is 1-based, `limit_lines: 0` runs to the end) — the way to page a large log,
 since `max_bytes` bounds the file, not the window. `file_write(…, append?, create_parents?)`
 appends instead of replacing and creates a missing parent directory unless `create_parents:
 false` refuses it. `file_manage(action, src, dst?, confirm?, overwrite?, recursive?, pattern?,
-include_hidden?)`: `copy`/`move` refuse an existing destination unless `overwrite: true` (a
-directory is copied as a tree, a cross-volume move is a copy then a delete), `delete` refuses a
-non-empty directory unless `recursive: true`, and `list` returns
-`[{Path, Name, IsDirectory, Size, Modified, Hidden}]` — `pattern` is a case-insensitive name
-glob, `recursive` descends, and hidden or system entries are skipped unless
-`include_hidden: true`.
+include_hidden?, max_entries?)`: `copy`/`move` refuse an existing destination unless
+`overwrite: true`, which **replaces** it — the old destination is moved aside, the copy or move
+runs, and only then is it removed; a failure or a cancel puts it back (best effort: if it cannot,
+the error says so and names where the previous content is). A directory is copied as a tree
+without descending into junctions or symlinks, a cross-volume move is a copy then a delete (links
+are dropped, and the destination is complete before the source goes), a missing destination
+parent is created, and a volume root, the same path, a destination inside the source or one that
+contains it are refused before anything is touched — judged on the volume's own spelling of both
+paths, so a `subst` letter or a junction cannot smuggle one inside the other. `delete` refuses a
+non-empty directory unless `recursive: true`; deleting a junction removes the link only
+(`removed link …`), and deleting what is not there answers `nothing at … to delete`. `list`
+returns `{Entries:[{Path, Name, IsDirectory, Size, Modified, Hidden, IsLink}], Truncated,
+MaxEntries}` — `pattern` is a case-insensitive name glob (a path separator in it is refused),
+`recursive` descends but never into a junction or symlink, hidden or system entries are skipped
+unless `include_hidden: true`, and the walk stops at `max_entries` (default 1000, range
+1–100000) with `Truncated: true`.
 
 `registry_get(hive, path)` without `value_name` returns the whole key —
 `{Path, Values: [{Path, Name, Data, Kind}], SubKeys: [...]}`, an empty path listing the hive
@@ -304,7 +320,18 @@ Destructive tools require `confirm: true` as an argument and throw
 Beyond the confirm gate, the destructive file actions ask for the specific permission they need:
 a copy or a move over an existing destination needs `overwrite: true`, and deleting a non-empty
 directory needs `recursive: true`. Neither used to be asked for — both defaults now refuse rather
-than destroy data the caller did not name.
+than destroy data the caller did not name. What they *do* ask for, they check before they touch
+anything: a missing or locked source, a volume or share root at either end, and a destination
+that is the source, inside it or containing it are all refused before the first byte moves. With
+`overwrite: true` the existing destination is set aside rather than deleted, so a failure or a
+cancel mid-copy puts it back; a junction or symlink is never descended into, never recreated
+across volumes, and `delete` of one removes the link and leaves its target alone.
+
+A refusal reaches you as its own sentence. The server surfaces the message of a deliberate answer
+— a refused parameter combination, a guard abort, a key or window that is not there, and the file
+system's own "not found" / "access denied" / "in use" / "path too long" with the path in it —
+instead of the SDK's generic `An error occurred invoking '<tool>'.`, capped at 2 000 characters.
+Unexpected faults (a null reference, a COM or Win32 failure) stay masked.
 
 `env(get|list)` redacts values for variables whose name contains
 `KEY/TOKEN/SECRET/PASSWORD/AUTH/CREDENTIAL/PRIVATE/PAT` (case-insensitive).

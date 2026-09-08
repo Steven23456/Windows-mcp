@@ -49,9 +49,10 @@ public sealed class ProcessTools
         "reuse — the kill aborts unless the live process's start time matches. graceful:true asks the " +
         "process to close (WM_CLOSE to its visible windows, so an editor can show its save prompt), " +
         "waits grace_ms (default 3000, at most 60000) and only then forces it; a process with no window " +
-        "is forced at once and the result says so. pid and name kills return " +
-        "{killed:[{pid, name, graceful, exitedGracefully, forced, waitedMs}]}; graceful cannot be " +
-        "combined with tree.")]
+        "is forced at once and the result says so; grace_ms applies per process on a name kill, and " +
+        "cancelling the request during the wait leaves the process asked to close but not killed. pid " +
+        "and name kills return {killed:[{pid, name, graceful, exitedGracefully, forced, waitedMs}]}; " +
+        "graceful cannot be combined with tree, and includeLineage cannot be combined with groupByRoot.")]
     public async Task<string> Process(
         [Description("Action: list, orphans, or kill")] string action,
         [Description("Process name; kill target, or substring filter for list/orphans")] string? name = null,
@@ -70,6 +71,9 @@ public sealed class ProcessTools
         switch (action.ToLowerInvariant())
         {
             case "list":
+                if (groupByRoot && includeLineage)
+                    throw new ArgumentException(
+                        "'includeLineage' and 'groupByRoot' are two different shapes; pass one of them, not both");
                 if (groupByRoot || includeLineage)
                 {
                     RefusePlainListOptions(sort_by, limit, groupByRoot ? "groupByRoot" : "includeLineage");
@@ -82,6 +86,10 @@ public sealed class ProcessTools
 
             case "orphans":
                 RefusePlainListOptions(sort_by, limit, "orphans");
+                if (includeLineage)
+                    throw new ArgumentException("'includeLineage' applies to list only; orphans already carries the lineage columns", nameof(includeLineage));
+                if (groupByRoot)
+                    throw new ArgumentException("'groupByRoot' applies to list only, not to orphans", nameof(groupByRoot));
                 return JsonSerializer.Serialize(await _process.ListLineageAsync(true, name, ct));
 
             case "kill":
