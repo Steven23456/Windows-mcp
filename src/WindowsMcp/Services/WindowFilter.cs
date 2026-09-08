@@ -57,14 +57,30 @@ internal static class WindowFilter
          : p.IsMaximized ? WindowState.Maximized
          : WindowState.Normal;
 
+    /// <summary>
+    /// C-5: the browsers that expose their page to UI Automation as a <c>RootWebArea</c> document
+    /// — the Chromium family. Firefox is a browser (<see cref="BrowserProcesses"/>) but not one
+    /// <c>scrape(source:dom)</c> can read.
+    /// </summary>
+    internal static readonly HashSet<string> ChromiumProcesses = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "chrome", "msedge", "brave", "opera", "vivaldi",
+    };
+
     /// <summary>Process name (with or without ".exe", case-insensitive) is a known browser. A-5 reuses this set.</summary>
     internal static bool IsBrowser(string processName)
+        => BrowserProcesses.Contains(BareName(processName));
+
+    /// <summary>Process name (with or without ".exe", case-insensitive) is a Chromium browser — one with a page document.</summary>
+    internal static bool IsChromium(string processName)
+        => ChromiumProcesses.Contains(BareName(processName));
+
+    private static string BareName(string processName)
     {
-        if (string.IsNullOrEmpty(processName)) return false;
-        var name = processName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+        if (string.IsNullOrEmpty(processName)) return "";
+        return processName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
             ? processName[..^4]
             : processName;
-        return BrowserProcesses.Contains(name);
     }
 
     /// <summary>

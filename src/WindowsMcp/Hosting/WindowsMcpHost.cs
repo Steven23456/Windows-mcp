@@ -62,6 +62,8 @@ internal static class WindowsMcpHost
         // assembly, so the public options record is what crosses into the tool layer.
         services.AddSingleton(new ScreenshotOptions(options.ScreenshotScale, options.Flash, options.ProfileSnapshot, options.ScreenshotBackend));
         services.AddSingleton(new UiTreeOptions(options.MaxTreeElements, options.ProfileSnapshot));
+        // C-5: the HTTP transport is stateless (BuildHttpApp), so sampling cannot reach the client there.
+        services.AddSingleton(new TransportOptions(Stateless: options.Transport == TransportKind.Http));
         // Always registered: the tool gates on ScreenshotOptions.Flash, and the overlay's thread
         // only starts on its first Show, so an off switch costs nothing.
         services.AddSingleton<IFlashOverlay, FlashOverlay>();

@@ -1,18 +1,32 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text.RegularExpressions;
+using AngleSharp.Dom;
+using AngleSharp.Html.Parser;
 using Microsoft.Extensions.Logging;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
 
 namespace WindowsMcp.Services;
 
-public sealed class WebService : IWebService
+public sealed partial class WebService : IWebService
 {
-    // Singleton HttpClient per process — standard guidance for .NET HttpClient lifecycle.
-    private static readonly HttpClient _client = new();
+    // One HttpClient per service, and the service is a process singleton — the standard
+    // guidance for the .NET HttpClient lifecycle. An instance field rather than a static so a
+    // test can give it a short timeout (C-5) without touching every other test's client.
+    private readonly HttpClient _client;
 
     private readonly bool _allowPrivateIps;
     private readonly ILogger? _log;
+
+    /// <summary>
+    /// C-5 (review F9): the deepest element nesting below <c>&lt;body&gt;</c> the HTML→Markdown
+    /// conversion is asked to walk. ReverseMarkdown recurses once per level and overflows the
+    /// stack near 900 — which no <c>catch</c> can stop and which takes the whole server with it —
+    /// so a deeper document is refused with an answer the caller can read. Measured iteratively
+    /// on the parsed tree before the converter sees it.
+    /// </summary>
+    internal const int MaxNestingDepth = 300;
 
     /// <summary>Production constructor: SSRF protection is active (allowPrivateIps = false).</summary>
     public WebService(ILogger<WebService>? log = null)
@@ -23,19 +37,109 @@ public sealed class WebService : IWebService
     /// (which binds to 127.0.0.1, otherwise blocked by SSRF protection).
     /// </summary>
     public WebService(bool allowPrivateIps, ILogger<WebService>? log = null)
+        : this(allowPrivateIps, httpTimeout: null, log) { }
+
+    /// <summary>
+    /// C-5: the timeout the client applies to every request (its 100-second default when null),
+    /// so a test can prove that a host that never answers is reported as a <see cref="TimeoutException"/>.
+    /// </summary>
+    internal WebService(bool allowPrivateIps, TimeSpan? httpTimeout, ILogger<WebService>? log = null)
     {
         _allowPrivateIps = allowPrivateIps;
         _log = log;
+        _client = new HttpClient();
+        if (httpTimeout is { } timeout) _client.Timeout = timeout;
     }
 
-    public async Task<string> ScrapeAsync(string url, CancellationToken ct = default)
+    /// <inheritdoc />
+    public async Task<ScrapeResult> ScrapeAsync(string url, int maxChars = 100000, CancellationToken ct = default)
     {
+        if (maxChars < 1)
+            throw new ArgumentException($"maxChars must be positive, got {maxChars}.", nameof(maxChars));
         ct.ThrowIfCancellationRequested();
         await ValidateUrlAsync(url, ct);
-        var html = await _client.GetStringAsync(url, ct);
-        var converter = new ReverseMarkdown.Converter();
-        return converter.Convert(html);
+
+        string html;
+        string finalUrl;
+        try
+        {
+            using var response = await _client.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+            html = await response.Content.ReadAsStringAsync(ct);
+            // After redirects: the request the content actually answered — without any
+            // credentials the caller put in the URL (review F12), which the model would quote back.
+            finalUrl = WithoutUserInfo(response.RequestMessage?.RequestUri) ?? WithoutUserInfo(new Uri(url)) ?? url;
+        }
+        catch (HttpRequestException ex)
+        {
+            // Caller-facing (ToolErrors): a 404 or a refused connection is an answer, not a fault.
+            throw new InvalidOperationException($"{url} could not be fetched: {ex.Message}", ex);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            var seconds = _client.Timeout.TotalSeconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+            throw new TimeoutException($"{url} did not respond within {seconds}s.", ex);
+        }
+
+        var document = new HtmlParser().ParseDocument(html);
+        var depth = NestingDepth(document);
+        if (depth > MaxNestingDepth)
+            throw new InvalidOperationException(
+                $"{url} nests its elements {depth} levels deep, past the {MaxNestingDepth}-level limit the " +
+                "HTML-to-Markdown conversion can walk. Read the raw HTML with http_request instead.");
+
+        var markdown = new ReverseMarkdown.Converter().Convert(html);
+        var content = TextCap.Cut(markdown, maxChars, out var truncated);
+        return new ScrapeResult("http", finalUrl, TitleOf(document), markdown.Length, truncated, content);
     }
+
+    /// <summary>
+    /// The document's own title — the first HTML <c>&lt;title&gt;</c> element, as a browser
+    /// resolves it (an SVG tooltip, a commented-out tag or a string inside a script is not one) —
+    /// entities decoded and whitespace collapsed; null when the page has none or it is blank.
+    /// </summary>
+    internal static string? HtmlTitle(string html) => TitleOf(new HtmlParser().ParseDocument(html));
+
+    private static string? TitleOf(IDocument document)
+    {
+        var title = Whitespace().Replace(document.Title ?? "", " ").Trim();
+        return title.Length == 0 ? null : title;
+    }
+
+    /// <summary>
+    /// How deep the elements below <c>&lt;body&gt;</c> nest (its own children are level 1),
+    /// walked with an explicit stack so the measurement itself cannot overflow.
+    /// </summary>
+    internal static int NestingDepth(IDocument document)
+    {
+        var body = document.Body;
+        if (body is null) return 0;
+        int deepest = 0;
+        var stack = new Stack<(IElement Element, int Depth)>();
+        stack.Push((body, 0));
+        while (stack.Count > 0)
+        {
+            var (element, depth) = stack.Pop();
+            if (depth > deepest) deepest = depth;
+            foreach (var child in element.Children)
+                stack.Push((child, depth + 1));
+        }
+        return deepest;
+    }
+
+    /// <summary>
+    /// The URL as it was fetched (<see cref="Uri.AbsoluteUri"/>, every escape intact — not the
+    /// display form <c>ToString()</c> gives, which unescapes <c>%20</c>), minus any user info.
+    /// </summary>
+    private static string? WithoutUserInfo(Uri? uri)
+    {
+        if (uri is null) return null;
+        if (string.IsNullOrEmpty(uri.UserInfo)) return uri.AbsoluteUri;
+        return new UriBuilder(uri) { UserName = string.Empty, Password = string.Empty }.Uri.AbsoluteUri;
+    }
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex Whitespace();
 
     public async Task<HttpResponseDto> RequestAsync(
         string url,
@@ -75,10 +179,17 @@ public sealed class WebService : IWebService
 
     private async Task ValidateUrlAsync(string url, CancellationToken ct)
     {
-        if (_allowPrivateIps) return;
-
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
             throw new InvalidOperationException("Invalid URL format");
+
+        // Review F5: the scheme is decided before the address. HttpClient refuses ftp:, file:,
+        // data:, ws: and the rest with a NotSupportedException the client never sees, and a
+        // scheme with no host would otherwise resolve "" — this machine — for the address check.
+        if (uri.Scheme is not ("http" or "https"))
+            throw new ArgumentException(
+                $"Unsupported URL scheme '{uri.Scheme}' in '{url}': only http and https are fetched.", nameof(url));
+
+        if (_allowPrivateIps) return;
 
         // Resolve hostname and check ALL resolved IPs (defends against DNS rebinding)
         IPAddress[] addresses;

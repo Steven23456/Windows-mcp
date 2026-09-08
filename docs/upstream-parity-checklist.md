@@ -5,7 +5,8 @@
 (released 2026-08-01; Python ≥ 3.14, FastMCP 3, 20 tools).
 **Ours:** `main` @ `8cb40b6` + the phase-2/3/4/5 branches, 69 tools, plugin `0.7.3`, `CHANGELOG.md
 [Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1,
-phase 3's A-2/A-3/A-4, phase 4's A-6 and phase 5's A-14, A-12 (phase 1), A-10 and A-5 (phase 1).
+phase 3's A-2/A-3/A-4, phase 4's A-6 and phase 5's A-14, A-12 (phase 1), A-10 and A-5 (phase 1),
+then all of section B and all of section C (C-7, C-4, C-2, C-3, C-1, C-6, C-5).
 SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
@@ -14,8 +15,8 @@ defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rul
 now fixed**; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
 phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and phase 5 shipped A-14,
 A-12 phase 1, A-10 and A-5 phase 1 — so every section-A row is ticked, with only A-5's Firefox
-phase left open and A-12's phase 2 deliberately not planned; sections B, C and S are the next
-work).
+phase left open and A-12's phase 2 deliberately not planned; section B is ticked too, and
+C-5/C-6 close section C — section S is the work that is left).
 Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
 implementation sketch, files to touch, tests, and a "done when" bar.
@@ -98,8 +99,8 @@ function names are the stable anchor.
 | C-2 | Registry delete + subkey listing on the tool surface | P2 | S | [C-2](design/C-2-registry-delete.md) | ☑ |
 | C-3 | Process list CPU %, sort, limit; graceful kill | P2 | M | [C-3](design/C-3-process-cpu-graceful-kill.md) | ☑ |
 | C-4 | Notification `app_id` (AUMID) | P3 | S | [C-4](design/C-4-notification-app-id.md) | ☑ |
-| C-5 | `scrape`: DOM source, query, MCP sampling summary | P2 | M | A-5 (DOM part) | ☐ |
-| C-6 | `powershell`: per-call timeout; env rebuild from registry | P2 | S–M | — | ☐ |
+| C-5 | `scrape`: DOM source, query, MCP sampling summary | P2 | M | A-5 · [C-5](design/C-5-scrape-dom-summary.md) | ☑ |
+| C-6 | `powershell`: per-call timeout; env rebuild from registry | P2 | S–M | [C-6](design/C-6-powershell-timeout-path.md) | ☑ |
 | C-7 | Tool annotations on all 69 tools | P2 | S | [C-7](design/C-7-tool-annotations.md) | ☑ |
 | S-1 | Tool allow/deny lists (`--tools`, `--exclude-tools`) | P2 | S | — | ☐ |
 | S-2 | IP allowlist (CIDR v4/v6) | P2 | S | S-8 | ☐ |
@@ -113,9 +114,9 @@ function names are the stable anchor.
 | S-10 | Per-tool black-box tester skill | P3 | S | — | ☐ |
 
 **Suggested order.** **All defects (D-1 … D-9) are done** — the D section is closed — and **so are
-sections A and B** (A-5's Firefox phase and D-2's `interact_element(type) clear` are the open
-sub-items; A-12's phase 2 is not planned). What is left is sections C and S: A-5's DOM work
-has unlocked C-5, and quick wins C-2, C-7, S-8, S-1 can be interleaved anywhere; S-4 last.
+sections A, B and C** (A-5's Firefox phase and D-2's `interact_element(type) clear` are the open
+sub-items; A-12's phase 2 is not planned). What is left is section S: the quick wins S-8 and S-1
+can be interleaved anywhere; S-4 last.
 The section-A sequencing, cross-item decisions (coordinate space, defaults, tool count, element
 ids, env vars) and per-item test seeds are in [`docs/design/A-roadmap.md`](design/A-roadmap.md).
 The section-B plan (four phases, the element-target resolver, window matcher, typing planner and
@@ -1073,7 +1074,7 @@ on some builds.
 requirement; optionally register a Start Menu shortcut carrying our AUMID on first use.
 
 ### C-5 — `scrape`: DOM source, query focus, MCP-sampling summary  `P2 · M`
-- [ ] Not started
+- [x] Done 2026-09-08 — [design note](design/C-5-scrape-dom-summary.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `Scrape(url, query?, use_dom=false, use_sampling=true)`: HTTP fetch → markdownify,
 **or** the active browser tab's DOM text with "Reached top / Scroll down to see more" hints
@@ -1081,14 +1082,14 @@ requirement; optionally register a Start Menu shortcut carrying our AUMID on fir
 a boilerplate-stripping system prompt focused on `query`; falls back to raw when sampling is
 unsupported (`tools/scrape.py`).
 
-**Ours.** `scrape(url)` → HTML→Markdown via ReverseMarkdown, private IPs rejected.
+**Ours (before C-5).** `scrape(url)` → HTML→Markdown via ReverseMarkdown, private IPs rejected.
 
 **Sketch.** `source: http|dom` (dom via A-5), `query`, `summarize:true` → server-initiated
 sampling through the SDK (`IMcpServer` sampling request — verify the 2.2.0 API and check the
 client's `sampling` capability first), `max_chars` truncation for raw output.
 
 ### C-6 — `powershell`: per-call timeout; environment rebuild from registry  `P2 · S–M`
-- [ ] Not started
+- [x] Done 2026-09-08 — [design note](design/C-6-powershell-timeout-path.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
 
 **Upstream.** `PowerShell(command, timeout=30)` with `run_with_graceful_timeout`;
 `powershell/service.py` `_read_reg_env()`/`_dedup_path()` rebuild the child environment
@@ -1096,8 +1097,8 @@ client's `sampling` capability first), `max_chars` truncation for raw output.
 and de-duplicated) because MCP hosts frequently spawn the server with a stripped environment,
 which makes `git`, `node`, etc. "not found" inside tool calls.
 
-**Ours.** 15-min backstop + `background:true` jobs (ahead), but no per-call `timeout_seconds`;
-`PowerShellInvocation.cs` does not touch the environment.
+**Ours (before C-6).** 15-min backstop + `background:true` jobs (ahead), but no per-call
+`timeout_seconds`; `PowerShellInvocation.cs` does not touch the environment.
 
 **Sketch.** `timeout_seconds` (≤ backstop) → cancel + tree-kill; environment: when the inherited
 `PATH` lacks `%SystemRoot%\System32` or is empty, rebuild from the registry as above and inject

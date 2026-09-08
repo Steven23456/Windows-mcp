@@ -19,8 +19,11 @@ Parses the command line (`Hosting/ServerOptions`, with `WINDOWSMCP_*` env fallba
 ```csharp
 public static async Task<int> Main(string[] args)
 {
-    // 1. Repair a host-stripped environment (PATHEXT, ProgramData, …) before anything spawns a
-    //    child; repaired names are logged to stderr once. Host-set values are never overwritten
+    // 1. Repair a host-stripped environment (PATHEXT, ProgramData, Path, …) before anything
+    //    spawns a child; repaired names are logged to stderr once. Host-set values are never
+    //    overwritten, except PATHEXT and (C-6) a Path with no System32 entry, which the
+    //    registry's machine then user Path is appended to — never reordered or trimmed — by the
+    //    pure Hosting/PathMerge, with the stock four directories as the empty-registry fallback
     EnvironmentRepair.Apply();
 
     // 2. Process AppUserModelID (taskbar grouping; toasts name their own id since C-4)
@@ -262,7 +265,7 @@ normalisation the service's containment guards rely on, and a model has no reaso
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `Powershell` | `(string command, bool background)` | Execute PowerShell; returns `{stdout, stderr, exitCode}` JSON. Foreground calls emit MCP progress heartbeats every 10s (via an SDK-injected `IProgress<ProgressNotificationValue>`, excluded from the tool schema) so spec-compliant clients reset their request timeout; the foreground execution backstop is 15 min. `background:true` starts a `JobService` job and returns its `JobInfo` immediately |
+| `Powershell` | `(string command, bool background, int timeout_seconds)` | Execute PowerShell; returns the `PSResult` as JSON (`{Success, Stdout, Stderr, ExitCode, Errors, TimedOut, StdoutTrimmedChars, StderrTrimmedChars}`). Foreground calls emit MCP progress heartbeats every 10s (via an SDK-injected `IProgress<ProgressNotificationValue>`, excluded from the tool schema) so spec-compliant clients reset their request timeout; the foreground execution backstop is 15 min. `timeout_seconds` (C-6) bounds this call to 1–900 s — outside that range, or combined with `background:true`, is an `ArgumentException` naming the parameter and raised before anything is spawned; `0` (default) means the backstop only. On expiry the child tree is killed and the result comes back with `TimedOut:true`, `Success:false`, `ExitCode:-1` and the partial stdout, not an exception. `background:true` starts a `JobService` job and returns its `JobInfo` immediately |
 
 ---
 
@@ -305,12 +308,12 @@ normalisation the service's containment guards rely on, and a model has no reaso
 ### `WebTools` — 2 tools
 `src/WindowsMcp/Tools/WebTools.cs`
 
-**Injected:** `IWebService`
+**Injected:** `IWebService`, `IUIAutomationService` (C-5: the `source:"dom"` page walk), `IWindowService` (the frontmost Chromium window), plus the `TransportOptions` record (whether the transport keeps a session, i.e. whether sampling can reach the client) and the internal `ISamplingClient` seam (`Tools/ISamplingClient.cs`: `McpServerSampling` over `McpServer.SampleAsync` in production, a fake in the unit tests)
 
 | Method | Description |
 |--------|-------------|
-| `Scrape` | Fetch a URL and convert HTML to Markdown (private address ranges rejected, DNS-rebinding aware) |
-| `HttpRequest` | HTTP request (GET/POST/PUT/DELETE/PATCH) with optional JSON headers and body; same private-range rejection |
+| `Scrape` | `(url?, query?, source = "http", summarize = false, max_chars = 100000, window?)` → JSON `{Source, Url, Title, Chars, Truncated, Content, Summarized, Model, Note}`. `source:"http"` fetches the URL (http/https only, private address ranges rejected, DNS-rebinding aware) and converts the HTML to Markdown; `source:"dom"` reads the page already open in a Chromium browser — the `window` named, else the frontmost Chromium window in the A-1 inventory (Firefox is refused by name: no page document) — through one `SnapshotAsync(Window, …, UseDom:true)`, taking the first page that has a `DocumentId` and rendering it with `DomPage` (text plus one scroll hint). `Chars` is the size before `max_chars` cut it; `Truncated` covers that cut **and** a walk the element budget stopped early, whose `Note` names `--max-tree-elements`. `summarize:true` asks the client's model through MCP sampling (`ScrapeSummary` builds the request, 120 s bound): no capability, the stateless HTTP transport, blank text, no answer, or a failure returns the text with a `Note` saying which. Every refusal (`source`, `max_chars`, `url`/`window` against the source, `query` without `summarize`) names its parameter and runs before anything is fetched or walked |
+| `HttpRequest` | HTTP request (GET/POST/PUT/DELETE/PATCH) with optional JSON headers and body; same http/https-only and private-range rejection, and a malformed `headers_json` is an `ArgumentException` naming the parameter |
 
 ---
 
@@ -392,7 +395,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IOcrService` | `ExtractTextAsync(region?)` → text |
 | `IClipboardService` | `GetTextAsync`, `SetTextAsync` |
 | `IAudioService` | `GetAsync` → `AudioState`, `SetVolumeAsync`, `SetMutedAsync` |
-| `IPowerShellService` | `RunAsync(command)` → `PSResult` |
+| `IPowerShellService` | `RunAsync(command)` → `PSResult` (the execution backstop only; an expiry is a caller-facing `TimeoutException`, C-6) and the C-6 overload `RunAsync(command, TimeSpan? timeout)` → `PSResult` (null = the backstop only; a non-positive timeout is an `ArgumentException`; an expiry **returns** `TimedOut:true` with the partial output) |
 | `IJobService` | `StartAsync(command)`, `GetStatus(id)`, `GetOutput(id, tailChars)`, `Cancel(id)`, `List()` |
 | `IUIAutomationService` | `GetStateAsync`, `FindElementAsync(text, kind, scope, windowTitle, includeOffscreen)`, `GetElementAsync`, `GetTextAsync`, `AssertElementAsync` → `AssertResult`, `InteractAsync` → `InteractResult`, `GetTableAsync`, `WaitForAsync(text, timeoutMs, intervalMs, kind, scope, windowTitle, includeOffscreen)` → `ElementInfo?` and the B-6 overload `WaitForAsync(WaitRequest)` → `WaitForResult`, `FocusAsync`, `SnapshotAsync(SnapshotRequest)` → `SnapshotResult` |
 | `IFileSystemService` | `ReadTextAsync`, `ReadLinesAsync(path, maxBytes, encoding, offsetLines, limitLines)` → `TextWindow` (C-1), `ReadBytesAsync`, `WriteTextAsync(path, content, encoding, append, createParents)`, `CopyAsync(src, dst, overwrite)`, `MoveAsync(src, dst, overwrite)`, `DeleteAsync(path, recursive)`, `ListAsync(path, pattern, recursive, includeHidden, maxEntries)` → `FileListing` (round 4: bounded and cancellable; `startup_report`'s startup-folder scan passes `int.MaxValue` so its reach is unchanged), `SearchAsync`, `GetInfoAsync`, `HashFileAsync`, `ZipAsync`, `UnzipAsync` — C-1's flags are **required** parameters, not defaulted: `FileTools` is the only caller and a required flag cannot be forgotten |
@@ -417,7 +420,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IPowerService` | `ExecuteAsync(action)` — shutdown / reboot / logoff / lock / sleep / hibernate |
 | `INotificationService` | `ShowAsync(title, message, appId?)` → `NotificationResult` (C-4: in-process WinRT toast; `appId` null = the server's own id) |
 | `INetworkService` | `ListAdaptersAsync`, `ListPortsAsync`, `GetWifiAsync`, `DnsLookupAsync`, `PingAsync` |
-| `IWebService` | `ScrapeAsync(url)`, `RequestAsync(url, method, headers, body)` → `HttpResponseDto` |
+| `IWebService` | `ScrapeAsync(url, maxChars = 100000)` → `ScrapeResult` (C-5, replacing the string-returning overload; the scheme and private-address checks run first, `Chars` is the size before the cut), `RequestAsync(url, method, headers, body)` → `HttpResponseDto` |
 | `IIntegrityService` | `BaselineAsync`, `CheckAsync`, `GetBaseline`, `DefaultWatchList` |
 | `IUsnService` | `StatusAsync(volume)` → `UsnStatus`, `ReadAsync(volume, startUsn, max)` → `UsnReadResult` |
 | `IWatchService` | `Start(path, filter, subdirs)` → `WatchSession`, `Poll(id, max)` → `WatchEvent[]`, `Stop(id)`, `List()` |
@@ -440,14 +443,14 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 23 f
 | `WindowDtos.cs` | `WindowAction` (trailing `MatchStrategy`/`Score`/`Hwnd`), `MonitorInfo` (trailing `WorkArea`/`Orientation`/`EffectiveDpi`/`Scale`, all defaulted), `ForegroundResult`, `WindowBoundsResult` (B-9: `Window`, `Before`, `After`, `MatchStrategy`, `Score`, `Restored`), `WindowInfo` (trailing `DesktopId`), `WindowProbe`, `WindowState` (enum, serialised by name), `VirtualDesktopInfo` |
 | `AppDtos.cs` | `AppEntry` (`Name`, `Kind` `shortcut\|packaged\|path`, `Target` — the `.lnk` path or the AUMID, `Source`), `AppMatch` (`Entry`, `Score`, `Strategy` `exact\|prefix\|fuzzy`), `LaunchResult` (`MatchedName`, `Kind`, `Score`, `Pid`, `Hwnd?`, `Title?`, `WindowDetected`, `Strategy`) |
 | `ProcessDtos.cs` | `ProcessDto` (trailing `CpuPercent`, defaulted to 0 — C-3; the lineage and group rows do not carry it), `ProcessSort` (enum, C-3), `ProcessListOptions` (`NameFilter`, `SortBy`, `Limit`), `KillOptions` (`Graceful`, `GraceMs`, `ExpectedStartUtc?`), `KillResult` (`Pid`, `Name`, `Graceful`, `ExitedGracefully`, `Forced`, `WaitedMs`), `ProcessStart`, `ProcessDetailDto`, `ModuleInfo`, `ProcessLineageDto`, `ProcessGroupDto` |
-| `PowerShellDtos.cs` | `PSResult` (success, stdout, stderr, exit code, parsed errors) |
+| `PowerShellDtos.cs` | `PSResult` (success, stdout, stderr, exit code, parsed errors, plus the trailing C-6 `TimedOut` and `StdoutTrimmedChars`/`StderrTrimmedChars`, all defaulted) |
 | `JobDtos.cs` | `JobInfo`, `JobOutput` |
 | `FileSystemDtos.cs` | `FileInfoDto`, `FileSearchHit`, `FileEntry` (C-1: `Path`, `Name`, `IsDirectory`, `Size` — 0 for a directory, `Modified` UTC, `Hidden`, plus trailing `IsLink` — round 4b's junction/symlink marker, defaulted so the field is additive), `FileListing` (round 4: `Entries`, `Truncated`, `MaxEntries`), `TextWindow` (C-1: `TotalLines`, `Offset` 1-based, `Returned`, `Truncated`, `Content` joined with `\n`), `AlternateStreamInfo`, `FileStreamsDto`, `RegistryValueDto`, `RegistryKeyDto` (C-2: `Path`, `Values`, `SubKeys`), `RegistryKeyDeleteResult` (`Existed`, `SubKeysRemoved`), `ServiceDto`, `ScheduledTaskDto`, `ScheduledTaskDetailDto`, `EventLogEntryDto` |
 | `NotificationDtos.cs` | `NotificationResult` (C-4: `Shown`, `AppId`, `Registered`, `Note`) |
 | `SystemDtos.cs` | `WmiResultDto` |
 | `NetworkDtos.cs` | `NetworkAdapterDto`, `PortInfoDto`, `WifiInfoDto`, `PingResult` |
 | `FirewallDtos.cs` | `FirewallRuleDto` |
-| `WebDtos.cs` | `HttpResponseDto` |
+| `WebDtos.cs` | `HttpResponseDto`, `ScrapeResult` (C-5: `Source` `http\|dom`, `Url` after redirects with any credentials stripped, `Title`, `Chars` before the cut, `Truncated`, `Content`, plus the trailing `Summarized`/`Model`/`Note`), `TransportOptions` (C-5: `Stateless`, with the `Stdio` instance a tool built without one assumes) |
 | `DiskDtos.cs` | `DiskUsageEntry`, `FileTypeEntry`, `StaleFileEntry`, `ReclaimableSpace` |
 | `StorageDtos.cs` | `StorageHealthReport`, `PhysicalDiskInfo`, `DiskInfo`, `VolumeInfo`, `ReliabilityInfo`, `DiskEventInfo` |
 | `SecurityDtos.cs` | `AuthenticodeInfo`, `LspProviderDto`, `SecurityAuditDto`, `DefenderStatusDto`, `CertInfoDto` |
@@ -502,9 +505,27 @@ Uses **H.InputSimulator** (`WindowsInput` namespace) for `SendInput` button, whe
 ### `PowerShellService`
 
 Executes foreground PowerShell via `System.Diagnostics.Process` (system `powershell.exe`):
-- Serializes all calls through a `SemaphoreSlim(1,1)` gate; a 15-minute execution backstop
-  (started **after** the gate is acquired, so it bounds execution rather than queue-wait)
-  tears down runaway scripts by killing the whole process tree
+- Serializes all calls through a `SemaphoreSlim(1,1)` gate; one clock — the earlier of the
+  caller's `timeout` and the 15-minute execution backstop, started **after** the gate is acquired,
+  so it bounds execution rather than queue-wait — tears down runaway scripts by killing the whole
+  process tree. A `timeout` equal to the backstop is still the caller's clock; one millisecond
+  past it is the backstop's, and only the backstop's reason says `(execution backstop)`
+- C-6, two overloads, two behaviours on expiry: `RunAsync(command, timeout, ct)` (the `powershell`
+  tool's) **returns** `PSResult` with `TimedOut:true`, `Success:false`, `ExitCode:-1` and
+  `Errors` = the errors the script wrote then `"timed out after Ns"` last; `RunAsync(command, ct)`
+  (every internal caller — disk, storage, security, firewall, network, audio, file streams) throws
+  a caller-facing `TimeoutException` carrying that reason, because none of those callers reads
+  `Success` and a partial stdout must never be parsed as an answer. Only the caller's own
+  cancellation throws `OperationCanceledException`
+- The invocation is built under the **caller's** token only, so a clock that fires during the
+  temp-script write cannot leave through the exception path; a cancelled write deletes its partial
+  `.ps1`
+- Both streams are read by `Pump`s — chunked reads into a `BoundedTextBuffer` that can be
+  inspected before the read finishes — under the caller's token only, so a tree kill closes the
+  write ends and the pumps drain what the script wrote before it died (`HarvestAsync` waits out a
+  2 s `HarvestGrace` for a survivor still holding a pipe, then takes what is buffered). Each
+  stream is capped at `BufferCapacityChars` (1 000 000) with the tail kept, exactly as a job's is,
+  and `StdoutTrimmedChars`/`StderrTrimmedChars` report what was dropped on every path
 - Builds the invocation via the shared `PowerShellInvocation` helper: `-EncodedCommand`
   (base64 UTF-16LE, two-line preamble — UTF-8 console encoding, then
   `$ProgressPreference='SilentlyContinue'`) with a temp-`.ps1` `-File` fallback for oversized
@@ -515,7 +536,12 @@ Executes foreground PowerShell via `System.Diagnostics.Process` (system `powersh
   pass through raw — losing output is worse than a blob
 - `Errors[]` still holds only the `<S S="Error">` records (they alone decide `Success`), extracted
   through the same `ClixmlStderr` parser so the two cannot drift
-- Returns `PSResult(Success, Stdout, Stderr, ExitCode, Errors)` to callers
+- Returns `PSResult(Success, Stdout, Stderr, ExitCode, Errors, TimedOut, StdoutTrimmedChars,
+  StderrTrimmedChars)` to callers
+- On a timeout only stdout is usually there: Windows PowerShell 5.1 emits the `#< CLIXML` header
+  as soon as a non-stdout record exists but buffers the records themselves until host shutdown, so
+  a kill loses them. The harvest still decodes what arrived, and an unparseable bare header
+  decodes to `""` rather than reaching the model
 
 ### `JobService`
 
@@ -608,7 +634,31 @@ stripped off the answer). `null` means Windows cannot say, and the caller falls 
 as written. `FileSystemService`'s public constructor uses `Win32FinalPathNative.Instance`; an
 `internal` one takes a fake, which is how `PathCanonical` is unit-tested without a second volume.
 
-### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `Annotator`, `FlashGlow`, `UiText`, `WindowFilter`, `VirtualDesktopRegistry`, `FuzzyMatch`, `WindowMatcher`, `ForegroundLadder`, `AppCatalog`, `LaunchWait`, `WindowGeometry`, `ArgvJson`, `TypePlanner`, `DragPath`, `BatchTargets`, `RegistryGuard`, `LineWindow`, `CpuSample`, `PathCanonical`)
+### `WebService` — the fetch, the title, the depth bound
+
+One `HttpClient` per service (and the service is a process singleton; an `internal` constructor
+takes a shorter timeout so a test can prove the timeout path):
+- **`ValidateUrlAsync` decides the scheme first** (C-5 review F5): anything but `http`/`https` is
+  an `ArgumentException` naming the scheme — `HttpClient` would otherwise raise a masked
+  `NotSupportedException`, and a scheme with no host resolved `""`, this machine, for the address
+  check. Then the private-address check as before: every resolved address of the host, so a DNS
+  rebind is caught too. Both run before anything is fetched, for `scrape` **and** `http_request`
+- **`ScrapeAsync(url, maxChars, ct)`** reads the response, takes `Title` from AngleSharp's
+  `IDocument.Title` (whitespace collapsed, `null` when absent or blank — not a regex, so a
+  commented-out tag, an SVG tooltip or a `<title>` inside a script is not the page's title),
+  reports `Url` as the response's request URI (so a redirect is reported at its destination) with
+  any user info stripped and every escape intact (`AbsoluteUri`), converts the HTML with
+  `ReverseMarkdown`, and cuts to `maxChars` through `TextCap` — `Chars` is the length before the
+  cut
+- **Failures are answers, not faults:** a 404 or a refused connection becomes an
+  `InvalidOperationException` naming the URL, and the client's own timeout a `TimeoutException`
+  naming the URL and the seconds waited, so both reach the caller instead of the SDK's masking
+- **`MaxNestingDepth` (300)** — the parsed tree's depth below `<body>`, measured iteratively with
+  an explicit stack (`NestingDepth`), is refused past 300 naming the URL and the limit:
+  `ReverseMarkdown` recurses once per level and overflowed the stack near 900, which no `catch`
+  can stop and which took the whole server down mid-call
+
+### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `Annotator`, `FlashGlow`, `UiText`, `WindowFilter`, `VirtualDesktopRegistry`, `FuzzyMatch`, `WindowMatcher`, `ForegroundLadder`, `AppCatalog`, `LaunchWait`, `WindowGeometry`, `ArgvJson`, `TypePlanner`, `DragPath`, `BatchTargets`, `RegistryGuard`, `LineWindow`, `CpuSample`, `PathCanonical`, `DomPage`, `ScrapeSummary`, `TextCap`)
 
 `internal static` classes in `Services/` with no Win32, no screen and no UIA dependency, so every
 rule is unit-tested headless:
@@ -633,8 +683,11 @@ rule is unit-tested headless:
 - `LineWindow.Slice(text, offsetLines, limitLines)` — C-1's window behind `file_read`: lines split on `\n` with a trailing `\r` stripped (a CRLF file counts the same as an LF one) and a final newline adding no line; `offsetLines` is 1-based (0 and 1 are both the first line), `limitLines` 0 runs to the end, an offset past the end returns zero lines with `Truncated:false`, and the content joins the window with `\n`. A negative offset or limit is an `ArgumentException` naming the parameter
 - `CpuSample.Percent(before, after, elapsed, cores)` / `SortAndLimit(rows, sortBy, limit)` — C-3's pure half of the process list: the percentage is `(after − before) / elapsed / cores × 100` clamped to 0–100 and rounded to one decimal, `0` when `elapsed ≤ 0`, `cores ≤ 0` or the delta is negative (a process that exited between the readings), so one saturated core of eight reads `12.5`. The sort is memory and CPU descending, `name` ordinal-ignore-case ascending, `pid` ascending, every key tie-broken by pid; `limit` 0 keeps every row
 - `PathCanonical.Canonical(fullPath, native)` — C-1 round 4d's one spelling every alias shares, behind the `IFinalPathNative` seam so it is unit-tested with a fake volume: ask the volume for the path itself, then for each ancestor up to the root, take the first answer and append the segments below it as written; a path the volume cannot speak for at any level comes back as written, and the result never carries a trailing separator. A `subst` drive, a mapped network drive, a junction and a symlink all reduce to the same string, which is what `FileSystemService`'s containment and root checks compare
+- `DomPage.Render(page)` / `Hint(scroll)` — C-5's renderer for `scrape(source:"dom")`: the page's visible text lines joined with `\n`, then a blank line and one scroll hint when the document scrolls vertically — `VerticalPercent <= 0` is "Reached top of the page; scroll down to see more.", `>= 100` "Reached bottom of the page; scroll up to see more.", anything between "Scrolled N% down the page; scroll up or down to see more." (N rounded away from zero). No scroll pattern, or no vertical scrolling, is no hint and no trailing blank line — the whole page is on screen
+- `ScrapeSummary.SystemPrompt(query, truncated)` / `Request(content, query, truncated)` — C-5's sampling request, pure so the prompt is testable without a server or a model: strip navigation, headers, footers, cookie and consent banners, advertisements and repeated boilerplate; keep names, numbers, dates, prices and quoted values verbatim; invent nothing; answer `query` from the page (quoting the passages, saying plainly when the page does not answer it) or, without one, summarise the page faithfully; and, when `truncated`, say the text is only the beginning of a longer page and do not conclude the page lacks what may lie past the cut. One user message carries the already-capped content, `MaxTokens` is 2048
+- `TextCap.Cut(text, maxChars, out truncated)` — C-5's one cut both `scrape` sources share, so `max_chars` means the same thing for a fetched page and a walked one; a cut that would land between the halves of a surrogate pair takes one character less
 - `UiText.Sanitize` — strips Private Use Area code points, replaces lone UTF-16 surrogates with U+FFFD, drops C0/C1 controls except tab/LF/CR, trims; returns the same instance when nothing needed changing
-- `WindowFilter` — A-1's judgement over the `WindowProbe` records `WindowService` gathers, so every rule is provable on hand-written probes with no desktop attached. `Keep` drops a window that is not visible, a `WS_EX_TOOLWINDOW` without `WS_EX_APPWINDOW`, a DWM-cloaked one (UWP ghosts, other virtual desktops), a zero-area one, the shell chrome classes (`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`, `Progman`, `WorkerW`, `IME`, `MSCTFIME UI`), an untitled one unless `includeHidden` (the title is judged **after** `UiText.Sanitize`) and a minimized one unless `includeMinimized`; `StateOf` reads `Minimized` before `Maximized` (a minimized window keeps `WS_MAXIMIZE`); `IsBrowser` matches `chrome, msedge, firefox, brave, opera, vivaldi` with or without `.exe`; `Build` projects the survivors onto `WindowInfo`, renumbering `ZOrder` from 0 and taking `MonitorIndex` from the window's centre via `CursorMath.MonitorIndexOf`; `ActiveOf` picks the entry flagged `IsActive`, so `active` reports the list's real `ZOrder`
+- `WindowFilter` — A-1's judgement over the `WindowProbe` records `WindowService` gathers, so every rule is provable on hand-written probes with no desktop attached. `Keep` drops a window that is not visible, a `WS_EX_TOOLWINDOW` without `WS_EX_APPWINDOW`, a DWM-cloaked one (UWP ghosts, other virtual desktops), a zero-area one, the shell chrome classes (`Shell_TrayWnd`, `Shell_SecondaryTrayWnd`, `Progman`, `WorkerW`, `IME`, `MSCTFIME UI`), an untitled one unless `includeHidden` (the title is judged **after** `UiText.Sanitize`) and a minimized one unless `includeMinimized`; `StateOf` reads `Minimized` before `Maximized` (a minimized window keeps `WS_MAXIMIZE`); `IsBrowser` matches `chrome, msedge, firefox, brave, opera, vivaldi` with or without `.exe`, and `IsChromium` (C-5) the same set minus `firefox` — the browsers that expose their page to UI Automation as a `RootWebArea`, which is what `scrape(source:"dom")` needs; `Build` projects the survivors onto `WindowInfo`, renumbering `ZOrder` from 0 and taking `MonitorIndex` from the window's centre via `CursorMath.MonitorIndexOf`; `ActiveOf` picks the entry flagged `IsActive`, so `active` reports the list's real `ZOrder`
 
 ### Snapshot core (`Services/UiTree/`)
 
@@ -696,7 +749,7 @@ C-4 — toasts in-process, no PowerShell cold start and no serialization gate:
 | `SkiaSharp` | 4.151.1 | Screenshot capture, image encode/decode |
 | `Microsoft.Windows.CsWin32` | 0.3.* (`PrivateAssets=all`) | Source-generated P/Invoke for Win32 APIs (DPI, AUMID, `SetCursorPos`, `VkKeyScan`, etc.) |
 | `Microsoft.Extensions.Hosting` | shared framework | Generic Host, DI container, configuration (no `PackageReference`; comes with the runtime / `Microsoft.AspNetCore.App`) |
-| `ReverseMarkdown` | 6.2.1 | HTML → Markdown conversion for `Scrape` tool |
+| `ReverseMarkdown` | 6.2.1 | HTML → Markdown conversion for `Scrape` tool; its transitive `AngleSharp` parser also supplies the document title and the nesting-depth measurement `WebService` bounds the conversion with |
 | `TaskScheduler` | 2.12.2 | Windows Task Scheduler COM automation |
 | `TextCopy` | 6.* | Cross-platform clipboard read/write |
 | `System.ServiceProcess.ServiceController` | 10.* | Windows service control (`service` tool) |

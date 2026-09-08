@@ -17,6 +17,11 @@ using WindowsMcp.Tests.Fixtures;
 
 namespace WindowsMcp.Tests.Hosting;
 
+// MCP9005: the SDK marks the Sampling feature obsolete as of specification version 2026-07-28
+// (SEP-2577). C-5's summary path exists only through client-side sampling, and this file holds
+// the only test that drives the real one; see src/WindowsMcp/Tools/ISamplingClient.cs.
+#pragma warning disable MCP9005
+
 /// <summary>
 /// Starts the real HTTP host (<see cref="WindowsMcpHost.BuildHttpApp"/>) in-process on an
 /// ephemeral loopback port and talks to it with the SDK's own client. This is the only test that
@@ -1615,6 +1620,137 @@ public class HttpTransportTests
             "the filter caps a caller-facing message at 2 000 characters, whatever the caller sent");
     }
 
+    // ---- C-5 (R8): scrape, and the sampling round trip ----------------------------------------
+
+    /// <summary>The fixed page every scrape test below is served by the mocked service.</summary>
+    private static readonly ScrapeResult FixedScrape =
+        new("http", "https://example.test/", "Example", 9, false, "page text");
+
+    /// <summary>
+    /// Replaces <c>IWebService</c> at the <c>BuildHttpApp</c> seam: what is under test here is the
+    /// tool, the transport and the sampling round trip, not anyone's internet connection.
+    /// </summary>
+    private static Action<IServiceCollection> WithScrapeService()
+    {
+        var mock = new Mock<IWebService>();
+        mock.Setup(s => s.ScrapeAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FixedScrape);
+        return services => services.AddSingleton(mock.Object);
+    }
+
+    /// <summary>
+    /// C-5: the tool takes the SDK-bound <c>McpServer</c> as a parameter. The SDK binds it by type
+    /// and must NOT advertise it to the client — a "server" property in the schema is a property a
+    /// model would try to fill in.
+    /// </summary>
+    [Fact]
+    public async Task Scrape_is_advertised_without_the_injected_server_and_without_a_required_url()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+
+        var (properties, required) = SchemaOf(await client.ListToolsAsync(), "scrape");
+
+        ShouldAdvertise(properties, "url", "query", "source", "summarize", "max_chars", "window");
+        properties.TryGetProperty("server", out _).Should().BeFalse(
+            "the McpServer parameter is bound by the SDK, not sent by the client");
+        required.Should().BeEmpty("source:'dom' reads the open page, so url is optional (C-5)");
+    }
+
+    /// <summary>
+    /// C-5: <c>summarize:true</c> over HTTP is answered by the <b>transport</b>, not by the client's
+    /// capabilities: <see cref="WindowsMcpHost.BuildHttpApp"/> runs Streamable HTTP stateless, so a
+    /// per-request server has no session to carry a sampling request on. The note must say that and
+    /// point at stdio, instead of blaming a client that was never asked.
+    /// </summary>
+    [Fact]
+    public async Task Scrape_summarize_without_a_sampling_client_returns_the_text_and_the_note()
+    {
+        await using var app = await Harness.StartAsync(configureServices: WithScrapeService());
+        await using var client = await ConnectAsync(app.McpEndpoint);
+
+        var result = await client.CallToolAsync(ToolName(await client.ListToolsAsync(), "scrape"),
+            new Dictionary<string, object?>
+            {
+                ["url"] = "https://example.test/",
+                ["summarize"] = true,
+            });
+
+        result.IsError.Should().NotBe(true);
+        using var doc = JsonDocument.Parse(result.Content.OfType<TextContentBlock>().Single().Text);
+        doc.RootElement.GetProperty("Summarized").GetBoolean().Should().BeFalse();
+        doc.RootElement.GetProperty("Content").GetString().Should().Be("page text",
+            "the page is never lost because the summary could not happen");
+        var note = doc.RootElement.GetProperty("Note").GetString();
+        note.Should().Contain("stateless", "the reason is the transport's statelessness, not the client");
+        note.Should().Contain("HTTP", "and the caller is told which transport it is on");
+        note.Should().Contain("stdio", "with the transport that CAN summarise named as the way out");
+        note.Should().NotContain("capability",
+            "this client declared nothing either way; blaming its capabilities would send the "
+            + "caller looking in the wrong place");
+    }
+
+    /// <summary>
+    /// C-5: the honest HTTP pin. A client that DOES declare sampling and DOES install a handler
+    /// still gets the text back with the stateless note, and its handler is never invoked — the
+    /// stateless server never asks. Also the DI proof for the seam: <c>WebTools</c>'s optional
+    /// <c>TransportOptions</c> parameter resolves from the host's registration, which is the only
+    /// reason the tool knows it is on HTTP at all.
+    /// <para>
+    /// The real <c>McpServer.SampleAsync</c> round trip is proven in
+    /// <c>StreamTransportTests</c> over a session-keeping transport; it cannot be proven here.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task Scrape_summarize_over_http_never_asks_even_a_client_that_can_sample()
+    {
+        var requests = new List<CreateMessageRequestParams>();
+
+        await using var app = await Harness.StartAsync(configureServices: WithScrapeService());
+
+        var transport = new HttpClientTransport(new HttpClientTransportOptions
+        {
+            Endpoint = app.McpEndpoint,
+            TransportMode = HttpTransportMode.StreamableHttp,
+        });
+        await using var client = await McpClient.CreateAsync(transport, new McpClientOptions
+        {
+            Capabilities = new ClientCapabilities { Sampling = new SamplingCapability() },
+            Handlers = new McpClientHandlers
+            {
+                SamplingHandler = (request, _, _) =>
+                {
+                    requests.Add(request!);
+                    return ValueTask.FromResult(new CreateMessageResult
+                    {
+                        Content = [new TextContentBlock { Text = "canned summary" }],
+                        Model = "canned-model",
+                        Role = Role.Assistant,
+                    });
+                },
+            },
+        });
+
+        var result = await client.CallToolAsync(ToolName(await client.ListToolsAsync(), "scrape"),
+            new Dictionary<string, object?>
+            {
+                ["url"] = "https://example.test/",
+                ["query"] = "what is the price",
+                ["summarize"] = true,
+            });
+
+        result.IsError.Should().NotBe(true);
+        using var doc = JsonDocument.Parse(result.Content.OfType<TextContentBlock>().Single().Text);
+        doc.RootElement.GetProperty("Summarized").GetBoolean().Should().BeFalse(
+            "a stateless server has no stream for the reply to come back on, whatever the client can do");
+        doc.RootElement.GetProperty("Model").ValueKind.Should().Be(JsonValueKind.Null);
+        doc.RootElement.GetProperty("Content").GetString().Should().Be("page text");
+        doc.RootElement.GetProperty("Note").GetString().Should().Contain("stateless");
+
+        requests.Should().BeEmpty(
+            "the client is never asked over HTTP - a request it could not answer would just hang the call");
+    }
+
 }
 
 
@@ -1774,3 +1910,4 @@ public class HttpTransportDomSnapshotTests
             .Should().Contain("Probe heading", "the page's visible text crosses the transport intact");
     }
 }
+#pragma warning restore MCP9005

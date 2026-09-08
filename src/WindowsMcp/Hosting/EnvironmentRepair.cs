@@ -11,9 +11,12 @@ namespace WindowsMcp.Hosting;
 /// whatever we have, so fix it once, here, before anything else runs.
 /// <para>
 /// Policy: <b>never overwrite</b> a variable the host set (its PATH may be deliberate) except
-/// <c>PATHEXT</c>, which is only corrected when it cannot resolve an <c>.exe</c>. Missing
-/// variables are filled from the registry (machine, then user overlay; the two <c>Path</c>
-/// values are joined, as the shell does) and then from well-known folder/system defaults.
+/// <c>PATHEXT</c>, which is only corrected when it cannot resolve an <c>.exe</c>, and
+/// <c>Path</c> (C-6), which is only <em>appended to</em> — never trimmed or reordered — when it
+/// is empty or has no <c>System32</c> entry: a short <c>Path</c> may be deliberate, a
+/// <c>Path</c> that cannot resolve <c>where.exe</c> cannot be. Missing variables are filled from
+/// the registry (machine, then user overlay; the two <c>Path</c> values are joined, as the shell
+/// does) and then from well-known folder/system defaults.
 /// </para>
 /// </summary>
 internal static class EnvironmentRepair
@@ -71,7 +74,46 @@ internal static class EnvironmentRepair
             changed.Add("PATHEXT");
         }
 
+        // C-6 (R9): Path is the second value we will touch, and only by appending. After the
+        // fills, `have` holds SystemRoot with the right precedence (process, then registry, then
+        // defaults). The registry's machine and user Path land behind the host's entries,
+        // de-duplicated; when the registry gave nothing and SystemRoot is known, the stock four
+        // directories go there instead, so a box whose registry read failed still resolves
+        // where.exe and powershell.exe.
+        have.TryGetValue("SystemRoot", out var systemRoot);
+        have.TryGetValue("Path", out var currentPath);
+        if (!PathMerge.HasSystem32(currentPath, systemRoot))
+        {
+            machine.TryGetValue("Path", out var machinePath);
+            user.TryGetValue("Path", out var userPath);
+            string repairedPath;
+            if (!string.IsNullOrWhiteSpace(machinePath) || !string.IsNullOrWhiteSpace(userPath))
+                repairedPath = PathMerge.Merge(currentPath, machinePath, userPath);
+            else if (!string.IsNullOrWhiteSpace(systemRoot))
+                repairedPath = PathMerge.Merge(currentPath, StockPath(systemRoot), null);
+            else
+                repairedPath = currentPath ?? "";
+
+            if (!string.Equals(repairedPath, currentPath ?? "", StringComparison.Ordinal))
+            {
+                set("Path", repairedPath);
+                have["Path"] = repairedPath;
+                if (!changed.Contains("Path", StringComparer.OrdinalIgnoreCase)) changed.Add("Path");
+            }
+        }
+
         return changed;
+    }
+
+    /// <summary>What a stock Windows install puts first on the machine Path; the fallback when the registry gave nothing.</summary>
+    internal static string StockPath(string systemRoot)
+    {
+        var root = systemRoot.Trim().TrimEnd('\\', '/');
+        return string.Join(';',
+            root + @"\System32",
+            root,
+            root + @"\System32\Wbem",
+            root + @"\System32\WindowsPowerShell\v1.0");
     }
 
     internal static bool HasExe(string? pathExt) =>

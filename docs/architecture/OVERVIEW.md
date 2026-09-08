@@ -170,7 +170,7 @@ Windows-MCP exposes **69 MCP tools** across 19 tool classes:
 ### Shell Tool (`ShellTools` — 1 tool)
 | Tool | Purpose |
 |------|---------|
-| `Powershell` | Execute a PowerShell command; returns stdout, stderr, exit code. Emits MCP progress heartbeats on long foreground calls; `background: true` starts a job (see `JobTools`) instead of waiting |
+| `Powershell` | Execute a PowerShell command; returns stdout, stderr, exit code and the trimmed-character counts. Emits MCP progress heartbeats on long foreground calls; `timeout_seconds` (1–900) bounds one call — expiry kills the child tree and returns `TimedOut: true` with the partial stdout — and `background: true` starts a job (see `JobTools`) instead of waiting |
 
 ### Job Tool (`JobTools` — 1 tool)
 | Tool | Purpose |
@@ -193,8 +193,8 @@ Windows-MCP exposes **69 MCP tools** across 19 tool classes:
 ### Web Tools (`WebTools` — 2 tools)
 | Tool | Purpose |
 |------|---------|
-| `Scrape` | Fetch a URL and convert HTML to Markdown (private address ranges rejected) |
-| `HttpRequest` | HTTP request (GET/POST/PUT/DELETE/PATCH) with optional headers and body (private address ranges rejected) |
+| `Scrape` | Read a page as text → JSON `{Source, Url, Title, Chars, Truncated, Content, Summarized, Model, Note}`: `source:"http"` fetches the URL and converts the HTML to Markdown, `source:"dom"` reads the page already open in a Chromium browser with a scroll hint, `max_chars` caps the text, and `summarize:true` asks the client's own model through MCP sampling (http/https only, private address ranges rejected) |
+| `HttpRequest` | HTTP request (GET/POST/PUT/DELETE/PATCH) with optional headers and body (http/https only, private address ranges rejected) |
 
 ### Disk Tool (`DiskTools` — 1 tool)
 | Tool | Purpose |

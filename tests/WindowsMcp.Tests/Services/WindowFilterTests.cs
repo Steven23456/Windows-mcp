@@ -243,6 +243,95 @@ public class WindowFilterTests
             "a raw Win32 process name arrives in whatever case the image was registered with");
     }
 
+    // ---- IsChromium (C-5 review F4) -----------------------------------------------------------
+
+    /// <summary>
+    /// F4: <c>scrape(source:dom)</c> reads the page through UI Automation, and only the Chromium
+    /// family exposes one. The same spelling rules as <see cref="WindowFilter.IsBrowser"/> — the
+    /// enumerator hands over whatever the image was registered as, with or without ".exe".
+    /// </summary>
+    [Theory]
+    [InlineData("chrome")]
+    [InlineData("msedge")]
+    [InlineData("brave")]
+    [InlineData("opera")]
+    [InlineData("vivaldi")]
+    [InlineData("chrome.exe")]
+    [InlineData("MSEDGE.EXE")]
+    [InlineData("Brave.Exe")]
+    [InlineData("VIVALDI")]
+    public void IsChromium_recognises_the_chromium_family_with_or_without_the_extension(string processName)
+    {
+        WindowFilter.IsChromium(processName).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// F4: Firefox is the reason this method exists. It is a browser by
+    /// <see cref="WindowFilter.IsBrowser"/> and has no page document, so picking it as "the
+    /// browser in front" produced an empty page and a note claiming the window had been read.
+    /// </summary>
+    [Theory]
+    [InlineData("firefox")]
+    [InlineData("firefox.exe")]
+    [InlineData("FIREFOX.EXE")]
+    [InlineData("Firefox")]
+    public void IsChromium_rejects_firefox_which_is_a_browser_without_a_page_document(string processName)
+    {
+        WindowFilter.IsChromium(processName).Should().BeFalse(
+            "Firefox exposes no RootWebArea, so source:dom cannot read it");
+        WindowFilter.IsBrowser(processName).Should().BeTrue(
+            "it is still a browser everywhere else - the two sets differ by exactly this one");
+    }
+
+    [Theory]
+    [InlineData("notepad")]
+    [InlineData("notepad.exe")]
+    [InlineData("explorer")]
+    [InlineData("chromedriver")]      // exact match on the stem, not a prefix
+    [InlineData("chrome_proxy")]
+    [InlineData("operator")]
+    [InlineData("msedgewebview2")]    // the embedded WebView host is not the browser
+    [InlineData("chrome.exe.bak")]
+    public void IsChromium_rejects_everything_else(string processName)
+    {
+        WindowFilter.IsChromium(processName).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The enumerator records "" when the process lookup throws (the process exited between the
+    /// window walk and the lookup), and a name that is nothing but the extension leaves an empty
+    /// stem. Neither is a browser: a blank name matched against a stem set is how "" becomes
+    /// "the frontmost Chromium window" and the tool walks whatever was in front.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(".exe")]
+    [InlineData(".EXE")]
+    public void IsChromium_and_IsBrowser_of_a_nameless_process_are_both_false(string? processName)
+    {
+        WindowFilter.IsChromium(processName!).Should().BeFalse();
+        WindowFilter.IsBrowser(processName!).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The two sets are the contract C-5 rests on: every Chromium name is a browser, and the one
+    /// browser that is not Chromium is Firefox. A set that drifted (a new Chromium entry added to
+    /// one and not the other) would silently change which window <c>source:dom</c> picks.
+    /// </summary>
+    [Fact]
+    public void ChromiumProcesses_is_the_browser_set_minus_firefox()
+    {
+        WindowFilter.ChromiumProcesses.Should().BeEquivalentTo(
+            new[] { "chrome", "msedge", "brave", "opera", "vivaldi" });
+        WindowFilter.ChromiumProcesses.Should().BeSubsetOf(WindowFilter.BrowserProcesses,
+            "a Chromium browser is a browser");
+        WindowFilter.BrowserProcesses.Except(WindowFilter.ChromiumProcesses, StringComparer.OrdinalIgnoreCase)
+            .Should().Equal("firefox");
+        WindowFilter.ChromiumProcesses.Contains("CHROME").Should().BeTrue(
+            "a raw Win32 process name arrives in whatever case the image was registered with");
+    }
+
     // ---- Build ------------------------------------------------------------------------------
 
     [Fact]

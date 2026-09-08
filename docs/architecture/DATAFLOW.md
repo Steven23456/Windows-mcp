@@ -405,11 +405,14 @@ PowerShell.
      │ Powershell   │                    │                          │
      │ (command)    │                    │                          │
      ├─────────────►│                    │                          │
-     │              │ RunAsync(command)  │                          │
+     │              │ RunAsync(command,  │                          │
+     │              │   timeout)         │                          │
      │              ├───────────────────►│                          │
      │              │                    │ acquire serialization    │
-     │              │                    │ gate, then start 15-min  │
-     │              │                    │ execution backstop CTS   │
+     │              │                    │ gate, then start the     │
+     │              │                    │ clock: the earlier of    │
+     │              │                    │ timeout and the 15-min   │
+     │              │                    │ execution backstop       │
      │              │                    │                          │
      │              │                    │ PowerShellInvocation:    │
      │              │                    │  -EncodedCommand (or     │
@@ -422,14 +425,22 @@ PowerShell.
      │              │                    ├─────────────────────────►│
      │              │                    │ close stdin; read        │
      │              │  progress          │ stdout+stderr; on cancel │
-     │  progress    │  heartbeat / 10s   │ or backstop: kill whole  │
-     │  notification│  while waiting     │ process tree             │
+     │  progress    │  heartbeat / 10s   │ or a clock: kill the     │
+     │  notification│  while waiting     │ tree, harvest the pumps  │
      │◄─────────────┤                    │◄─────────────────────────┤
      │              │ PSResult           │                          │
      │              │◄───────────────────┤                          │
      │ JSON string  │                    │                          │
      │◄─────────────┤                    │                          │
 ```
+
+`timeout_seconds` (C-6, 1–900) is what the tool turns into that `timeout`; `0` passes `null` and
+leaves the backstop as the only clock. A clock expiry is **not** an exception on this path: the
+tree is killed, `HarvestAsync` gives the two pumps a 2-second grace to drain what the script wrote
+before it died, and the tool serialises a `PSResult` with `TimedOut:true`, `Success:false`,
+`ExitCode:-1` and `"timed out after Ns"` last in `Errors`. The one-argument
+`RunAsync(command, ct)` every *internal* caller uses turns the same expiry into a caller-facing
+`TimeoutException` instead, so no service parses a partial stdout as an answer.
 
 `background:true` skips this path entirely: ShellTools calls `JobService.StartAsync`, which
 builds the child via the same `PowerShellInvocation` helper but runs it **outside** the
@@ -443,15 +454,18 @@ a per-job 60-min backstop tears down runaway jobs as `timedOut`.
 Input:  command = "Get-Process | Select-Object Name,CPU | ConvertTo-Json"
 
 Processing:
-  1. Acquire the serialization gate (one PowerShell at a time), then arm the 15-min backstop
+  1. Acquire the serialization gate (one PowerShell at a time), then arm the clock —
+     the caller's timeout when it is the shorter, else the 15-min backstop
   2. PowerShellInvocation.BuildArgumentsAsync — UTF-8 preamble + -EncodedCommand
-     (temp .ps1 -File fallback for oversized scripts)
+     (temp .ps1 -File fallback for oversized scripts), under the CALLER's token only
   3. Process.Start(powershell.exe); close stdin (protects the MCP stdio channel)
   4. Await exit (ShellTools reports a progress heartbeat every 10s meanwhile);
-     read stdout + stderr
+     both streams are pumped into 1 000 000-char bounded buffers, tail kept
 
-Output: PSResult { Success=true, Stdout="[{...}]", Stderr="", ExitCode=0, Errors=[] }
-        → JSON: {"Success":true,"Stdout":"[{...}]","Stderr":"","ExitCode":0,"Errors":[]}
+Output: PSResult { Success=true, Stdout="[{...}]", Stderr="", ExitCode=0, Errors=[],
+                   TimedOut=false, StdoutTrimmedChars=0, StderrTrimmedChars=0 }
+        → JSON: {"Success":true,"Stdout":"[{...}]","Stderr":"","ExitCode":0,"Errors":[],
+                 "TimedOut":false,"StdoutTrimmedChars":0,"StderrTrimmedChars":0}
 ```
 
 ---
@@ -665,8 +679,10 @@ Host.CreateApplicationBuilder(args)
         ▼
 builder.Services.AddSingleton<IInputService, InputService>()
   ...  (39 services + the ScreenshotOptions record from --screenshot-scale,
-       --flash, --profile-snapshot and --screenshot-backend, and the
-       UiTreeOptions record from --max-tree-elements and --profile-snapshot)
+       --flash, --profile-snapshot and --screenshot-backend, the
+       UiTreeOptions record from --max-tree-elements and --profile-snapshot,
+       and the TransportOptions record from --transport: Stateless over HTTP,
+       which is how WebTools knows sampling cannot reach the client there)
         │
         ▼
 builder.AddWindowsMcp(options)    ← Hosting/WindowsMcpHost: AddMcpServer(...) + filter + WithToolsFromAssembly()
@@ -788,22 +804,31 @@ UIAutomationService.AssertElementAsync(element_id, state, expected)
 ### PowerShell Execution Errors
 
 ```
-PowerShellService.RunAsync(command)
+PowerShellService.RunAsync(command, timeout)
         │
         ▼
-  ValidateCommand(command)  →  ArgumentException if blocked
+  timeout <= 0  →  ArgumentException (there is no command blocklist)
         │ (passes)
         ▼
-  Process.Start(...)
+  gate → clock → Process.Start(...)
         │
-  ┌─────┴─────┐
-  ▼           ▼
-Success     Exception
-  │           │
-  ▼           ▼
-PowerShell  Return PowerShellResult{
-Result       Stdout="", Stderr=ex.Message, ExitCode=-1}
+  ┌─────┴───────────────┬──────────────────┐
+  ▼                     ▼                  ▼
+Success              Clock fired        Exception
+  │                     │                  │
+  ▼                     ▼                  ▼
+PSResult{...}       Kill tree, harvest   Return PSResult{
+                    the pumps, return      Success=false, Stdout="",
+                    PSResult{              Stderr=ex.Message,
+                      TimedOut=true,       ExitCode=-1,
+                      Success=false,       Errors=[ex.Message]}
+                      ExitCode=-1, …}
 ```
+
+The one-argument `RunAsync(command, ct)` wraps the middle branch: it rethrows the timeout as a
+caller-facing `TimeoutException` carrying the same reason, so an internal caller never parses a
+partial stdout as data. The caller's own cancellation is an `OperationCanceledException` on every
+overload.
 
 ### UI Automation Errors
 
@@ -911,7 +936,8 @@ Scrollable (1):
 | `AppCatalogService` | The catalog is read from the Start Menu and the package manager at most once per 5 minutes; a resolve miss forces one extra refresh | Enumerating a few hundred packages costs ~1 s cold, which is why it is cached rather than read per `launch` |
 | `ProcessService.ListAsync(ProcessListOptions)` | One 250 ms window (`CpuSampleWindow`) between the two `TotalProcessorTime` readings of every plain `process(list)` | Each reading is timestamped per process, so a walk of a few hundred processes does not over-credit the ones read first. `orphans`, `includeLineage`, `groupByRoot` and the `ListAsync(nameFilter)` overload do not sample and pay nothing; the delay is injected, so the unit tests do not pay it either |
 | `ProcessService.KillAsync(pid, KillOptions)` | `graceful:true` waits up to `GraceMs` (default 3000, range 0–60000) after posting `WM_CLOSE` before forcing the process; the budget is **per process**, so a name kill matching five of them can wait five times over | A pid with no visible window is forced at once (`waitedMs:0`); a hard kill (`graceful:false`) waits nothing at all. When the wait times out, `HasExited` is read once more — a process that answered late is `exitedGracefully:true, forced:false`, not forced (round 4); a caller cancellation during the wait rethrows and kills nothing |
-| `PowerShellService` | Async wait on process exit | 15-min execution backstop (armed after the serialization gate); caller cancellation kills the process tree |
+| `PowerShellService` | Async wait on process exit, bounded by the earlier of `timeout_seconds` (C-6, 1–900 s) and the 15-min execution backstop — both armed **after** the serialization gate, so a queued caller does not burn its budget waiting | A clock expiry kills the process tree and **returns** `TimedOut:true` with the partial stdout (the one-argument `RunAsync` throws a `TimeoutException` instead); after the kill the stream pumps get a 2 s `HarvestGrace` to drain before the result is built. Caller cancellation still kills the tree and throws |
+| `scrape(summarize:true)` (`WebTools`) | The sampling request to the client's model is bounded by `SamplingTimeout` (120 s) on a token linked to the caller's | A client whose handler prompts a person who walks away would otherwise hang the call; the expiry returns the page text with a `Note`, never an error. Only the caller's own cancellation propagates |
 | `ShellTools` heartbeat | Progress notification every 10s during a foreground `powershell` call | Lets spec-compliant clients reset their request timeout |
 | `JobService` | Background jobs poll-based; per-job 60-min backstop | Runs outside the PowerShell serialization gate |
 | `FlashOverlay` | The post-capture glow is up for 3.5 s, then taken down by its own timer — and unconditionally at the start of the next capture | `Show`/`Hide` marshal to the overlay thread and wait for it, bounded by a 2 s call timeout; both are silent no-ops with no interactive window station |

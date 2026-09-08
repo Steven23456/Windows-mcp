@@ -2,6 +2,60 @@
 
 ### Added
 
+- **`scrape` reads the open browser tab, caps what it returns, and can summarise through your own
+  client's model** (parity C-5, roadmap R8). `scrape(url?, query?, source = "http",
+  summarize = false, max_chars = 100000, window?)` answers with JSON
+  `{Source, Url, Title, Chars, Truncated, Content, Summarized, Model, Note}` instead of a bare
+  markdown string (see *Changed*). `source:"http"` fetches `url` as before — now reporting the
+  document's own `Title`, the `Url` **after** redirects (any credentials in it stripped, every
+  escape intact) and the text cut at `max_chars` (1–1000000), `Chars` being the size before the
+  cut. `source:"dom"` reads the page already open in a Chromium browser — the window named by
+  `window`, else the frontmost Chromium window; Firefox is refused by name, since it exposes no
+  page document to UI Automation — through A-5's page walk, ending in one scroll hint ("Reached
+  top of the page; scroll down to see more." / "Reached bottom …" / "Scrolled N% down the page
+  …"); a walk the element budget cut short comes back `Truncated: true` with a `Note` naming
+  `--max-tree-elements`. `summarize:true` asks **your client's** model, through MCP sampling, to
+  condense the page and to answer `query` from it when one is given, waiting at most 120 s: a
+  client that never declared the sampling capability, this server's stateless HTTP transport, a
+  client that never answers and a client whose handler fails all return the text unchanged with
+  `Note` saying which — the page is never lost because the summary failed — and the model is told
+  when the text it was given is only the beginning of a longer page. Every refusal (`source`,
+  `max_chars`, `url` with `dom`, `window` with `http`, `query` without `summarize`) names its
+  parameter and fires before anything is fetched or walked; a 404 or a refused connection is a
+  caller-facing `InvalidOperationException` naming the URL and the client's own 100-second
+  timeout a `TimeoutException`, instead of the SDK's masking; and HTML nested more than 300
+  levels below `<body>` is refused naming the URL and the limit, because `ReverseMarkdown`
+  recurses once per level and overflowed the stack at ~900, taking the whole server down mid-call.
+  New pure `Services/DomPage.cs` (the render and the hint), `Services/ScrapeSummary.cs` (the
+  sampling prompt), `Services/TextCap.cs` (the one surrogate-safe cut both sources share), the
+  internal `Tools/ISamplingClient.cs` seam over `McpServer.SampleAsync`, the `ScrapeResult` and
+  `TransportOptions` records, and `WindowFilter.IsChromium` beside `IsBrowser`. MCP sampling is
+  deprecated in the SDK (analyzer `MCP9005`, specification revision 2026-07-28) and nothing
+  replaces asking the *client's* model, so the warning is suppressed narrowly with its reason in
+  the files that touch the types. No new service — the count stays 39. Design note:
+  `docs/design/C-5-scrape-dom-summary.md`.
+- **`powershell` takes a per-call timeout that returns the partial output, and `Path` is repaired
+  at startup** (parity C-6, roadmap R9). `powershell(command, background = false,
+  timeout_seconds = 0)` bounds one call to 1–900 seconds; `0` (the default) is the 15-minute
+  execution backstop only, and `timeout_seconds` with `background:true` is refused — a job has
+  `job(cancel)` and its own 60-minute backstop. Expiry does **not** throw: the child tree is
+  killed and the call returns `TimedOut: true`, `Success: false`, `ExitCode: -1`, the stdout the
+  script wrote before it hung — usually the diagnosis — and `Errors` holding the errors the script
+  wrote with `"timed out after Ns"` last. The clock starts **after** the serialization gate, like
+  the backstop, so a queued caller does not burn its budget waiting behind another script.
+  `IPowerShellService.RunAsync(command, TimeSpan? timeout, ct)` sits beside the old overload.
+  Only stdout survives the kill — Windows PowerShell 5.1 buffers its CLIXML stderr records until
+  host shutdown (measured 2026-09-08) — so the harvest decodes what arrived and never hands the
+  bare `#< CLIXML` header to the model. Separately, `Hosting/EnvironmentRepair` now repairs
+  `Path`: one that the host set empty, or without a `System32` entry, gets the registry's machine
+  and then user `Path` **appended** behind the host's own entries — never reordered, never
+  trimmed, de-duplicated by the pure new `Hosting/PathMerge.cs` — with a stock-four fallback
+  (`<SystemRoot>\System32`, `<SystemRoot>`, `…\Wbem`, `…\WindowsPowerShell\v1.0`) when the
+  registry gave nothing and `SystemRoot` is known, so `git`, `node` and `where.exe` resolve
+  inside a tool call even under a host that stripped the block. `Path` joins `PATHEXT` as the
+  only value the repair will touch, and the startup line on stderr names it. No new service — the
+  count stays 39 — and no new tool: still 69. Design note:
+  `docs/design/C-6-powershell-timeout-path.md`.
 - **`review-agent` subagent (dev infrastructure).** `.claude/agents/review-agent.md` — an
   Opus-model Claude Code subagent that runs after the GREEN pass and before the PR. It reads the
   finished diff cold and hunts, per changed behaviour, for the inputs the tests never named:
@@ -372,6 +426,36 @@
 
 ### Changed
 
+- **`scrape` returns a JSON result object, not a markdown string** (parity C-5 — a contract
+  change). The tool used to answer with the converted markdown and nothing else; it now returns
+  `{Source, Url, Title, Chars, Truncated, Content, Summarized, Model, Note}` with the text in
+  `Content`, so a caller that pasted the whole answer into a prompt now has JSON around it — and
+  a way to tell a cut page from a whole one. `IWebService.ScrapeAsync(url, maxChars = 100000,
+  ct)` → `ScrapeResult` **replaces** `ScrapeAsync(url)` → `string`; there is no string overload
+  left.
+- **`scrape` and `http_request` fetch http and https only** (parity C-5 — a contract change for
+  `http_request`). Any other scheme — `ftp:`, `file:`, `data:`, `ws:`, `javascript:` — is an
+  `ArgumentException` naming the scheme, decided **before** the address check, where it used to
+  reach the caller as `HttpClient`'s masked `NotSupportedException` (and a scheme with no host
+  resolved `""` — this machine — for the private-address check). `http_request` also refuses a
+  malformed `headers_json` by name, instead of masking the `JsonException` behind "An error
+  occurred invoking 'http_request'.".
+- **`PSResult` carries three more fields, and foreground output is capped like a job's** (parity
+  C-6 — a contract change for a script that writes more than a megabyte to one stream). `PSResult`
+  gained trailing `TimedOut`, `StdoutTrimmedChars` and `StderrTrimmedChars`, all defaulted, so
+  every construction that predates C-6 still compiles and serialises with one extra `false` and
+  two zeros. Each foreground stream is now a `BoundedTextBuffer` of 1 000 000 characters with the
+  **tail** kept — exactly what a background job's output already did — so a script that floods
+  stdout and then hangs no longer hands the client everything it wrote (100 MB in six seconds,
+  measured); the two trimmed counts say how much went.
+- **A foreground PowerShell backstop expiry reaches the caller as a `TimeoutException`** (parity
+  C-6 — a contract change). `IPowerShellService.RunAsync(command, ct)` — the overload every
+  internal caller uses (disk, storage, security, firewall, network, audio, file streams) — threw
+  `OperationCanceledException`, which the SDK masked as "An error occurred invoking '<tool>'.";
+  it now throws a caller-facing `TimeoutException` whose message is the reason. None of those
+  callers read `Success`, so a *returned* failure would have been parsed as data — `audio`
+  answering "volume 50" from a partial stdout. Only the two-argument overload, the `powershell`
+  tool's, folds a timeout into `TimedOut: true` instead.
 - **`file_manage` no longer overwrites or deletes a tree silently** (parity C-1 — two contract
   breaks, deliberate). `copy` and `move` used to pass `overwrite: true` to the framework, so an
   existing destination was replaced without a word; they now refuse it with an
