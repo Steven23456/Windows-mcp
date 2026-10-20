@@ -746,6 +746,32 @@
 
 ### Fixed
 
+- **HTTP-mode log lines carry a local timestamp, and the plain-HTTP warning is one of them.**
+  Over `--transport http` nothing prefixes the server's stderr — a console window, a redirected
+  file, a scheduled task's log — so no entry could be placed in time. Each one now starts with
+  the local time to the millisecond and its UTC offset,
+  `2026-10-20 13:06:34.223 -04:00 info: Microsoft.Hosting.Lifetime[14]` (the time separator and
+  calendar follow the machine's culture, as in any ASP.NET Core app). These are defaults, not
+  overrides: `Logging:Console` configuration wins wherever it is set, so
+  `Logging__Console__FormatterName=json`, `Logging__Console__FormatterOptions__TimestampFormat`
+  and `Logging__Console__FormatterOptions__UseUtcTimestamp=true` are honoured (every level still
+  goes to stderr whatever the configuration says). The default stamp belongs to the simple
+  formatter only: `json` carries no timestamp unless `FormatterOptions:TimestampFormat` is set as
+  well. Behaviour change: in HTTP mode the deprecated flat `Logging:Console:Format`,
+  `TimestampFormat`, `IncludeScopes`, `DisableColors` and `UseUtcTimestamp` settings are no longer
+  honoured; use `Logging:Console:FormatterName` and `FormatterOptions:*` instead. stdio is
+  unchanged and unstamped: the MCP host already timestamps every stderr line it captures. The
+  off-loopback plain-HTTP warning, which `Program.RunHttpAsync` wrote as a raw
+  `Windows-mcp: WARNING: listening on …` line, is now a `warn:` entry logged by
+  `WindowsMcpHost.BuildHttpApp`, stamped like the rest and reading
+  `Listening on <bind>:<port> over plain HTTP — …`. It cannot be silenced: when `Logging:LogLevel`
+  filters would hide that entry, the old raw `Windows-mcp: WARNING: …` line is written instead.
+  The other lines `Program` writes before any host exists — the environment-repair notice, option
+  errors and the startup refusals (no API key off-loopback, an unusable `--cert-thumbprint`) —
+  stay raw and unstamped. Code: `WindowsMcpHost.ConfigureStderrLogging` and `BuildHttpApp`; tests:
+  `WindowsMcpHostTests` ("HTTP log timestamps"), `HttpHostLoggingIntegrationTests` (the real host,
+  built but never started) and `ServerProcessLoggingIntegrationTests` (the built exe in both
+  transports, read from its own stderr). README: "Run over HTTP/HTTPS (remote)" → **Logs.**
 - **`find_element` and `wait_for` survive a stale element, and can be pinned to one window**
   (parity D-5). The find path walked the whole desktop in one `FindAllDescendants` and read
   `Name` / `ControlType` / bounds **unguarded**, so a single element that died between the walk and

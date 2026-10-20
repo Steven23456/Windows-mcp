@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using WindowsMcp.Abstractions;
@@ -47,6 +48,16 @@ internal static class WindowsMcpHost
             // Stateless Streamable HTTP builds a fresh McpServer per request, so the SDK's
             // per-server lifecycle chatter would otherwise repeat for every single call.
             logging.AddFilter("ModelContextProtocol", LogLevel.Warning);
+
+            // Nothing prefixes stderr in HTTP mode, so each line carries its own local time.
+            // stdio stays unstamped: the MCP host already timestamps every stderr line it captures.
+            // Defaults only: Logging:Console config (FormatterName, FormatterOptions) still wins.
+            // FormatterName must name the simple formatter; left null, the console provider
+            // overwrites the formatter's options from its own obsolete flat settings (null stamp).
+            // So the obsolete flat Format, TimestampFormat, IncludeScopes, DisableColors and
+            // UseUtcTimestamp no longer apply here; FormatterOptions:* replaces them.
+            logging.Services.Configure<ConsoleLoggerOptions>(o => o.FormatterName ??= ConsoleFormatterNames.Simple);
+            logging.Services.Configure<SimpleConsoleFormatterOptions>(o => o.TimestampFormat ??= "yyyy-MM-dd HH:mm:ss.fff zzz ");
         }
     }
 
@@ -186,6 +197,22 @@ internal static class WindowsMcpHost
         });
 
         var app = builder.Build();
+
+        // Through the logger so it carries the HTTP-mode stamp like every other line. A security
+        // notice must not vanish with an operator's Logging:LogLevel, so if that filter would hide
+        // it, fall back to the raw line it always was.
+        if (cert is null && !options.IsLoopback)
+        {
+            if (app.Logger.IsEnabled(LogLevel.Warning))
+                app.Logger.LogWarning(
+                    "Listening on {Bind}:{Port} over plain HTTP — the API key and all tool traffic cross the network " +
+                    "unencrypted. Pass --cert-thumbprint to serve HTTPS.",
+                    options.BindAddress, options.Port);
+            else
+                Console.Error.WriteLine(
+                    $"Windows-mcp: WARNING: listening on {options.BindAddress}:{options.Port} over plain HTTP — " +
+                    "the API key and all tool traffic cross the network unencrypted. Pass --cert-thumbprint to serve HTTPS.");
+        }
 
         // Before MapMcp so the gate sits between the auto-inserted UseRouting and UseEndpoints:
         // every path, matched or not, is covered — no unauthenticated probe surface.

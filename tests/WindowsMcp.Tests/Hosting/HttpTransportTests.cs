@@ -111,7 +111,7 @@ public class HttpTransportTests
     /// A throwaway localhost server certificate. SChannel cannot serve TLS with the purely
     /// in-memory key CreateSelfSigned produces, so it is round-tripped through PKCS#12.
     /// </summary>
-    private static X509Certificate2 CreateEphemeralServerCertificate()
+    internal static X509Certificate2 CreateEphemeralServerCertificate()
     {
         using var rsa = RSA.Create(2048);
         var request = new CertificateRequest("CN=localhost", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);

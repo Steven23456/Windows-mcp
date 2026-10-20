@@ -109,6 +109,18 @@ off-loopback (the key and all tool traffic would cross the network in the clear)
 Use HTTPS, and put the port behind a VPN or a firewall rule scoped to your client's
 IP. The bearer check is constant-time; there is no rate limiting, so keep the key long.
 
+**Logs.** Both transports log to stderr. Over HTTP each entry starts with the local time, to
+the millisecond, and its UTC offset — `2026-10-20 13:06:34.223 -04:00 info: …` (time separator
+and calendar follow the machine's culture); over stdio the MCP host stamps the lines it
+captures, so the server adds none. The plain-HTTP warning above is one of these entries
+(`warn:`); a `Logging:LogLevel` filter that would hide it only turns it back into a raw
+`Windows-mcp: WARNING: …` line. Standard `Logging:Console` configuration wins over the defaults
+where set: `$env:Logging__Console__FormatterName = "json"` (which has no timestamp unless you
+also set `Logging__Console__FormatterOptions__TimestampFormat`), or
+`Logging__Console__FormatterOptions__UseUtcTimestamp`. Over HTTP the deprecated flat
+`Logging:Console:Format`, `TimestampFormat`, `IncludeScopes`, `DisableColors` and
+`UseUtcTimestamp` settings are ignored; use `FormatterName` and `FormatterOptions:*`.
+
 **Setup on the remote machine**
 
 1. **Certificate** (for HTTPS). A self-signed one is fine for a private box — create

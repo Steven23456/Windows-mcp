@@ -138,13 +138,8 @@ internal static class Program
                 return 2;
             }
         }
-        else if (!options.IsLoopback)
-        {
-            Console.Error.WriteLine(
-                $"Windows-mcp: WARNING: listening on {options.BindAddress}:{options.Port} over plain HTTP — " +
-                "the API key and all tool traffic cross the network unencrypted. Pass --cert-thumbprint to serve HTTPS.");
-        }
 
+        // BuildHttpApp logs the plain-HTTP warning when no certificate is configured off-loopback.
         var app = WindowsMcpHost.BuildHttpApp(options, cert);
         await app.RunAsync();
         return 0;

@@ -54,6 +54,10 @@ static async Task<int> RunStdioAsync(string[] args, ServerOptions options)
 static async Task<int> RunHttpAsync(ServerOptions options)
 {
     // Refuse off-loopback without an API key; resolve --cert-thumbprint via CertificateLocator.
+    // BuildHttpApp calls ConfigureStderrLogging(http: true): stderr as in stdio, plus a local
+    // "yyyy-MM-dd HH:mm:ss.fff zzz" stamp on every entry (defaults; Logging:Console config wins),
+    // and logs the off-loopback plain-HTTP warning as a warn: entry once the app is built (a raw
+    // "Windows-mcp: WARNING:" stderr line instead if Logging:LogLevel filters would hide it).
     var app = WindowsMcpHost.BuildHttpApp(options, cert);   // Kestrel Listen(bind, port[, UseHttps])
     await app.RunAsync();                                    //   + bearer gate + MapMcp("/mcp"), stateless
     return 0;

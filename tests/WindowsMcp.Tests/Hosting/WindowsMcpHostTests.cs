@@ -1,6 +1,14 @@
+using System.Globalization;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging.Console;
+using Microsoft.Extensions.Options;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Hosting;
@@ -400,5 +408,367 @@ public class WindowsMcpHostTests
 
         (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().NotContain("wgc",
             "the default is auto: a refusing compositor is answered with GDI, silently");
+    }
+
+    // ---- HTTP log timestamps (fix/http-log-timestamps) ---------------------------------------
+    // User report: "The datetime isn't showing up in the console logs when running the app in http
+    // mode." ConfigureStderrLogging never set a timestamp format, and SimpleConsoleFormatterOptions
+    // defaults it to null. HTTP mode gets local time with its UTC offset and milliseconds; stdio
+    // stays bare because the MCP host (Claude Desktop/Code) prefixes its own timestamp to every
+    // stderr line it captures, so a second one would double it.
+    //
+    // Two traps make an options-only assertion insufficient (both verified against the .NET 10
+    // logging stack before these tests were written):
+    //  * SimpleConsoleFormatter reads the UNNAMED SimpleConsoleFormatterOptions (CurrentValue).
+    //    Options configured under the name ConsoleFormatterNames.Simple ("simple") are never read.
+    //  * While ConsoleLoggerOptions.FormatterName is null - which is what AddConsole(o => ...)
+    //    leaves it - ConsoleLoggerProvider OVERWRITES the simple formatter's options on construction
+    //    from the obsolete ConsoleLoggerOptions.TimestampFormat (null). Configure<SimpleConsoleFormatterOptions>
+    //    beside the existing AddConsole call therefore shows the format in the options and still
+    //    renders no timestamp. Only a FormatterName that names the simple formatter makes it stick.
+    // So each mode has an options assertion (the exact contract) AND a rendered-line assertion
+    // through the formatter the real provider selected (the behaviour).
+    //
+    // Review round 2 (F2), policy "operator config wins where set": the HTTP default fills only
+    // what the Logging:Console configuration leaves unset. A configured FormatterName (json,
+    // systemd), FormatterOptions:TimestampFormat or FormatterOptions:UseUtcTimestamp is honoured;
+    // LogToStandardErrorThreshold stays Trace whatever the config says, because stdout is the
+    // JSON-RPC channel in stdio and the same sink is kept in HTTP. HTTP mode no longer honours the
+    // deprecated flat ConsoleLoggerOptions settings (obsolete since .NET 5) - Logging:Console:Format,
+    // TimestampFormat, IncludeScopes, DisableColors and UseUtcTimestamp - because the provider
+    // applies them only while FormatterName is null, and HTTP mode now names the simple formatter
+    // (stdio leaves it null, so they still apply there). Accepted, and deliberately not pinned.
+    // Those rows build the logging pipeline the way CreateBuilder/CreateApplicationBuilder do
+    // (AddConfiguration over the Logging section, then AddConsole) from in-memory config, so they
+    // are hermetic: the process environment is never read or written.
+
+    /// <summary>The HTTP-mode stamp: local time, milliseconds, UTC offset, and the separating space.</summary>
+    internal const string HttpTimestampFormat = "yyyy-MM-dd HH:mm:ss.fff zzz ";
+
+    /// <summary>A rendered HTTP-mode first line: the timestamp, exactly one space, then the level token.</summary>
+    private static readonly Regex TimestampedLine = new(
+        @"^(?<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} [+-]\d{2}:\d{2}) info: ", RegexOptions.CultureInvariant);
+
+    private static readonly Regex AnsiColor = new(@"\x1B\[[0-9;]*m", RegexOptions.CultureInvariant);
+
+    internal const string SdkCategory = "ModelContextProtocol.Server.McpServer";
+    internal const string OwnCategory = "WindowsMcp.Tools.Probe";
+
+    private static ServiceProvider BuildLogging(bool http) =>
+        new ServiceCollection()
+            .AddLogging(logging => WindowsMcpHost.ConfigureStderrLogging(logging, http))
+            .BuildServiceProvider();
+
+    /// <summary>
+    /// Renders one Information line through the console formatter the real
+    /// <see cref="ConsoleLoggerProvider"/> uses and returns its first line, ANSI colour codes
+    /// stripped. Public API only, no mocks: the logger factory is resolved first because building
+    /// the provider is when it pushes the obsolete <see cref="ConsoleLoggerOptions"/> into the simple
+    /// formatter (no formatter name set); the formatter resolved afterwards is the same DI
+    /// singleton the provider holds. Invariant culture because ':' in a .NET custom date format is
+    /// the culture's time separator, which would make the shape assertion machine-dependent.
+    /// The pin is test-only: the server's stamp deliberately follows the machine's CurrentCulture -
+    /// its calendar (th-TH writes 2569-...) as well as its time separator - exactly as
+    /// SimpleConsoleFormatter does for every ASP.NET Core app (review round 2, F1: accepted).
+    /// </summary>
+    internal static string RenderFirstLine(IServiceProvider services)
+    {
+        _ = services.GetRequiredService<ILoggerFactory>();
+        services.GetServices<ILoggerProvider>().OfType<ConsoleLoggerProvider>()
+            .Should().ContainSingle("logs reach stderr through exactly one console provider");
+
+        // The provider's own selection: the named formatter, else the simple one.
+        var name = services.GetRequiredService<IOptionsMonitor<ConsoleLoggerOptions>>().CurrentValue.FormatterName
+            ?? ConsoleFormatterNames.Simple;
+        var formatter = services.GetServices<ConsoleFormatter>().Single(f => f.Name == name);
+
+        var saved = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+        try
+        {
+            using var writer = new StringWriter(CultureInfo.InvariantCulture);
+            var entry = new LogEntry<string>(
+                LogLevel.Information, OwnCategory, new EventId(0), "probe message", null, (state, _) => state);
+            formatter.Write(in entry, null, writer);
+            var firstLine = writer.ToString().Split('\n')[0].TrimEnd('\r');
+            return AnsiColor.Replace(firstLine, string.Empty);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = saved;
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="line"/> starts with a local, millisecond, offset-carrying stamp for the
+    /// moment it was rendered (between <paramref name="before"/> and <paramref name="after"/>),
+    /// immediately followed by one space and the level token.
+    /// </summary>
+    internal static void ShouldStartWithALocalTimestampForNow(string line, DateTimeOffset before, DateTimeOffset after)
+    {
+        var match = TimestampedLine.Match(line);
+        match.Success.Should().BeTrue(
+            "an HTTP-mode line must start '<yyyy-MM-dd HH:mm:ss.fff zzz> info: ' but rendered \"{0}\"; if "
+            + "SimpleConsoleFormatterOptions.TimestampFormat is set and this still fails, the console provider "
+            + "overwrote it because ConsoleLoggerOptions.FormatterName does not name the simple formatter "
+            + "(AddSimpleConsole sets it)", line);
+
+        var stamp = DateTimeOffset.ParseExact(
+            match.Groups["ts"].Value, "yyyy-MM-dd HH:mm:ss.fff zzz", CultureInfo.InvariantCulture);
+        stamp.Should().BeOnOrAfter(before.AddSeconds(-2)).And.BeOnOrBefore(after.AddSeconds(2),
+            "the stamp is the wall-clock moment the line was written, on a 24-hour clock");
+        stamp.Offset.Should().Be(TimeZoneInfo.Local.GetUtcOffset(stamp.UtcDateTime),
+            "the stamp is local time carrying its UTC offset, not UTC (UseUtcTimestamp stays false)");
+    }
+
+    [Fact]
+    public void ConfigureStderrLogging_http_sets_a_local_millisecond_timestamp_with_offset()
+    {
+        using var provider = BuildLogging(http: true);
+
+        var simple = provider.GetRequiredService<IOptionsMonitor<SimpleConsoleFormatterOptions>>().CurrentValue;
+
+        simple.TimestampFormat.Should().Be(HttpTimestampFormat,
+            "nothing prefixes stderr in HTTP mode, so each line carries its own local time, offset and "
+            + "milliseconds; the trailing space separates the stamp from the level token written next");
+        simple.UseUtcTimestamp.Should().BeFalse("the stamp is local time; zzz carries the offset");
+    }
+
+    [Fact]
+    public void ConfigureStderrLogging_http_renders_each_line_with_a_leading_local_timestamp()
+    {
+        using var provider = BuildLogging(http: true);
+
+        var before = DateTimeOffset.Now;
+        var line = RenderFirstLine(provider);
+        var after = DateTimeOffset.Now;
+
+        ShouldStartWithALocalTimestampForNow(line, before, after);
+    }
+
+    [Fact]
+    public void ConfigureStderrLogging_stdio_leaves_the_timestamp_off()
+    {
+        using var provider = BuildLogging(http: false);
+
+        provider.GetRequiredService<IOptionsMonitor<SimpleConsoleFormatterOptions>>().CurrentValue.TimestampFormat
+            .Should().BeNull("the MCP host prefixes its own timestamp to every stderr line it captures; a second would double it");
+    }
+
+    [Fact]
+    public void ConfigureStderrLogging_stdio_renders_lines_without_a_timestamp()
+    {
+        using var provider = BuildLogging(http: false);
+
+        var line = RenderFirstLine(provider);
+
+        line.Should().StartWith("info: ", "a stdio line starts at the level token; the MCP host adds the time");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConfigureStderrLogging_routes_every_level_to_stderr(bool http)
+    {
+        using var provider = BuildLogging(http);
+
+        provider.GetRequiredService<IOptionsMonitor<ConsoleLoggerOptions>>().CurrentValue.LogToStandardErrorThreshold
+            .Should().Be(LogLevel.Trace,
+                "stdout is the JSON-RPC channel in stdio mode, and HTTP mode keeps the same sink");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConfigureStderrLogging_logs_Information_and_above(bool http)
+    {
+        using var provider = BuildLogging(http);
+        var logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger(OwnCategory);
+
+        logger.IsEnabled(LogLevel.Debug).Should().BeFalse("the minimum level is Information");
+        logger.IsEnabled(LogLevel.Information).Should().BeTrue("the minimum level is Information");
+        logger.IsEnabled(LogLevel.Warning).Should().BeTrue();
+    }
+
+    [Fact]
+    public void ConfigureStderrLogging_http_quiets_the_mcp_sdk_below_Warning()
+    {
+        using var provider = BuildLogging(http: true);
+        var sdk = provider.GetRequiredService<ILoggerFactory>().CreateLogger(SdkCategory);
+
+        sdk.IsEnabled(LogLevel.Information).Should().BeFalse(
+            "stateless HTTP builds a server per request, so the SDK's lifecycle chatter would repeat on every call");
+        sdk.IsEnabled(LogLevel.Warning).Should().BeTrue("SDK warnings and errors still reach the operator");
+    }
+
+    [Fact]
+    public void ConfigureStderrLogging_stdio_does_not_quiet_the_mcp_sdk()
+    {
+        using var provider = BuildLogging(http: false);
+        var sdk = provider.GetRequiredService<ILoggerFactory>().CreateLogger(SdkCategory);
+
+        sdk.IsEnabled(LogLevel.Information).Should().BeTrue(
+            "the Warning filter is HTTP-only: stdio runs one server for the life of the process");
+    }
+
+    // ---- F2: operator Logging:Console configuration wins where set -------------------------
+
+    /// <summary>
+    /// The logging pipeline as <c>WebApplication.CreateBuilder</c> / <c>Host.CreateApplicationBuilder</c>
+    /// leave it before our call - <c>AddConfiguration(Logging section)</c>, then <c>AddConsole()</c> -
+    /// fed from in-memory settings (keys relative to <c>Logging</c>), then
+    /// <see cref="WindowsMcpHost.ConfigureStderrLogging"/>. Hermetic: no environment, no files.
+    /// </summary>
+    private static ServiceProvider BuildLoggingWithConfig(bool http, params (string Key, string Value)[] logging)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(logging.Select(s => new KeyValuePair<string, string?>("Logging:" + s.Key, s.Value)))
+            .Build();
+
+        return new ServiceCollection()
+            .AddLogging(builder =>
+            {
+                builder.AddConfiguration(config.GetSection("Logging"));
+                builder.AddConsole();
+                WindowsMcpHost.ConfigureStderrLogging(builder, http);
+            })
+            .BuildServiceProvider();
+    }
+
+    private static string SelectedFormatterName(IServiceProvider services) =>
+        services.GetRequiredService<IOptionsMonitor<ConsoleLoggerOptions>>().CurrentValue.FormatterName
+            ?? ConsoleFormatterNames.Simple;
+
+    [Fact]
+    public void ConfigureStderrLogging_http_with_an_empty_Logging_section_keeps_the_local_millisecond_stamp()
+    {
+        using var provider = BuildLoggingWithConfig(http: true);
+
+        var simple = provider.GetRequiredService<IOptionsMonitor<SimpleConsoleFormatterOptions>>().CurrentValue;
+        simple.TimestampFormat.Should().Be(HttpTimestampFormat, "nothing is configured, so the HTTP default applies");
+        simple.UseUtcTimestamp.Should().BeFalse("nothing is configured, so the stamp is local time");
+        SelectedFormatterName(provider).Should().Be(ConsoleFormatterNames.Simple);
+
+        var before = DateTimeOffset.Now;
+        var line = RenderFirstLine(provider);
+        var after = DateTimeOffset.Now;
+        ShouldStartWithALocalTimestampForNow(line, before, after);
+    }
+
+    [Fact]
+    public void ConfigureStderrLogging_stdio_with_an_empty_Logging_section_stays_unstamped()
+    {
+        using var provider = BuildLoggingWithConfig(http: false);
+
+        RenderFirstLine(provider).Should().StartWith("info: ",
+            "stdio is unchanged by the HTTP default: the MCP host adds the time");
+    }
+
+    [Fact]
+    public void ConfigureStderrLogging_http_honours_a_configured_json_formatter()
+    {
+        using var provider = BuildLoggingWithConfig(http: true, ("Console:FormatterName", "json"));
+
+        SelectedFormatterName(provider).Should().Be(ConsoleFormatterNames.Json,
+            "an operator who configured Logging:Console:FormatterName=json gets JSON; the HTTP default only fills what is unset");
+
+        var line = RenderFirstLine(provider);
+        line.Should().StartWith("{", "a json-formatted entry is one JSON object, not '<stamp> info: ...'");
+        using var json = JsonDocument.Parse(line);
+        json.RootElement.GetProperty("Message").GetString().Should().Be("probe message");
+        json.RootElement.GetProperty("LogLevel").GetString().Should().Be("Information");
+    }
+
+    [Fact]
+    public void ConfigureStderrLogging_http_honours_a_configured_systemd_formatter()
+    {
+        using var provider = BuildLoggingWithConfig(http: true, ("Console:FormatterName", "systemd"));
+
+        SelectedFormatterName(provider).Should().Be(ConsoleFormatterNames.Systemd,
+            "a configured formatter name wins over the HTTP default's 'simple'");
+        RenderFirstLine(provider).Should().StartWith("<6>",
+            "systemd renders an Information entry with its syslog priority prefix, not the HTTP stamp");
+    }
+
+    [Fact]
+    public void ConfigureStderrLogging_http_honours_a_configured_timestamp_format()
+    {
+        using var provider = BuildLoggingWithConfig(http: true, ("Console:FormatterOptions:TimestampFormat", "[HH:mm:ss] "));
+
+        provider.GetRequiredService<IOptionsMonitor<SimpleConsoleFormatterOptions>>().CurrentValue.TimestampFormat
+            .Should().Be("[HH:mm:ss] ",
+                "an operator who configured Logging:Console:FormatterOptions:TimestampFormat gets that format, not the HTTP default");
+
+        RenderFirstLine(provider).Should().MatchRegex(@"^\[\d{2}:\d{2}:\d{2}\] info: ",
+            "the configured format is what the simple formatter actually writes");
+    }
+
+    [Fact]
+    public void ConfigureStderrLogging_http_with_a_configured_simple_formatter_and_no_format_still_stamps()
+    {
+        using var provider = BuildLoggingWithConfig(http: true, ("Console:FormatterName", "simple"));
+
+        provider.GetRequiredService<IOptionsMonitor<SimpleConsoleFormatterOptions>>().CurrentValue.TimestampFormat
+            .Should().Be(HttpTimestampFormat, "naming the simple formatter leaves the timestamp unset, so the HTTP default fills it");
+
+        var before = DateTimeOffset.Now;
+        var line = RenderFirstLine(provider);
+        var after = DateTimeOffset.Now;
+        ShouldStartWithALocalTimestampForNow(line, before, after);
+    }
+
+    [Fact]
+    public void ConfigureStderrLogging_http_honours_a_configured_UseUtcTimestamp_with_the_default_format()
+    {
+        using var provider = BuildLoggingWithConfig(http: true, ("Console:FormatterOptions:UseUtcTimestamp", "true"));
+
+        var simple = provider.GetRequiredService<IOptionsMonitor<SimpleConsoleFormatterOptions>>().CurrentValue;
+        simple.UseUtcTimestamp.Should().BeTrue("a configured UseUtcTimestamp is honoured");
+        simple.TimestampFormat.Should().Be(HttpTimestampFormat, "only the clock was configured; the format is still the HTTP default");
+
+        var before = DateTimeOffset.UtcNow;
+        var line = RenderFirstLine(provider);
+        var after = DateTimeOffset.UtcNow;
+        var match = TimestampedLine.Match(line);
+        match.Success.Should().BeTrue("the entry still starts with the HTTP stamp, but rendered \"{0}\"", line);
+        var stamp = DateTimeOffset.ParseExact(match.Groups["ts"].Value, "yyyy-MM-dd HH:mm:ss.fff zzz", CultureInfo.InvariantCulture);
+        stamp.Offset.Should().Be(TimeSpan.Zero, "UseUtcTimestamp=true renders UTC, which zzz shows as +00:00");
+        stamp.Should().BeOnOrAfter(before.AddSeconds(-2)).And.BeOnOrBefore(after.AddSeconds(2));
+    }
+
+    [Theory]
+    [InlineData(false, "None")]
+    [InlineData(true, "None")]
+    [InlineData(false, "Critical")]
+    [InlineData(true, "Critical")]
+    public void ConfigureStderrLogging_keeps_every_level_on_stderr_whatever_the_config_says(bool http, string configured)
+    {
+        using var provider = BuildLoggingWithConfig(http, ("Console:LogToStandardErrorThreshold", configured));
+
+        provider.GetRequiredService<IOptionsMonitor<ConsoleLoggerOptions>>().CurrentValue.LogToStandardErrorThreshold
+            .Should().Be(LogLevel.Trace,
+                "a configured threshold would send log lines to stdout - the JSON-RPC channel in stdio - so this one setting is not the operator's");
+    }
+
+    // ---- F3: the plain-HTTP warning is a logged entry, not a raw stderr write --------------
+
+    [Fact]
+    public void Program_does_not_write_the_plain_HTTP_warning_straight_to_stderr()
+    {
+        // A source guard (the behaviour itself is HttpHostLoggingIntegrationTests: the warning is
+        // logged by BuildHttpApp). An off-loopback bind cannot be exercised end to end unattended -
+        // the first listen on a public interface raises a firewall prompt - so this is what stops
+        // the unstamped Console.Error write from coming back beside the logged one.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "Windows-mcp.slnx")))
+            dir = dir.Parent;
+        dir.Should().NotBeNull("the guard reads src/WindowsMcp/Program.cs, so it must run from inside the repo");
+
+        var program = File.ReadAllText(Path.Combine(dir!.FullName, "src", "WindowsMcp", "Program.cs"));
+
+        var rawWrite = Regex.Match(program, @"Console\.Error\.Write(Line)?\([^;]*plain HTTP[^;]*;");
+        rawWrite.Success.Should().BeFalse(
+            "the plain-HTTP warning must go through the logger so it carries the HTTP-mode timestamp like every other entry, "
+            + "but Program.cs still writes it raw: {0}", rawWrite.Value);
     }
 }
