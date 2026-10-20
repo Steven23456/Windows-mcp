@@ -2,6 +2,9 @@
 
 ### Added
 
+- **`build.ps1` at the repo root (dev infrastructure).** `.\build.ps1` is a shortcut that runs
+  `scripts/build-release.ps1` — still the one place the publish flags live — and passes on its
+  exit code, producing `bundle/WindowsMcp.exe`; README "Build" now leads with it.
 - **`scrape` reads the open browser tab, caps what it returns, and can summarise through your own
   client's model** (parity C-5, roadmap R8). `scrape(url?, query?, source = "http",
   summarize = false, max_chars = 100000, window?)` answers with JSON

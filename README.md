@@ -9,12 +9,13 @@ SDK. See [Tool reference](#tool-reference) for the 69 tools.
 ```powershell
 git clone https://github.com/Steven23456/Windows-mcp.git
 cd Windows-mcp
-.\scripts\build-release.ps1
+.\build.ps1
 ```
 
 Output: one file, `bundle/WindowsMcp.exe` (~77 MB self-contained — bundles the .NET and
 ASP.NET Core runtimes plus the native SkiaSharp library; nothing to install on the target
-machine). The script runs this publish:
+machine). `build.ps1` is a repo-root shortcut that calls `scripts/build-release.ps1`, where
+the publish flags live (either works from any directory). That script runs this publish:
 
 ```powershell
 dotnet publish src/WindowsMcp -c Release -o bundle -r win-x64 --self-contained `
