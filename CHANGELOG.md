@@ -426,6 +426,25 @@
 
 ### Changed
 
+- **Every log entry on stderr opens with the local date and time** (a contract change for anyone
+  who reshaped the console log through configuration). `WindowsMcpHost.ConfigureStderrLogging`,
+  the one logging setup the stdio and HTTP transports share, now names the simple console
+  formatter, so each `ILogger` entry starts with the time to the millisecond and keeps its
+  two-line layout — `2026-10-20 14:03:27.512 info: WindowsMcp.Services.ScreenshotService[0]`,
+  then the message indented on the next line — where it used to carry no time at all, so a
+  stderr line could not be tied to when it happened. The stamp format (`yyyy-MM-dd HH:mm:ss.fff`),
+  local rather than UTC time, the two-line layout and the absence of scope lines are pinned in
+  code after configuration binds, so `Logging__Console__FormatterOptions__*` variables and a
+  working-directory `appsettings.json` cannot change them (`ColorBehavior` stays configurable);
+  `Logging:Console:FormatterName` (e.g. `Logging__Console__FormatterName=json`) and the deprecated
+  `Logging:Console:TimestampFormat` / `IncludeScopes` / `DisableColors` / `UseUtcTimestamp` keys,
+  which used to take effect, no longer change the format. Every level still goes to stderr, never
+  stdout. The stamp is rendered in the machine's current culture — .NET exposes no override — so
+  a culture whose time separator is not `:` prints its own (fi-FI: `14.03.27.512`). The lines
+  `Program.cs` writes straight to stderr at startup (environment repair, the refusals, the
+  plain-HTTP warning) are not `ILogger` output and stay unstamped. Covered in
+  `WindowsMcpHostTests`, including the real HTTP host and the stdio host's builder. No new
+  service, no new tool.
 - **`scrape` returns a JSON result object, not a markdown string** (parity C-5 — a contract
   change). The tool used to answer with the converted markdown and nothing else; it now returns
   `{Source, Url, Title, Chars, Truncated, Content, Summarized, Model, Note}` with the text in

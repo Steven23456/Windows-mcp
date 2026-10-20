@@ -34,12 +34,25 @@ internal static class WindowsMcpHost
     /// Logs go to stderr in <b>both</b> modes. In stdio mode stdout is the JSON-RPC channel, so
     /// anything else there corrupts the protocol; in HTTP mode keeping the same sink means one
     /// logging story, and it also sidesteps the Windows EventLog provider that
-    /// <see cref="WebApplication.CreateBuilder()"/> would otherwise add.
+    /// <see cref="WebApplication.CreateBuilder()"/> would otherwise add. Every entry opens with
+    /// the local date and time to the millisecond, so a stderr line can be tied to when it happened.
     /// </summary>
     public static void ConfigureStderrLogging(ILoggingBuilder logging, bool http)
     {
         logging.ClearProviders();
         logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
+        // Names the formatter as well as configuring it: with no FormatterName the provider
+        // overwrites the simple formatter's options and the timestamp never renders. Naming it
+        // also makes Logging:Console:FormatterOptions live (env vars, a working-directory
+        // appsettings.json), so every field that changes the line's content or layout is pinned
+        // here, after config binding; ColorBehavior stays configurable (cosmetic, stderr only).
+        logging.AddSimpleConsole(o =>
+        {
+            o.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff ";
+            o.UseUtcTimestamp = false;
+            o.SingleLine = false;
+            o.IncludeScopes = false;
+        });
         logging.SetMinimumLevel(LogLevel.Information);
 
         if (http)
