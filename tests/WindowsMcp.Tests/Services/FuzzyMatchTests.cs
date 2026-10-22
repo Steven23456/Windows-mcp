@@ -190,4 +190,187 @@ public class FuzzyMatchTests
             "tokenising splits on the em dash and lower-casing is culture-invariant, so the "
             + "request's single token is a subset of the title's two");
     }
+
+    // ---- Abbreviations: "vs code" is Visual Studio Code, not QR Code Scanner -------------------
+    //
+    // The rule (fix/app-catalog-matching, round 2 - the strict one). Tokens as above (lower-case,
+    // split on every non-letter/digit run) but kept as an ORDERED LIST, repeats and all:
+    //   * ANCHORED, NO SKIPPING: request token 0 is read at candidate token 0, and each next request
+    //     token at the very next unread candidate token. No candidate token is ever skipped.
+    //   * A request token of 2+ characters reads as a WORD PREFIX (the candidate token starts with
+    //     it; consumes 1) or as INITIALS (its k characters are the first characters of the next k
+    //     candidate tokens, k >= 2; consumes k). A 1-character token never reads.
+    //   * If EVERY request token read as initials, the reading must end exactly at the last
+    //     candidate token. Once any token read as a word prefix, trailing tokens may stay unread.
+    //   * AbbreviationUnread = the fewest trailing tokens left unread over every reading, or -1
+    //     when there is none; AbbreviationCovers = AbbreviationUnread >= 0. A side with no tokens
+    //     never abbreviates anything.
+    // Round 1 let tokens be skipped and initials stop short of the end. On a real catalog that
+    // read "mps" as VLC [media player skinned], "uy" as [Uninstall YubiKey] Manager and "16" as
+    // Python [1]3 ([6]4-bit): refusals became confident launches of the wrong app.
+
+    /// <summary>
+    /// (request, candidate, unread). Every value follows from the rule above and was checked
+    /// against an independent reference walk before the implementation existed. The rows marked
+    /// "round 1" were true under the loose rule and are refusals now.
+    /// </summary>
+    public static TheoryData<string, string, int> UnreadTable => new()
+    {
+        // reads, nothing left over
+        { "vs code", "Visual Studio Code", 0 },          // initials "visual studio", then the word "code"
+        { "vsc", "Visual Studio Code", 0 },               // initials over all three tokens
+        { "wt", "Windows Terminal", 0 },
+        { "ssms", "SQL Server Management Studio", 0 },
+        { "sm", "Server Manager", 0 },
+        { "7z", "7-Zip", 0 },                             // digits are token characters; '-' separates
+        { "vs 2026", "Visual Studio 2026", 0 },
+        { "mt", "Movies & TV", 0 },                       // '&' is a separator, not a token
+        { "vs", "Visual Studio", 0 },
+        { "vi st co", "Visual Studio Code", 0 },          // three word prefixes at exactly 2 characters
+        { "vs-code", "Visual Studio Code", 0 },           // punctuation separates the request's tokens too
+        { "term", "Tiny Easy Remote Manager", 0 },
+
+        // a word prefix lets trailing tokens stay unread - and the count is reported
+        { "vs code", "Visual Studio Code Insiders", 1 },
+        { "visual studio", "Visual Studio Code", 1 },
+        { "vis", "Visual Studio Code", 2 },
+
+        // initials alone must reach the last token
+        { "vsc", "Visual Studio Code Insiders", -1 },
+        { "vs", "Visual Studio Code", -1 },               // round 1: true
+        { "sm", "SQL Server Management Studio", -1 },     // and 's','s' is not 's','m' anyway
+        { "7z", "7-Zip File Manager", -1 },               // round 1: true
+        { "7z", "7-Zip Help", -1 },
+        { "uy", "Uninstall YubiKey Manager", -1 },
+        { "uu", "Uninstall UltiMaker Cura", -1 },
+        { "dcp", "Developer Command Prompt for VS", -1 },
+        { "td", "Click to Do", -1 },
+        { "mt", "Microsoft To Do", -1 },
+        { "ms edge", "Microsoft Edge", -1 },              // "ms" is not the prefix "mi"; as initials "me" it leaves "edge" nothing
+
+        // anchored: nothing before the first match is skipped ...
+        { "mps", "VLC media player skinned", -1 },
+        { "16", "Python 3.13 (64-bit)", -1 },
+        { "10", "my.ini (MariaDB 13.0 (x64))", -1 },
+        { "52", "Blender 5.2.3.0", -1 },
+        { "td", "Microsoft To Do", -1 },
+        { "vs 2026", "Open Sample ASP.NET Core Application in Visual Studio 2026 - Telerik UI for ASP.NET Core", -1 },
+        { "vs code", "Microsoft Visual Studio Code", -1 }, // round 1: true (skipped "microsoft")
+        { "code", "Visual Studio Code", -1 },             // round 1: true (skipped two tokens)
+        { "term", "Windows Terminal", -1 },
+
+        // ... and nothing between two matches
+        { "vis code", "Visual Studio Code", -1 },         // round 1: true (skipped "studio")
+        { "vc", "Visual Studio Code", -1 },
+        { "aab bx", "Ax Aab Bx", -1 },                    // round 1: true (skipped "ax")
+
+        // other refusals, unchanged from round 1
+        { "vs code", "QR Code Scanner", -1 },
+        { "v code", "Visual Studio Code", -1 },           // a 1-character token never reads
+        { "v", "Visual", -1 },
+        { "code vs", "Visual Studio Code", -1 },          // order matters
+        { "vsco", "Visual Studio Code", -1 },             // initials do not run on into a prefix
+        { "code code", "Visual Studio Code", -1 },        // no candidate token is read twice
+        { "visual studio code", "Visual Studio", -1 },    // every request token must read
+        { "vsc", "Visual Studio", -1 },                   // initials past the last token: -1, not an index error
+        { "wt", "WordPad", -1 },                          // one word has no two-word initials
+        { "aa bb cc", "Aa Bb", -1 },                      // more request words than name words: each needs at least one
+    };
+
+    [Theory]
+    [MemberData(nameof(UnreadTable))]
+    public void AbbreviationUnread_reads_the_table(string request, string candidate, int unread)
+    {
+        FuzzyMatch.AbbreviationUnread(request, candidate).Should().Be(unread,
+            $"'{request}' over '{candidate}' leaves {unread} token(s) unread (-1: it does not abbreviate it)");
+    }
+
+    [Theory]
+    [MemberData(nameof(UnreadTable))]
+    public void AbbreviationCovers_is_true_exactly_when_AbbreviationUnread_is_not_negative(
+        string request, string candidate, int unread)
+    {
+        FuzzyMatch.AbbreviationCovers(request, candidate).Should().Be(unread >= 0,
+            $"AbbreviationCovers is AbbreviationUnread >= 0, and '{request}' over '{candidate}' is {unread}");
+    }
+
+    [Theory]
+    [InlineData("VS CODE", "Visual Studio Code")]
+    [InlineData("vs code", "VISUAL STUDIO CODE")]
+    [InlineData("Vs Code", "visual studio code")]
+    public void AbbreviationCovers_ignores_case_on_both_sides(string request, string candidate)
+    {
+        FuzzyMatch.AbbreviationUnread(request, candidate).Should().Be(0);
+        FuzzyMatch.AbbreviationCovers(request, candidate).Should().BeTrue();
+    }
+
+    [Theory]
+    // "db" reads as the word "db" or as the initials of "DB Browser". Only the word reading leaves
+    // "browser" for the second token: an implementation that tries initials first and never
+    // retries says -1.
+    [InlineData("db browser", "DB Browser for SQLite", 2)]
+    // The mirror: "ab" reads as a prefix of "Abc" or as the initials of "Abc Bxx". Only the
+    // initials reading puts "cd" at "Cd": prefix-first with no retry says -1.
+    [InlineData("ab cd", "Abc Bxx Cd", 0)]
+    public void AbbreviationUnread_retries_the_other_reading_when_the_first_one_dead_ends(
+        string request, string candidate, int unread)
+    {
+        FuzzyMatch.AbbreviationUnread(request, candidate).Should().Be(unread);
+        FuzzyMatch.AbbreviationCovers(request, candidate).Should().BeTrue();
+    }
+
+    [Theory]
+    // Both readings succeed. Prefix-first finds "abz" + "bcd" and leaves one "bcd" unread (1);
+    // initials-first finds "abz bcd" + "bcd" and leaves none (0). The fewest wins.
+    [InlineData("ab bc", "Abz Bcd Bcd", 0)]
+    // And the other way round: initials-first finds "ab b" + "bbc" and leaves "cx" (1);
+    // prefix-first finds "ab" + the initials of "b bbc cx" and leaves none (0).
+    [InlineData("ab bbc", "Ab B Bbc Cx", 0)]
+    public void AbbreviationUnread_reports_the_reading_with_the_fewest_unread_not_the_first_found(
+        string request, string candidate, int unread)
+    {
+        FuzzyMatch.AbbreviationUnread(request, candidate).Should().Be(unread,
+            "every reading is tried and the best one counts; stopping at the first success depends on which rule is tried first");
+    }
+
+    [Theory]
+    // Ten 2-character request tokens, the last unreadable, against 30 tokens every one of which
+    // the other nine read both as a word prefix and (in pairs) as initials. Round 1's walk with no
+    // memo took 59.6 s on this one call. AppCatalog.Match makes the call once per catalog entry.
+    [InlineData(9, 30)]
+    // The strict rule only branches between "prefix" and "initials" at each token, so the first
+    // shape is cheap even without a memo. Forty tokens against eighty is 2^39 readings walked
+    // naively, and 40 x 81 (request index, candidate index) states memoised.
+    [InlineData(39, 80)]
+    public async Task AbbreviationUnread_stays_fast_on_a_pathological_request_and_name(int readable, int nameTokens)
+    {
+        var request = string.Join(' ', Enumerable.Repeat("aa", readable)) + " zz";
+        var candidate = string.Join(' ', Enumerable.Repeat("aa", nameTokens));
+
+        var call = Task.Run(() => (Unread: FuzzyMatch.AbbreviationUnread(request, candidate),
+                                   Covers: FuzzyMatch.AbbreviationCovers(request, candidate)));
+        var finished = await Task.WhenAny(call, Task.Delay(TimeSpan.FromSeconds(5)));
+
+        finished.Should().BeSameAs(call,
+            "a launch(\"...\") must not spend seconds deciding one catalog entry; the budget is 5 s and a memoised walk takes microseconds");
+        var (unread, covers) = await call;
+        unread.Should().Be(-1, "'zz' reads nothing in the name");
+        covers.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("", "Visual Studio Code")]
+    [InlineData("   ", "Visual Studio Code")]
+    [InlineData("---", "Visual Studio Code")]
+    [InlineData("vs", "")]
+    [InlineData("vs", "---")]
+    [InlineData("", "")]
+    public void AbbreviationCovers_is_false_when_either_side_has_no_tokens(string request, string candidate)
+    {
+        // "Every request token reads" is vacuously true of zero tokens. Taken literally, a request
+        // of "---" would abbreviate every app in the catalog at 95 and launch() would open the
+        // shortest name on the machine. Nothing abbreviates nothing.
+        FuzzyMatch.AbbreviationUnread(request, candidate).Should().Be(-1);
+        FuzzyMatch.AbbreviationCovers(request, candidate).Should().BeFalse();
+    }
 }

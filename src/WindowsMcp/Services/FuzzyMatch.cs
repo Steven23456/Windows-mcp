@@ -55,10 +55,68 @@ internal static class FuzzyMatch
         return Math.Max(RatioLower(sect, c12), Math.Max(RatioLower(sect, c21), RatioLower(c12, c21)));
     }
 
-    /// <summary>Lower-cased tokens split on every run of non-letter/digit characters, as a set.</summary>
-    private static HashSet<string> Tokens(string s)
+    /// <summary>True when <paramref name="request"/> abbreviates <paramref name="candidate"/> (<see cref="AbbreviationUnread"/> is not -1).</summary>
+    internal static bool AbbreviationCovers(string request, string candidate)
+        => AbbreviationUnread(request, candidate) >= 0;
+
+    /// <summary>
+    /// -1 when <paramref name="request"/> does not abbreviate <paramref name="candidate"/>, else the
+    /// fewest candidate tokens left unread at the end. Anchored at the first candidate token, no
+    /// token skipped; each request token (2+ chars) reads as a word prefix (1 token) or as the
+    /// initials of the next k &gt;= 2 tokens; an all-initials reading must end at the last token.
+    /// Case-insensitive; see <c>FuzzyMatchTests</c>. So <c>vs code</c> reads "Visual Studio Code"
+    /// to the end and <c>wt</c> "Windows Terminal", which the scorers rate no higher than "QR Code
+    /// Scanner" or "WordPad", while <c>mps</c> cannot start at "VLC media player skinned"'s second
+    /// word and <c>uy</c> cannot stop short of "Uninstall YubiKey Manager"'s last. A side with no
+    /// tokens reads nothing, so a request of only punctuation never matches every name.
+    /// </summary>
+    internal static int AbbreviationUnread(string request, string candidate)
     {
-        var set = new HashSet<string>(StringComparer.Ordinal);
+        var req = TokenList(request);
+        var cand = TokenList(candidate);
+        // Every request token reads at least one candidate token, so more of them cannot fit.
+        if (req.Count == 0 || req.Count > cand.Count) return -1;
+        var memo = new int?[req.Count, cand.Count + 1, 2];
+        int end = End(0, 0, false);
+        return end < 0 ? -1 : cand.Count - end;
+
+        // The furthest candidate token a reading of request tokens r onwards can end at, starting
+        // at candidate token p, or -1; word says an earlier token was read as a word prefix. Both
+        // readings of each token are tried ("db browser" over "DB Browser for SQLite" must take
+        // "db" whole, "ab cd" over "Abc Bxx Cd" as initials), and each (r, p, word) is worked out
+        // once, so a crafted name cannot make the search exponential.
+        int End(int r, int p, bool word)
+        {
+            if (r == req.Count) return word || p == cand.Count ? p : -1;
+            if (memo[r, p, word ? 1 : 0] is { } known) return known;
+            var token = req[r];
+            int best = -1;
+            if (token.Length >= 2 && p < cand.Count)
+            {
+                if (cand[p].StartsWith(token, StringComparison.Ordinal))
+                    best = End(r + 1, p + 1, true);
+                if (p + token.Length <= cand.Count && IsInitials(token, p))
+                    best = Math.Max(best, End(r + 1, p + token.Length, word));
+            }
+            memo[r, p, word ? 1 : 0] = best;
+            return best;
+        }
+
+        bool IsInitials(string token, int start)
+        {
+            for (int i = 0; i < token.Length; i++)
+                if (cand[start + i][0] != token[i]) return false;
+            return true;
+        }
+    }
+
+    /// <summary>Lower-cased tokens split on every run of non-letter/digit characters, as a set.</summary>
+    private static HashSet<string> Tokens(string s) => new(TokenList(s), StringComparer.Ordinal);
+
+    /// <summary>The same tokens in order, repeats kept - what an abbreviation is read against.</summary>
+    private static List<string> TokenList(string s)
+    {
+        var tokens = new List<string>();
         var lower = s.ToLowerInvariant();
         int start = -1;
         for (int i = 0; i <= lower.Length; i++)
@@ -67,11 +125,11 @@ internal static class FuzzyMatch
             if (inToken && start < 0) start = i;
             else if (!inToken && start >= 0)
             {
-                set.Add(lower[start..i]);
+                tokens.Add(lower[start..i]);
                 start = -1;
             }
         }
-        return set;
+        return tokens;
     }
 
     private static int RatioLower(string a, string b)

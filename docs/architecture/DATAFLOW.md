@@ -372,7 +372,11 @@ PowerShell.
     │   PackageManager.FindPackagesForUser("") → GetAppListEntriesAsync()
     │   (display name + AUMID), merged by AppCatalog.Merge, cached 5 min
     ├─► AppCatalog.Match: exact → prefix (shortest name) → fuzzy
-    │   max(PartialRatio, TokenSetRatio) ≥ 70 (highest, ties shortest name)
+    │   max(PartialRatio, TokenSetRatio, 95 − unread words when the request
+    │   abbreviates the name) ≥ 70 (highest, ties shortest name)
+    ├─► a top tie with an abbreviation in it → ArgumentException naming the
+    │   tied names ("'wt' could mean more than one app: …"); no refresh,
+    │   nothing launched
     ├─► a miss refreshes the cache ONCE, then re-matches
     └─► still nothing → KeyNotFoundException naming the five nearest with scores
     └─► IAppActivator.ActivatePackaged(AUMID)      → pid   (packaged)
