@@ -17,7 +17,8 @@ public interface IAppCatalogService
     /// <summary>
     /// The entry <paramref name="name"/> means: exact → prefix → fuzzy (score 70+). No match is a
     /// <see cref="KeyNotFoundException"/> naming the request and the five nearest entries with
-    /// their scores.
+    /// their scores; an abbreviation that fits two names equally is an <see cref="ArgumentException"/>
+    /// naming both, and does not refresh the cache.
     /// </summary>
     Task<AppMatch> ResolveAsync(string name, CancellationToken ct = default);
 }

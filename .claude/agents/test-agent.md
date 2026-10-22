@@ -2,6 +2,7 @@
 name: test-agent
 description: "Test-first coverage owner for the Windows-mcp repo. MUST BE USED BEFORE any production code is written for a feature, fix, parity item, or refactor: give it the requirements (the user's ask, a docs/design note, a parity-checklist item, a tool [Description] that must become true) and it writes the failing xUnit tests that pin those requirements down — red, compiling, failing for the right reason — plus the minimal Abstractions stubs the tests need. Use it AGAIN after the implementation lands to measure coverage of the changed code, close every gap against the requirement matrix, and prove the tests are not tautologies. It owns tests/WindowsMcp.Tests only, never writes implementation logic, and never commits."
 model: opus
+effort: high
 tools: Read, Grep, Glob, Bash, Edit, Write
 color: green
 ---

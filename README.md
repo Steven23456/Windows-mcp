@@ -269,7 +269,9 @@ opens Visual Studio Code, with no PowerShell anywhere in the path. It then polls
 inventory for up to `timeout_ms` (default 10 s) for a window of the launched process, or a new
 window whose title matches, and returns `{MatchedName, Kind, Score, Strategy, Pid, Hwnd, Title,
 WindowDetected}`. A wait that runs out is `WindowDetected: false` with the pid, not an error; a
-name that matches nothing lists the five nearest apps with their scores.
+name that matches nothing lists the five nearest apps with their scores, and an abbreviation
+that fits two apps equally (`wt`: Windows Terminal, Windows Tools) is an error naming both,
+with nothing launched.
 
 `window(action: "move" | "resize" | "set_bounds", ...)` places a window: `move` needs `x`/`y`,
 `resize` needs `width`/`height`, `set_bounds` all four. The target is a `title`/`hwnd` matched the

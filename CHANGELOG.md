@@ -801,6 +801,45 @@
   instance was collected, Windows would have dispatched the second one's messages through a freed
   delegate. `LayeredWindow` now holds one static procedure for every class it registers. Latent in
   production, which creates one `FlashOverlay` per process.
+- **`launch("vs code")` opens Visual Studio Code, not "QR Code Scanner"; abbreviations match.**
+  The B-8 fuzzy stage scored a name only by `max(PartialRatio, TokenSetRatio)`, which gives
+  `vs code` 73 against both Visual Studio Code and "QR Code Scanner" (they share only "code"), and
+  the tie went to the shorter name. `AppCatalog.Match` now also asks the new
+  `FuzzyMatch.AbbreviationUnread` whether the request **abbreviates** the name: its words are read
+  in order from the name's first word with no name word skipped, each request word of 2+
+  characters as a word prefix or as the initials of the next two or more name words; a request
+  read entirely as initials must reach the last word, and the best reading is the one with the
+  fewest name words left unread. Such a name scores 95 less one per unread word when that beats
+  the scorers, so `vs code` gives Visual Studio Code 95 and its Insiders build 94, `wt` reads
+  Windows Terminal and `ssms` SQL Server Management Studio, while `mps` does not read "VLC media
+  player skinned", `uy` does not read "Uninstall YubiKey Manager" and `7z` does not read "7-Zip
+  File Manager". The search is memoized, so a crafted name cannot make it exponential. Exact and
+  prefix matching are unchanged, and 95 stays below a scorer's 100.
+- **An ambiguous abbreviation is refused instead of guessed.** When two or more apps tie at the
+  top fuzzy score and at least one of them got it only through an abbreviation, `launch` starts
+  nothing and returns the `ArgumentException` naming them: `'wt' could mean more than one app:
+  'Windows Terminal' (95), 'Windows Tools' (95). Use more of the name.` It is deliberately not a
+  `KeyNotFoundException`, so `AppCatalogService.ResolveAsync` does not refresh the catalog for it
+  (a fresh catalog would be just as ambiguous). Ties the scorers alone decide still go to the
+  shortest name. `IAppCatalogService.ResolveAsync` and `AppMatch` document the refusal.
+- **One unreadable Start Menu folder no longer empties the shortcut half of the catalog.**
+  `Directory.EnumerateFiles` is lazy, so a subfolder the user could not read threw from inside the
+  loop, outside its `try`, and the source's catch then dropped every shortcut from **both** roots.
+  `AppCatalogService.ScanStartMenu(roots)` now walks with `EnumerationOptions`
+  (`IgnoreInaccessible`, `AttributesToSkip = 0` so Hidden and System folders such as
+  Administrative Tools are still listed, as before, `*.lnk` ignoring case) and stops
+  `MaxStartMenuDepth` = 8 folders below a root, so a junction back to a root cannot loop; a
+  per-root `try` keeps whatever a broken walk had already read.
+- **Tests / CI: the app-catalog Integration tests no longer assume this machine's apps.** CI on
+  `main` was red in three `AppCatalogServiceIntegrationTests`: the GitHub Windows runner has
+  Calculator and Notepad as Start Menu shortcuts, not packaged apps, and has no VS Code. The
+  Calculator/Notepad test now accepts either form (an existing `.lnk`, or an AUMID), and the
+  VS Code test is a new `[StartMenuShortcutFact("Visual Studio Code")]` that skips, naming the
+  shortcut and both roots, when no such shortcut exists — it decides through the same
+  `ScanStartMenu`. New `[JunctionFact]` fixture and `AppCatalogServiceStartMenuScanTests`
+  (recursion, case, Hidden/System, the depth cap, and deny-ACL and junction Integration tests).
+  No new tool or service: still 69 tools and 40 services. Design note:
+  `docs/design/B-8-launch-catalog.md`.
 - **HTTP-mode log lines carry a local timestamp, and the plain-HTTP warning is one of them.**
   Over `--transport http` nothing prefixes the server's stderr — a console window, a redirected
   file, a scheduled task's log — so no entry could be placed in time. Each one now starts with
