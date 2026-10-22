@@ -112,11 +112,13 @@ function names are the stable anchor.
 | S-8 | Unauthenticated `/health` | P2 | S | — | ☐ |
 | S-9 | Claude Desktop Extension (`.mcpb`) + registry `server.json` | P3 | M | — | ☐ |
 | S-10 | Per-tool black-box tester skill | P3 | S | — | ☐ |
+| S-11 | AI-control indicator + takeover hotkey (indicator only — no gating) | P2 | M | A-14 · [S-11](design/S-11-control-indicator.md) | ☑ on its branch, not yet merged |
 
 **Suggested order.** **All defects (D-1 … D-9) are done** — the D section is closed — and **so are
 sections A, B and C** (A-5's Firefox phase and D-2's `interact_element(type) clear` are the open
-sub-items; A-12's phase 2 is not planned). What is left is section S: the quick wins S-8 and S-1
-can be interleaved anywhere; S-4 last.
+sub-items; A-12's phase 2 is not planned). What is left is section S: S-11 (the control
+indicator) is done on `feature/control-indicator`; the quick wins S-8 and S-1 can be interleaved
+anywhere; S-4 last.
 The section-A sequencing, cross-item decisions (coordinate space, defaults, tool count, element
 ids, env vars) and per-item test seeds are in [`docs/design/A-roadmap.md`](design/A-roadmap.md).
 The section-B plan (four phases, the element-target resolver, window matcher, typing planner and
@@ -1260,6 +1262,36 @@ cleanup, VM/Sandbox recommendation for destructive tools.
 
 **Sketch.** `skills/windows-tool-tester/SKILL.md` adapted to our 69 tools and `confirm:true`
 gates; wire into the plugin manifest.
+
+### S-11 — AI-control indicator and takeover hotkey  `P2 · M`
+- [x] Done 2026-10-21 on branch `feature/control-indicator`, not yet merged — [design note](design/S-11-control-indicator.md); in `CHANGELOG.md [Unreleased]`, ships with the next release
+
+**Upstream (0.8.8, PR #445; policies and opt-out added after it, PRs #458/#460/#466).** A
+desktop-control layer:
+- an owner gate on tool calls, with relaxed/balanced/strict policies;
+- physical input blocked through low-level hooks while the AI acts;
+- a takeover on a large mouse movement or Ctrl+Alt+Shift+Backspace, until 10 s of idle;
+- a blue edge and cursor glow plus a top notice, and a `ControlStatus` tool.
+
+Two bugs followed within a week: #456 (the gate latched forever on a missed key-up) and #457 (the
+agent was refused whenever the user touched the mouse).
+
+**Ours (before S-11).** Nothing; the pointer moved with no explanation. Now
+`--control-indicator on|off` / `WINDOWSMCP_CONTROL_INDICATOR` (default on, both transports) and
+`--control-hotkey <combo>` / `WINDOWSMCP_CONTROL_HOTKEY` (default `ctrl+alt+shift+backspace`;
+ctrl, alt or win must be written) — see the design note.
+
+**Decision (2026-10-21, deliberate deviation).** The indicator only:
+- a cursor ring and a hotkey banner while a driving tool runs, fading 5 s after the last one;
+- takeover by the key combination alone, which hides the indicator and adds a one-time note to
+  the AI's next tool result;
+- **no** gating of tool calls, **no** input blocking, **no** `ControlStatus` tool.
+
+See the design note for the shape and the requirement matrix.
+
+**Done when.** A `click` shows the ring and banner and they fade 5 s later. No capture contains
+them. The hotkey hides them, and the next result carries the note exactly once. `--control-indicator
+off` shows nothing.
 
 ---
 

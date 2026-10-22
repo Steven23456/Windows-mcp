@@ -90,10 +90,13 @@ $env:WINDOWSMCP_API_KEY = "<a long random secret>"
 | `--flash <on\|off>` | `WINDOWSMCP_FLASH` | `on` | Orange glow around the captured area for ~3.5 s after every `screenshot` — the signal to a person at the machine; also applies to **stdio** |
 | `--profile-snapshot <on\|off>` | `WINDOWSMCP_PROFILE_SNAPSHOT` | `off` | Per-stage timings on `snapshot`/`screenshot` results, also logged to stderr; also applies to **stdio** |
 | `--screenshot-backend <auto\|gdi\|wgc>` | `WINDOWSMCP_SCREENSHOT_BACKEND` | `auto` | Which backend reads the screen when a `screenshot` call says `auto`: `wgc` = Windows.Graphics.Capture, `gdi` = the classic screen copy; also applies to **stdio** |
+| `--control-indicator <on\|off>` | `WINDOWSMCP_CONTROL_INDICATOR` | `on` | Pointer ring and takeover banner while a tool drives the mouse or keyboard (see [When the AI drives the mouse](#when-the-ai-drives-the-mouse)); also applies to **stdio** |
+| `--control-hotkey <combo>` | `WINDOWSMCP_CONTROL_HOTKEY` | `ctrl+alt+shift+backspace` | The combination a person presses to take over; ctrl, alt or win must be written out (shift alone is refused) plus one key; also applies to **stdio** |
 
 `WindowsMcp.exe --help` prints the same options (it lists `--screenshot-scale`,
 `--max-tree-elements`, `--flash`, `--profile-snapshot` and `--screenshot-backend` under a
-"Capture options (both transports)" heading, since none of them is HTTP-only). No arguments =
+"Capture options (both transports)" heading, and `--control-indicator` and `--control-hotkey`
+under "Control indicator (both transports)", since none of them is HTTP-only). No arguments =
 stdio, unchanged.
 
 One tool behaves differently on this transport: `scrape(summarize: true)` asks *your* client's
@@ -166,6 +169,37 @@ or in `.mcp.json`:
 ```
 
 The host name in the URL must match the certificate's `-DnsName`.
+
+## When the AI drives the mouse
+
+While a tool that moves the pointer, presses keys or changes focus is running (`click`, `drag`,
+`hover`, `type`, `key`, `shortcut`, `scroll`, `multi_select`, `multi_edit`, `interact_element`,
+`file_dialog`, `focus`, `switch_to_window`), a person at the machine sees a blue ring around the
+pointer and a dark banner at the top of the pointer's monitor:
+
+> AI is controlling mouse & keyboard · Ctrl+Alt+Shift+Backspace to take over
+
+It stays up while any of those calls is running and fades 5 s after the last one ends. Pressing
+the combination hides it at once, and the agent's next tool result — from any tool — ends with
+one extra block, once:
+
+> Note: the user pressed Ctrl+Alt+Shift+Backspace at 14:03:12 (4 s ago) and took over the mouse
+> and keyboard; the screen may have changed since your last snapshot.
+
+That is all a takeover does. **Nothing is ever refused, delayed or cancelled, and your own mouse
+and keyboard are never blocked**: the indicator informs, it does not gate the agent the way
+upstream's desktop-control layer does. Moving the mouse is not a takeover; only the combination
+is. The combination is registered only while the indicator is showing, so other applications
+have it the rest of the time; if another application already holds it, the banner leaves the hint
+out and the server logs a warning.
+
+The ring and banner are click-through, never take focus, are not listed by `window` or
+`snapshot`, and never appear in a `screenshot` or `ocr` capture (on Windows 10 before 2004 they
+are hidden for the moment of each capture instead). The indicator is on by default under both
+transports. Turn it off with `--control-indicator off` (`WINDOWSMCP_CONTROL_INDICATOR=off`), or
+choose another combination with `--control-hotkey <combo>` (`WINDOWSMCP_CONTROL_HOTKEY`), such as
+`ctrl+alt+f12`. Like the other desktop tools it needs the interactive session: run as a service
+or a Session-0 task, there is no desktop to draw on and it does nothing.
 
 ## Companion skill
 

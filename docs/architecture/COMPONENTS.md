@@ -46,7 +46,8 @@ static async Task<int> RunStdioAsync(string[] args, ServerOptions options)
     var builder = Host.CreateApplicationBuilder(args);
     WindowsMcpHost.ConfigureStderrLogging(builder.Logging, http: false);
     builder.AddWindowsMcp(options)      // Hosting/WindowsMcpHost: all singletons + AddMcpServer(ServerInfo)
-        .WithStdioServerTransport();    //   + ToolErrors call-tool filter + WithToolsFromAssembly()
+        .WithStdioServerTransport();    //   + call-tool filter (ToolErrors; S-11's indicator bracket
+                                        //   and takeover note) + WithToolsFromAssembly()
     await builder.Build().RunAsync();
     return 0;
 }
@@ -69,6 +70,7 @@ static async Task<int> RunHttpAsync(ServerOptions options)
 | Interface | Implementation |
 |-----------|---------------|
 | `IFlashOverlay` | `FlashOverlay` (always registered; the screen tools gate on `ScreenshotOptions.Flash`) |
+| `IControlIndicator` | `ControlIndicator` (S-11; always registered beside the `ControlIndicatorOptions` record from `--control-indicator` / `--control-hotkey`; nothing is created until the first driving call, and nothing ever when off) |
 | `IInputService` | `InputService` |
 | `IScreenshotService` | `ScreenshotService` |
 | `IOcrService` | `OcrService` |
@@ -396,6 +398,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 | `IInputService` | `ClickAsync`, `DragAsync` (and the B-2 overload `(…, durationMs, steps)`), `HoverAsync`, `TypeAsync` (and the B-1 overload `(text, TypeOptions)` → `TypeResult` with `Method`/`ClipboardRestored`), `PressKeyAsync`, `PressShortcutAsync`, `ScrollAsync` (and the B-3 overload `(…, shiftWheel)`), `KeyDownAsync(key)` / `KeyUpAsync(key)` (B-7: hold and release a modifier for `multi_select`), `GetCursorPositionAsync` → `CursorPosition` |
 | `IScreenshotService` | `CaptureAsync(region?, options?)` → `ScreenshotResult` (`CaptureOptions`: format, max size, scale, quality, cursor, annotations, grid, profile, backend) |
 | `IFlashOverlay` | `Show(rect, duration)`, `Hide()`, `IsVisible` — the post-capture glow; every member is a silent no-op with no interactive window station |
+| `IControlIndicator` | `BeginAction()` / `EndAction()` (a driving tool starts / ends; the last end starts the 5 s fade), `IsVisible`, `IsCaptureExcluded` (display affinity keeps both windows out of every capture), `SuspendForCapture()` → `IDisposable` (the windows are down until it is disposed, unless `IsCaptureExcluded`), `ConsumeTakeover()` → `TakeoverRecord?` (once, then null) — S-11; nothing refuses or blocks, nothing throws, and every member is a silent no-op when off, disposed or with no interactive window station |
 | `IOcrService` | `ExtractTextAsync(region?)` → text |
 | `IClipboardService` | `GetTextAsync`, `SetTextAsync` |
 | `IAudioService` | `GetAsync` → `AudioState`, `SetVolumeAsync`, `SetMutedAsync` |
@@ -437,7 +440,7 @@ Located in `src/WindowsMcp.Abstractions/`. Each interface is a separate file.
 
 ## Data Models (`WindowsMcp.Abstractions.Models`)
 
-Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 23 files):
+Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 24 files):
 
 | File | Key Types |
 |------|-----------|
@@ -464,6 +467,7 @@ Located in `src/WindowsMcp.Abstractions/Models/` (one DTOs file per domain, 23 f
 | `IntegrityDtos.cs` | `IntegrityItem`, `IntegrityBaseline`, `IntegrityChange`, `IntegrityCheckResult` |
 | `UsnDtos.cs` | `UsnStatus`, `UsnChange`, `UsnReadResult` |
 | `WatchDtos.cs` | `WatchSession`, `WatchEvent` |
+| `ControlIndicatorDtos.cs` | `HotkeyChord` (S-11: `Modifiers` in `RegisterHotKey` flags — `ModAlt` 1, `ModControl` 2, `ModShift` 4, `ModWin` 8 — `Key` as a virtual-key code, `Display` such as `Ctrl+Alt+Shift+Backspace`; `Default`), `ControlIndicatorOptions` (`Enabled`, `Hotkey`, `Linger` — 5 s in `Default`), `TakeoverRecord` (`At`, wall-clock UTC, and `Hotkey`) |
 
 **Model pattern** — all DTOs are C# records:
 ```csharp
@@ -577,7 +581,7 @@ capacity is exceeded and counts trimmed chars — the unit-testable core of job 
 Two frame sources (GDI or Windows.Graphics.Capture) + **SkiaSharp** downscale, annotate and encode. `IDisposable`, because the WGC path holds a D3D11 device; the container disposes the singleton:
 - `ResolveBackend(requested, processDefault)` — pure: a call's `auto` becomes the process default (`--screenshot-backend`), anything else wins; the answer is lower-case and validated (`auto|gdi|wgc`) before anything is allocated, so a bad backend never costs a capture
 - `AcquireFrame(rect, backend)` — `gdi` is the classic `Graphics.CopyFromScreen`, copied out of the locked GDI buffer into a writable `SKBitmap`; `wgc` goes to `WgcCaptureBackend` (one `GraphicsCaptureItem` per monitor the rect touches, each frame copied through a D3D11 staging texture and blitted into the rect) and **throws** naming the rect when the compositor cannot serve it; `auto` prefers WGC where it is supported and falls back to GDI silently. The returned pair carries the backend that actually produced the frame, which is what `ScreenshotResult.Backend` and the tool's `backend` metadata report — never `auto`
-- `CaptureAsync(region?, options?)` — frame (null region = the primary display) → cursor → fit → downscale → encode. With `CaptureOptions.IncludeCursor` the pointer is composited onto the full-resolution frame first (real cursor icon through `DrawIconEx` on a GDI view over the Skia pixels, else `CursorOverlay.DrawRing`), then the bitmap is resized to `ScaleMath.Fit(...)` with a Mitchell cubic filter when that changes the size, and encoded as PNG or JPEG at `Quality`. With `CaptureOptions.Profile` the service adds `capture`/`cursor`/`resize`/`encode` `StageTiming`s and logs the same numbers to stderr at Information
+- `CaptureAsync(region?, options?)` — frame (null region = the primary display) → cursor → fit → downscale → encode. The frame — including an `auto` → GDI fallback — is acquired inside one `IControlIndicator.SuspendForCapture()` scope when the container injected an indicator (an optional constructor argument; S-11), so the ring and banner are never in the picture: a no-op where display affinity already excludes them, a hide-and-restore around the grab below Windows 10 2004. With `CaptureOptions.IncludeCursor` the pointer is composited onto the full-resolution frame first (real cursor icon through `DrawIconEx` on a GDI view over the Skia pixels, else `CursorOverlay.DrawRing`), then the bitmap is resized to `ScaleMath.Fit(...)` with a Mitchell cubic filter when that changes the size, and encoded as PNG or JPEG at `Quality`. With `CaptureOptions.Profile` the service adds `capture`/`cursor`/`resize`/`encode` `StageTiming`s and logs the same numbers to stderr at Information
 - `EncodeAnnotated(bmp, format, quality, boxes, captured, coordinateScale, grid)` — the encode step both paths route through. With no boxes and no grid it is byte-identical to `Encode`; otherwise it copies the bitmap first (the unscaled path's `SKBitmap` is a zero-copy view of a read-only GDI lock), hands the copy to `Annotator.Draw`, and reports how many boxes landed. Drawing happens **after** the downscale, so a 2 px box and an 11 px chip stay legible at the output size and map through the same `CoordinateScale` the metadata reports
 - Returns `ScreenshotResult(Bytes, Width, Height, Format, OriginalWidth, OriginalHeight, CoordinateScale, CursorDrawn, AnnotationsDrawn, Stages, Backend)`; the `screenshot` tool turns that into an image content block plus a metadata text block (`output="file"` writes to `%TEMP%\WindowsMcp` and returns the path instead)
 - Which rect to capture is the tool's decision (`RegionMath` over `IWindowService.EnumerateMonitorsAsync`); the service captures whatever rect it is handed
@@ -609,9 +613,19 @@ A-12 phase 1 — read-only virtual-desktop facts, from the registry through `IRe
 ### `FlashOverlay`
 
 A-14 — the post-capture glow, and the only signal a person at the target machine gets that an agent captured their screen:
-- A `WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` window on its own thread with its own message loop, painted by `UpdateLayeredWindow` from a Skia bitmap the pure `FlashGlow` draws. Click-through, non-activating, and a tool window, so it is invisible to `window list` and to `snapshot`
+- A `WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` window on its own thread with its own message loop, painted by `UpdateLayeredWindow` from a Skia bitmap the pure `FlashGlow` draws. Click-through, non-activating, and a tool window, so it is invisible to `window list` and to `snapshot`. The window itself — class registration, creation, the DIB paint, the top-most show — is the shared `LayeredWindow` helper (S-11), whose one static window procedure outlives every instance that registers a class
 - `Show(rect, duration)` hides any glow already up and replaces it; `Hide()` is idempotent and is called before **every** capture, whatever `--flash` says, so the glow can never be in a picture. The thread only starts on the first `Show`, so an off switch costs nothing
 - Nothing here throws: with no interactive window station (Task Scheduler, session 0) every member is a silent no-op and `IsVisible` stays false — which is why the tool reports `flash` from `IsVisible` rather than from the switch
+
+### `ControlIndicator`
+
+S-11 — the "AI is in control" ring and banner, and the user's takeover by key combination. Information, never control: nothing here refuses, delays or cancels a tool call, and no physical input is blocked:
+- **Lifetime.** The call-tool filter calls `BeginAction()` before and `EndAction()` after every tool in `Hosting/DrivingTools.Names` (`click`, `drag`, `hover`, `type`, `key`, `shortcut`, `scroll`, `multi_select`, `multi_edit`, `interact_element`, `file_dialog`, `focus`, `switch_to_window`). The pure `ControlIndicatorState` refcounts the calls in flight (HTTP clients can overlap), clamps an unbalanced end at zero, and keeps the indicator visible until `Linger` (5 s) after the last end — measured on the monotonic clock, so a wall-clock step back cannot hold it up. A `BeginAction` during the fade cancels the fade
+- **Windows.** A lazily started STA thread owns two `LayeredWindow`s of one shared class: a ring around the pointer and a pill banner centred just below the top of the work area of the pointer's monitor, both painted by the pure `ControlIndicatorArt` at that monitor's DPI. One tick — every 16 ms while shown, 100 ms otherwise — asks the state whether to show, so it is both the pointer follower and the fade; the ring is repainted only when the DPI changes and the banner only when the monitor changes. `BeginAction` runs a tick on the thread and waits at most 50 ms for it
+- **Takeover.** The combination is `RegisterHotKey`'d against the banner (with `MOD_NOREPEAT`) only while the indicator is shown and unregistered when it hides. `WM_HOTKEY` is taken off the thread's own queue (the window class is shared, so its procedure cannot know which instance it serves); a press while shown dismisses the indicator even with calls in flight and records `TakeoverRecord(At, Hotkey)`, the latest winning; `ConsumeTakeover()` hands it out once. A combination that cannot be registered leaves the hint off the banner and logs one warning per instance
+- **Never in a picture.** On Windows 10 2004+ (build ≥ 19041) both windows get `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` and `IsCaptureExcluded` is true, so `SuspendForCapture()` returns a no-op scope. Below that build the affinity would black-box the windows instead, so none is applied and `SuspendForCapture()` takes them down synchronously before the grab and lets them back once the last open scope is disposed; with no overlay thread yet there is nothing on screen and no thread is started
+- **A courtesy, never a failure.** Every member is a silent no-op when `--control-indicator off` (nothing is created and nothing registered), after `Dispose`, or with no interactive window station; the filter also swallows anything the indicator throws, so it can never fail a tool call
+- **Seams** (`internal`, for the tests): `ExcludeFromCapture` (false lets a capture see the windows), `OsBuild`, `OnShowForTest`, `RingHandle`/`BannerHandle`, `IsHotkeyRegistered`. `Hosting/HotkeyParser` turns `--control-hotkey` text into a `HotkeyChord` through `ShortcutParser.ResolveKey`: modifiers then one key, with ctrl, alt or win **written** (shift alone, or a modifier the layout implies for the key, does not count; implied modifiers are still registered)
 
 ### `ProcessService` — the CPU sample and the graceful kill
 
@@ -662,7 +676,7 @@ takes a shorter timeout so a test can prove the timeout path):
   `ReverseMarkdown` recurses once per level and overflowed the stack near 900, which no `catch`
   can stop and which took the whole server down mid-call
 
-### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `Annotator`, `FlashGlow`, `UiText`, `WindowFilter`, `VirtualDesktopRegistry`, `FuzzyMatch`, `WindowMatcher`, `ForegroundLadder`, `AppCatalog`, `LaunchWait`, `WindowGeometry`, `ArgvJson`, `TypePlanner`, `DragPath`, `BatchTargets`, `RegistryGuard`, `LineWindow`, `CpuSample`, `PathCanonical`, `DomPage`, `ScrapeSummary`, `TextCap`)
+### Pure helpers (`ScaleMath`, `RegionMath`, `CursorMath`, `CursorOverlay`, `Annotator`, `FlashGlow`, `ControlIndicatorArt`, `UiText`, `WindowFilter`, `VirtualDesktopRegistry`, `FuzzyMatch`, `WindowMatcher`, `ForegroundLadder`, `AppCatalog`, `LaunchWait`, `WindowGeometry`, `ArgvJson`, `TypePlanner`, `DragPath`, `BatchTargets`, `RegistryGuard`, `LineWindow`, `CpuSample`, `PathCanonical`, `DomPage`, `ScrapeSummary`, `TextCap`)
 
 `internal static` classes in `Services/` with no Win32, no screen and no UIA dependency, so every
 rule is unit-tested headless:
@@ -672,6 +686,7 @@ rule is unit-tested headless:
 - `CursorOverlay` — `RingPoint` (cursor rebased onto the captured rect, null when outside) and `DrawRing` (white 3 px ring at radius 12, black 2 px at radius 8)
 - `Annotator` — A-6's drawing core (SkiaSharp only, no screen): a twelve-colour opaque `Palette` indexed by list position via `ColorFor`, so a colour always means the same label even when an off-image box is skipped; `ToImage` maps virtual-desktop `Bounds` to image pixels (subtract the captured origin, divide by the coordinate scale, round half **away from zero**, widen a sub-pixel box to 1 px, clip — null when nothing is in the picture); `ChipRect` places the label chip just above the box's top-left, inside the box when there is no room, never off the image; `UseDarkText` picks black or white by luminance; `Draw` paints the grid first, then each box as a 2 px stroke plus a filled chip, and returns how many were drawn. Grid lines are translucent dark grey at every interior division, captioned with the **virtual-desktop** coordinate, not the image pixel
 - `FlashGlow` — A-14's glow as pixels: `WindowRect` inflates the captured rect by the 10 px band, `Render` paints an orange band fading outward with the captured area left fully transparent, so the picture underneath is untouched
+- `ControlIndicatorArt` — S-11's indicator as pixels and positions, blue so it is never mistaken for the orange flash: `CursorRing(dpiScale)` (a 56 px square at 96 DPI — a soft halo, a solid stroke and a thin white inner line, the centre left transparent so the pointer is never tinted), `Banner(text, dpiScale)` (a 32 px-high dark pill sized to the text, a blue dot and white Segoe UI text), `BannerText(hotkey?)` (the hint is dropped when the combination could not be registered), `RingRect` (centred on the pointer) and `BannerRect` (centred in the work area, 12 px below its top at 96 DPI). Premultiplied BGRA for `UpdateLayeredWindow`; a non-positive or NaN scale is an `ArgumentOutOfRangeException`
 - `VirtualDesktopRegistry` — A-12's core over the two Explorer registry blobs: `Parse(ids, current, nameOf)` yields one `VirtualDesktopInfo` per complete 16-byte GUID in registry order (a trailing partial GUID is ignored), flags the one `current` names, and falls back to `Desktop N` when no name is stored; `Id` is the wire form (lower-case, dashed, no braces) and `GuidKey` the registry subkey form (upper-case, braced)
 - `FuzzyMatch` — B-10's three `thefuzz` scorers, in-repo and package-free: `Ratio` (`round(200 × LCS / (|a| + |b|))`, away from zero), `PartialRatio` (the best `Ratio` of the shorter string against every same-length window of the longer) and `TokenSetRatio` (lower-case, split on every non-alphanumeric run, best of the three shared/own token comparisons). Every score is 0–100 and case-insensitive; two empty strings score 100, one empty against a non-empty 0
 - `WindowMatcher.Match(inventory, title?, hwnd?)` — the single title-to-window resolver for `switch_to_window`, `focus` and `window(action:…)`: an `hwnd` wins and never fuzzes, else exact (ordinal, ignoring case) → substring → fuzzy (`max(PartialRatio, TokenSetRatio) >= 70`), ties inside one strategy going to the lowest `ZOrder` (the frontmost). Minimised windows are candidates. Neither argument is an `ArgumentException`; nothing matched is a `KeyNotFoundException` listing up to 15 open titles and the nearest score. Deliberately **not** `UIAutomationService.MatchWindows`, which stays exact-then-substring — a snapshot scope must not fuzz

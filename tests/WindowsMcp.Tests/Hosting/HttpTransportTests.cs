@@ -58,8 +58,13 @@ public class HttpTransportTests
             Action<IServiceCollection>? configureServices = null)
         {
             // Port 0: Kestrel picks a free port and reports it via IServerAddressesFeature —
-            // no pick-then-bind race.
-            var options = new ServerOptions(TransportKind.Http, "127.0.0.1", 0, cert?.Thumbprint, apiKey);
+            // no pick-then-bind race. S-11 (D1): the control indicator is OFF here. It is on by
+            // default under both transports, so without this every test that calls a driving tool
+            // (switch_to_window's miss, multi_select's refusal, ...) would draw a ring and a banner
+            // on the desktop and register the user's real Ctrl+Alt+Shift+Backspace. The filter
+            // tests swap in a mock IControlIndicator through configureServices, and the
+            // real-indicator pipeline test re-enables it with a test-only chord the same way.
+            var options = new ServerOptions(TransportKind.Http, "127.0.0.1", 0, cert?.Thumbprint, apiKey, ControlIndicator: false);
             var app = WindowsMcpHost.BuildHttpApp(options, cert, configureServices);
             await app.StartAsync();
 
@@ -1570,6 +1575,34 @@ public class HttpTransportTests
         result.IsError.Should().BeTrue();
         result.Content.OfType<TextContentBlock>().Single().Text
             .Should().Contain("Open windows", "the miss is only actionable with the inventory beside it");
+    }
+
+    /// <summary>
+    /// S-11 (D1): the harness runs with the control indicator off, so a driving tool called by any
+    /// test in this class neither draws on the desktop nor takes the user's real takeover
+    /// combination. Asserted on the container's REAL indicator after a real driving call, not on
+    /// the options record alone: an options record that said "off" while the indicator was built
+    /// from <c>ControlIndicatorOptions.Default</c> would still draw.
+    /// </summary>
+    [Fact]
+    public async Task The_harness_runs_with_the_control_indicator_off_so_driving_tools_draw_nothing()
+    {
+        await using var server = await Harness.StartAsync();
+        await using var client = await ConnectAsync(server.McpEndpoint);
+        var tools = await client.ListToolsAsync();
+
+        await client.CallToolAsync(ToolName(tools, "switchtowindow"), new Dictionary<string, object?>
+        {
+            ["title"] = "no-such-window-" + Guid.NewGuid().ToString("N"),
+        });
+
+        server.App.Services.GetRequiredService<ControlIndicatorOptions>().Enabled.Should().BeFalse();
+        var indicator = server.App.Services.GetRequiredService<IControlIndicator>()
+            .Should().BeOfType<WindowsMcp.Services.ControlIndicator>("the harness keeps the real registration, switched off").Subject;
+        indicator.IsVisible.Should().BeFalse("switch_to_window is a driving tool, and the harness's indicator is off");
+        indicator.RingHandle.Should().Be(0, "off means no window is ever created");
+        indicator.BannerHandle.Should().Be(0);
+        indicator.IsHotkeyRegistered.Should().BeFalse("and the user's real combination is never registered by a test");
     }
 
     /// <summary>C-1 R4-7: and the commonest one of all — a file that is not there.</summary>

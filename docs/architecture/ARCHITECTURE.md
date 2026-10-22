@@ -21,7 +21,7 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
 │  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘  │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐  │
 │  │ProcessTools│ │ScreenTools │ │  WebTools  │ │RegistryTls │ │NetworkTls  │  │
-│  │  6 tools   │ │  2 tools   │ │  2 tools   │ │  2 tools   │ │  2 tools   │  │
+│  │  6 tools   │ │  2 tools   │ │  2 tools   │ │  3 tools   │ │  2 tools   │  │
 │  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘  │
 │  ShellTools(1) · JobTools(1) · DiskTools(1) · StorageTools(1)                │
 │  SecurityTools(3) · StartupTools(1) · IntegrityTools(1)                      │
@@ -37,7 +37,8 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
 │  IRegistryService · IServiceControlService · IEventLogService                │
 │  ITaskSchedulerService · IProcessService · IWindowService · IWmiService      │
 │  IEnvService · IPowerService · INotificationService · INetworkService        │
-│  IWebService · IVirtualDesktopService · IFlashOverlay  (39 interfaces total) │
+│  IWebService · IVirtualDesktopService · IFlashOverlay · IControlIndicator    │
+│                                                 (40 interfaces total)        │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │ implemented by
                                     ▼
@@ -49,8 +50,8 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
 │  RegistryService · ServiceControlService · EventLogService                   │
 │  TaskSchedulerService · ProcessService · WindowService · WmiService          │
 │  EnvService · PowerService · NotificationService · NetworkService            │
-│  WebService · VirtualDesktopService · FlashOverlay                           │
-│               (39 singletons — registered in Hosting/WindowsMcpHost)         │
+│  WebService · VirtualDesktopService · FlashOverlay · ControlIndicator        │
+│               (40 singletons — registered in Hosting/WindowsMcpHost)         │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -82,6 +83,7 @@ The MCP SDK (`ModelContextProtocol.Server`) handles all protocol concerns:
 - **Server Info**: `ServerInfo = new() { Name = "Windows-mcp", Version = Program.ServerVersion }` — the version comes from `<Version>` in `Directory.Build.props`
 - **Shared wiring**: `WindowsMcpHost.AddWindowsMcp(options)` holds the service registrations, server identity, caller-facing error filter and tool discovery, so both transports are configured identically; only the transport call differs.
 - **Caller-facing errors**: the call-tool filter returns `ToolErrors.MessageFor(ex)` — the exception's own message, capped at 2 000 characters — for `ArgumentException`, `InvalidOperationException`, `KeyNotFoundException`, `IOException`, `UnauthorizedAccessException` and `TimeoutException` (`ToolErrors.IsCallerFacing`), the deliberate answers a caller must be able to read. Everything else keeps the SDK's `"An error occurred invoking '<tool>'."` masking. See `DATAFLOW.md` → "Which exception the caller sees".
+- **Control indicator (S-11)**: the same filter runs a *driving* tool — one of the 13 names in `Hosting/DrivingTools.Names` (`click`, `type`, `shortcut`, `focus`, `switch_to_window`, …) — between `IControlIndicator.BeginAction()` and `EndAction()`, and appends a pending takeover to the next result of **any** tool as one extra, last text block (`WindowsMcpHost.TakeoverNote`). It never refuses, delays or cancels a call, and a fault in the indicator is swallowed rather than failing the tool. A cancelled call, or a fault the SDK masks, leaves the takeover pending for the next result. See `DATAFLOW.md` → "Control Indicator Flow".
 
 **Critical startup requirements** (handled in `Program.cs` before host build):
 ```csharp
@@ -161,7 +163,7 @@ public sealed class InputTools
 ### 3. Service Abstraction Layer (`WindowsMcp.Abstractions`)
 
 A separate assembly (`WindowsMcp.Abstractions.csproj`) containing:
-- **39 `IXxxService` interfaces** — define the contract for each domain
+- **40 `IXxxService` interfaces** — define the contract for each domain
 - **Model DTOs** in `WindowsMcp.Abstractions.Models` — records/classes shared between tools and services
 
 The abstraction layer exists so tool classes compile against interfaces, not concrete types. This enforces the dependency inversion principle and makes services independently testable.
@@ -191,7 +193,7 @@ public interface IInputService
 
 ### 4. Service Implementation Layer
 
-All 39 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as three options records — `ScreenshotOptions` (read by the screen tools), `UiTreeOptions` (injected into `UIAutomationService`) and `TransportOptions` (read by `WebTools`, which cannot sample the client over the stateless HTTP transport):
+All 40 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as four options records — `ScreenshotOptions` (read by the screen tools), `UiTreeOptions` (injected into `UIAutomationService`), `TransportOptions` (read by `WebTools`, which cannot sample the client over the stateless HTTP transport) and `ControlIndicatorOptions` (S-11, injected into `ControlIndicator`):
 
 ```csharp
 // --screenshot-scale, --flash, --profile-snapshot, --screenshot-backend
@@ -202,9 +204,13 @@ services.AddSingleton(new UiTreeOptions(options.MaxTreeElements, options.Profile
 // C-5: --transport http is stateless, so a sampling request has no session to travel on
 services.AddSingleton(new TransportOptions(Stateless: options.Transport == TransportKind.Http));
 services.AddSingleton<IFlashOverlay, FlashOverlay>();   // always registered; the tool gates on ScreenshotOptions.Flash
+// S-11: --control-indicator, --control-hotkey; always registered, nothing created until the first driving call
+services.AddSingleton(new ControlIndicatorOptions(options.ControlIndicator, options.ControlHotkey,
+    ControlIndicatorOptions.Default.Linger));
+services.AddSingleton<IControlIndicator, ControlIndicator>();
 services.AddSingleton<IInputService, InputService>();
-services.AddSingleton<IScreenshotService, ScreenshotService>();
-// ... (39 registrations)
+services.AddSingleton<IScreenshotService, ScreenshotService>();   // takes IControlIndicator (optional ctor arg)
+// ... (40 registrations)
 ```
 
 Services contain all business logic and directly call Windows APIs through platform packages. They are constructed once at host startup and shared across all tool invocations.
@@ -293,7 +299,9 @@ Windows-mcp.slnx
 │   │   ├── WindowsMcp.csproj              (targets net10.0-windows10.0.19041)
 │   │   ├── Program.cs                     (entry: env repair, AUMID + DPI setup, parse options, pick transport)
 │   │   ├── Hosting/                       (ServerOptions, WindowsMcpHost, CertificateLocator,
-│   │   │                                   EnvironmentRepair + PathMerge — C-6's pure Path merge)
+│   │   │                                   EnvironmentRepair + PathMerge — C-6's pure Path merge;
+│   │   │                                   HotkeyParser and DrivingTools — S-11's --control-hotkey
+│   │   │                                   parser and the driving-tool names)
 │   │   ├── Tools/                         (19 tool classes)
 │   │   │   ├── InputTools.cs
 │   │   │   ├── UIAutomationTools.cs
@@ -314,13 +322,16 @@ Windows-mcp.slnx
 │   │   │   ├── IntegrityTools.cs
 │   │   │   ├── UsnTools.cs
 │   │   │   └── WatchTools.cs
-│   │   ├── Services/                      (39 service implementations + helpers)
+│   │   ├── Services/                      (40 service implementations + helpers)
 │   │   │   ├── InputService.cs            (+ TypePlanner, DragPath, IKeyboardSink and
 │   │   │   │                               SimulatorKeyboardSink — B-1's typing plan and
 │   │   │   │                               keystroke seam, B-2's drag path, B-7's KeyDown/KeyUp)
 │   │   │   ├── BatchTargets.cs            (B-7: the pure parser behind multi_select/multi_edit)
 │   │   │   ├── UIAutomationService.cs
 │   │   │   ├── ScreenshotService.cs       (+ WgcCaptureBackend, Annotator, FlashOverlay, FlashGlow)
+│   │   │   ├── ControlIndicator.cs        (+ ControlIndicatorState, ControlIndicatorArt — S-11's
+│   │   │   │                               pure state and pixels; LayeredWindow — the overlay
+│   │   │   │                               window both it and FlashOverlay paint through)
 │   │   │   ├── UiTree/                    (snapshot core: UiNode, UiClassifier, ElementBudget,
 │   │   │   │                               UiTraverser, SnapshotRenderer, DomCorrection,
 │   │   │   │                               ElementTarget — B-4's element_id → point;
@@ -351,8 +362,8 @@ Windows-mcp.slnx
 │       ├── WindowsMcp.Abstractions.csproj
 │       ├── IInputService.cs
 │       ├── IUIAutomationService.cs
-│       ├── ... (39 interfaces)
-│       └── Models/                        (23 DTO files)
+│       ├── ... (40 interfaces)
+│       └── Models/                        (24 DTO files)
 │           ├── InputDtos.cs
 │           └── ...
 ├── tests/WindowsMcp.Tests/                (xUnit + Moq + FluentAssertions)

@@ -1,4 +1,6 @@
 using FluentAssertions;
+using SkiaSharp;
+using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Services;
 using Xunit;
@@ -193,5 +195,175 @@ public class ScreenshotServiceTests
             new CaptureOptions(ImageFormat.Png, MaxWidth: 0, MaxHeight: 0, IncludeCursor: false, Profile: true));
 
         result.Stages!.Select(x => x.Stage).Should().Equal(["capture", "cursor", "resize", "encode"]);
+    }
+}
+
+/// <summary>
+/// S-11 (R6): the control indicator is never in a picture. <c>CaptureAsync</c> is the single path
+/// <c>screenshot</c>, its annotated form and <c>ocr</c> share, so it brackets the frame acquisition
+/// with <see cref="IControlIndicator.SuspendForCapture"/> - a no-op when display affinity took
+/// effect, a hide/restore otherwise. Driven through the <c>WgcFrameSource</c> seam (backend "wgc"),
+/// so no desktop is read and this is a Unit test; whether affinity alone keeps the windows out of
+/// a real GDI/WGC frame is <see cref="ControlIndicatorDesktopTests"/>.
+/// </summary>
+[Trait("Category", "Unit")]
+public class ScreenshotServiceControlIndicatorTests
+{
+    private static readonly ScreenRegion Rect = new(100, 50, 40, 20);
+
+    /// <summary>The 0x0 tripwire: reaching the GDI frame path throws ArgumentException on any session.</summary>
+    private static readonly ScreenRegion Tripwire = new(0, 0, 0, 0);
+
+    /// <summary>An indicator that records every suspension: how many opened, how many closed, and whether one is open now.</summary>
+    private sealed class SuspensionRecorder : IControlIndicator
+    {
+        private int _open;
+        public int Opened;
+        public int Closed;
+        public bool IsOpen => Volatile.Read(ref _open) > 0;
+
+        public void BeginAction() { }
+        public void EndAction() { }
+        public bool IsVisible => true;
+        public bool IsCaptureExcluded => false;
+        public TakeoverRecord? ConsumeTakeover() => null;
+
+        public IDisposable SuspendForCapture()
+        {
+            Interlocked.Increment(ref Opened);
+            Interlocked.Increment(ref _open);
+            return new Scope(this);
+        }
+
+        private sealed class Scope(SuspensionRecorder owner) : IDisposable
+        {
+            private int _done;
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _done, 1) != 0) return;   // a double dispose is not a second close
+                Interlocked.Increment(ref owner.Closed);
+                Interlocked.Decrement(ref owner._open);
+            }
+        }
+    }
+
+    private static SKBitmap Frame(int width = 40, int height = 20)
+    {
+        var bmp = new SKBitmap(new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
+        bmp.Erase(new SKColor(128, 128, 128, 255));
+        return bmp;
+    }
+
+    private static CaptureOptions Options(string backend = "wgc") =>
+        new(ImageFormat.Png, MaxWidth: 0, MaxHeight: 0, Backend: backend);
+
+    [Fact]
+    public async Task CaptureAsync_acquires_the_frame_inside_a_capture_suspension()
+    {
+        var indicator = new SuspensionRecorder();
+        bool? openWhenGrabbed = null;
+        using var service = new ScreenshotService(indicator: indicator)
+        {
+            WgcFrameSource = _ => { openWhenGrabbed = indicator.IsOpen; return Frame(); },
+        };
+
+        var result = await service.CaptureAsync(Rect, Options());
+
+        result.Backend.Should().Be("wgc");
+        openWhenGrabbed.Should().BeTrue("the indicator's windows must be out of the way at the moment the frame is taken");
+        indicator.Opened.Should().Be(1, "one capture, one suspension");
+        indicator.Closed.Should().Be(1, "and the suspension is closed again, so the indicator comes back");
+        indicator.IsOpen.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CaptureAsync_closes_the_suspension_when_the_compositor_refuses()
+    {
+        // backend "wgc" refuses loudly when the compositor cannot serve: the windows must not be
+        // left hidden behind the refusal.
+        var indicator = new SuspensionRecorder();
+        using var service = new ScreenshotService(indicator: indicator) { WgcFrameSource = _ => null };
+
+        Func<Task> act = () => service.CaptureAsync(Rect, Options());
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        indicator.Opened.Should().Be(1, "the acquisition was attempted inside a suspension");
+        indicator.Closed.Should().Be(1, "a failed grab still restores the indicator (try/finally, not a happy-path dispose)");
+    }
+
+    [Fact]
+    public async Task CaptureAsync_holds_one_suspension_across_the_auto_fallback_to_gdi()
+    {
+        // auto asks the compositor first and falls back to GDI: one acquisition, one suspension -
+        // not a restore between the two attempts, which would put the ring in the GDI frame.
+        var indicator = new SuspensionRecorder();
+        bool? openWhenAsked = null;
+        using var service = new ScreenshotService(indicator: indicator)
+        {
+            WgcFrameSource = _ => { openWhenAsked = indicator.IsOpen; return null; },
+        };
+
+        Func<Task> act = () => service.CaptureAsync(Tripwire, Options("auto"));
+
+        await act.Should().ThrowAsync<ArgumentException>("the GDI path was reached through the 0x0 tripwire");
+        openWhenAsked.Should().BeTrue();
+        indicator.Opened.Should().Be(1, "the fallback happens inside the same suspension");
+        indicator.Closed.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_with_an_invalid_backend_never_suspends()
+    {
+        // The backend is decided before anything is allocated: a bad argument must not flicker the
+        // indicator either.
+        var indicator = new SuspensionRecorder();
+        using var service = new ScreenshotService(indicator: indicator) { WgcFrameSource = _ => Frame() };
+
+        Func<Task> act = () => service.CaptureAsync(Rect, Options("dxcam"));
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        indicator.Opened.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_with_a_cancelled_token_never_suspends()
+    {
+        var indicator = new SuspensionRecorder();
+        using var service = new ScreenshotService(indicator: indicator) { WgcFrameSource = _ => Frame() };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Func<Task> act = () => service.CaptureAsync(Rect, Options(), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        indicator.Opened.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_suspends_once_per_capture()
+    {
+        var indicator = new SuspensionRecorder();
+        using var service = new ScreenshotService(indicator: indicator) { WgcFrameSource = _ => Frame() };
+
+        await service.CaptureAsync(Rect, Options());
+        await service.CaptureAsync(Rect, Options());
+        await service.CaptureAsync(Rect, Options());
+
+        indicator.Opened.Should().Be(3);
+        indicator.Closed.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task CaptureAsync_without_an_indicator_works_unchanged()
+    {
+        // Every existing caller constructs the service without one (tests, ocr's own instance):
+        // the parameter is optional and its absence is not an error.
+        using var service = new ScreenshotService(options: new ScreenshotOptions(1.0, Backend: "wgc")) { WgcFrameSource = _ => Frame() };
+
+        var result = await service.CaptureAsync(Rect, Options());
+
+        result.Width.Should().Be(40);
+        result.Height.Should().Be(20);
+        result.Backend.Should().Be("wgc");
     }
 }

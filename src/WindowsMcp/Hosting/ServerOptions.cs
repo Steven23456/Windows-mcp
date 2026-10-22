@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using WindowsMcp.Abstractions.Models;
 
 namespace WindowsMcp.Hosting;
 
@@ -46,8 +47,14 @@ internal sealed record ServerOptions(
     // A-14: per-stage timings on snapshot/screenshot results, logged to stderr.
     bool ProfileSnapshot = false,
     // A-10: which capture backend every screenshot uses unless the call names its own: auto|gdi|wgc.
-    string ScreenshotBackend = "auto")
+    string ScreenshotBackend = "auto",
+    // S-11: the "AI is in control" indicator (on by default under both transports; one switch).
+    bool ControlIndicator = true)
 {
+    // S-11: the takeover combination (--control-hotkey / WINDOWSMCP_CONTROL_HOTKEY). Not positional:
+    // a record parameter's default must be a constant.
+    public HotkeyChord ControlHotkey { get; init; } = HotkeyChord.Default;
+
     public const int DefaultPort = 8765;
     public const string DefaultBind = "0.0.0.0";
     public const int MinApiKeyLength = 16;
@@ -65,7 +72,8 @@ internal sealed record ServerOptions(
 
     private static readonly string[] HttpOnlyOptions = ["port", "bind", "cert-thumbprint", "api-key"];
     private static readonly HashSet<string> KnownOptions =
-        new(["transport", "screenshot-scale", "max-tree-elements", "flash", "profile-snapshot", "screenshot-backend", .. HttpOnlyOptions], StringComparer.OrdinalIgnoreCase);
+        new(["transport", "screenshot-scale", "max-tree-elements", "flash", "profile-snapshot", "screenshot-backend",
+             "control-indicator", "control-hotkey", .. HttpOnlyOptions], StringComparer.OrdinalIgnoreCase);
 
     public static string Usage => $"""
         Usage: WindowsMcp.exe [--transport stdio|http] [options]
@@ -108,10 +116,22 @@ internal sealed record ServerOptions(
                                     that gdi returns black for; auto (default) prefers wgc and falls
                                     back to gdi.
 
+        Control indicator (both transports):
+          --control-indicator <on|off>
+                                    While a tool drives the mouse or keyboard, ring the pointer and
+                                    show a banner naming the takeover hotkey; it fades 5 s after the
+                                    last such call (default on; a no-op without a desktop). Nothing
+                                    is ever refused or blocked.
+          --control-hotkey <combo>  The combination a person presses to take over (default
+                                    ctrl+alt+shift+backspace). It hides the indicator and the next
+                                    tool result tells the agent. Needs ctrl, alt or win written out
+                                    (shift may be added) plus one key.
+
         Environment fallbacks (a flag on the command line wins): {EnvPrefix}TRANSPORT,
         {EnvPrefix}PORT, {EnvPrefix}BIND, {EnvPrefix}CERT_THUMBPRINT, {EnvPrefix}API_KEY,
         {EnvPrefix}SCREENSHOT_SCALE, {EnvPrefix}MAX_TREE_ELEMENTS, {EnvPrefix}FLASH,
-        {EnvPrefix}PROFILE_SNAPSHOT, {EnvPrefix}SCREENSHOT_BACKEND.
+        {EnvPrefix}PROFILE_SNAPSHOT, {EnvPrefix}SCREENSHOT_BACKEND, {EnvPrefix}CONTROL_INDICATOR,
+        {EnvPrefix}CONTROL_HOTKEY.
         Prefer {EnvPrefix}API_KEY over --api-key: it stays out of process command lines.
 
         Examples:
@@ -203,6 +223,11 @@ internal sealed record ServerOptions(
                 throw new OptionsException($"Invalid --screenshot-backend '{backendRaw}'; expected auto|gdi|wgc.");
         }
 
+        var controlIndicator = ParseSwitch(Get("control-indicator", "CONTROL_INDICATOR"), "control-indicator", defaultValue: true);
+        var controlHotkey = Get("control-hotkey", "CONTROL_HOTKEY") is { } hotkeyRaw
+            ? HotkeyParser.Parse(hotkeyRaw, "control-hotkey")
+            : HotkeyChord.Default;
+
         if (transport == TransportKind.Stdio)
         {
             var stray = HttpOnlyOptions.FirstOrDefault(cli.ContainsKey);
@@ -210,8 +235,13 @@ internal sealed record ServerOptions(
                 throw new OptionsException($"'--{stray}' only applies with '--transport http'.");
             return Stdio with
             {
-                ScreenshotScale = screenshotScale, MaxTreeElements = maxTreeElements,
-                Flash = flash, ProfileSnapshot = profile, ScreenshotBackend = screenshotBackend,
+                ScreenshotScale = screenshotScale,
+                MaxTreeElements = maxTreeElements,
+                Flash = flash,
+                ProfileSnapshot = profile,
+                ScreenshotBackend = screenshotBackend,
+                ControlIndicator = controlIndicator,
+                ControlHotkey = controlHotkey,
             };
         }
 
@@ -250,7 +280,11 @@ internal sealed record ServerOptions(
 
         return new ServerOptions(TransportKind.Http, bind, port, thumbprint, apiKey,
             ScreenshotScale: screenshotScale, MaxTreeElements: maxTreeElements,
-            Flash: flash, ProfileSnapshot: profile, ScreenshotBackend: screenshotBackend);
+            Flash: flash, ProfileSnapshot: profile, ScreenshotBackend: screenshotBackend,
+            ControlIndicator: controlIndicator)
+        {
+            ControlHotkey = controlHotkey,
+        };
     }
 
     /// <summary>on|off|true|false|1|0, case-insensitive; null (unset) keeps the default.</summary>

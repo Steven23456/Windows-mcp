@@ -78,6 +78,10 @@ internal static class WindowsMcpHost
         // Always registered: the tool gates on ScreenshotOptions.Flash, and the overlay's thread
         // only starts on its first Show, so an off switch costs nothing.
         services.AddSingleton<IFlashOverlay, FlashOverlay>();
+        // S-11: the same shape - always registered, nothing created until the first driving call,
+        // and nothing ever created when the switch is off.
+        services.AddSingleton(new ControlIndicatorOptions(options.ControlIndicator, options.ControlHotkey, ControlIndicatorOptions.Default.Linger));
+        services.AddSingleton<IControlIndicator, ControlIndicator>();
 
         services.AddSingleton<IInputService, InputService>();
         services.AddSingleton<IScreenshotService, ScreenshotService>();
@@ -128,24 +132,65 @@ internal static class WindowsMcpHost
             // aborting a kill looks identical to the tool crashing — and a caller may "retry"
             // without the guard, causing exactly the kill the guard existed to prevent.
             // Unexpected faults still fall through to the SDK's masking. See ToolErrors.
+            // S-11: a driving tool runs between BeginAction/EndAction (it is never refused or
+            // delayed, and the indicator can never fail it), and a takeover the user made goes to
+            // the next result that reaches the caller as one extra, last block. A masked fault or a
+            // cancelled call (its response may never be delivered) keeps it pending for the next one.
             .WithRequestFilters(f => f.AddCallToolFilter(next => async (ctx, ct) =>
             {
+                var indicator = ctx.Services?.GetService<IControlIndicator>();
+                var driving = indicator is not null && ctx.Params?.Name is { } name && DrivingTools.Names.Contains(name);
+                CallToolResult result;
+                if (driving) Quietly(indicator!.BeginAction);
                 try
                 {
-                    return await next(ctx, ct);
+                    result = await next(ctx, ct);
                 }
                 catch (Exception ex) when (ToolErrors.IsCallerFacing(ex))
                 {
-                    return new CallToolResult
+                    result = new CallToolResult
                     {
                         IsError = true,
                         Content = [new TextContentBlock { Text = ToolErrors.MessageFor(ex) }],
                     };
                 }
+                finally
+                {
+                    if (driving) Quietly(indicator!.EndAction);
+                }
+
+                if (!ct.IsCancellationRequested && TryConsumeTakeover(indicator) is { } takeover)
+                    result.Content = [.. result.Content, new TextContentBlock { Text = TakeoverNote(takeover, DateTimeOffset.UtcNow) }];
+                return result;
             }))
             // Explicit assembly: the calling-assembly default would pick the wrong one if this
             // ever moved, and the test host builds the HTTP app from another assembly.
             .WithToolsFromAssembly(typeof(WindowsMcpHost).Assembly);
+    }
+
+    /// <summary>S-11: the indicator is a courtesy - a fault in it must never fail or skip a tool call.</summary>
+    private static void Quietly(Action action)
+    {
+        try { action(); }
+        catch { /* the tool runs regardless */ }
+    }
+
+    private static TakeoverRecord? TryConsumeTakeover(IControlIndicator? indicator)
+    {
+        try { return indicator?.ConsumeTakeover(); }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// S-11: what the agent is told after a takeover - who pressed what, when (local time and how
+    /// long ago), and that the desktop may no longer be what its last snapshot showed.
+    /// </summary>
+    internal static string TakeoverNote(TakeoverRecord takeover, DateTimeOffset now)
+    {
+        var ago = Math.Max(0, (int)(now - takeover.At).TotalSeconds);
+        var at = takeover.At.ToLocalTime().ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+        return $"Note: the user pressed {takeover.Hotkey} at {at} ({ago} s ago) and took over " +
+               "the mouse and keyboard; the screen may have changed since your last snapshot.";
     }
 
     /// <summary>
