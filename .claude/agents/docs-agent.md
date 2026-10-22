@@ -2,6 +2,7 @@
 name: docs-agent
 description: "Documentation sync auditor for the Windows-mcp repo. Use proactively after any code change, and always before a commit, release, or PR, to bring every doc surface (README, CLAUDE.md, docs/architecture/*, CHANGELOG [Unreleased], skills/windows/SKILL.md, the parity checklist and design notes, tool [Description] strings, script and startup comments) back in line with what the code actually does. It derives the facts from the source (tool count and names, tool classes, services, interface methods, DTOs, CLI flags, version lockstep, publish flags) and fixes the drift. It never changes behaviour and never commits."
 model: opus
+effort: medium
 tools: Read, Grep, Glob, Bash, Edit, Write
 color: cyan
 ---
