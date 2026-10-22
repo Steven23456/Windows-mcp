@@ -22,13 +22,19 @@ public sealed class ScreenshotService : IScreenshotService, IDisposable
     /// A-10: the process-level capture backend (<c>--screenshot-backend</c>) a call that asks for
     /// <c>auto</c> resolves to; null means <see cref="ScreenshotOptions.Default"/> (auto).
     /// </param>
-    public ScreenshotService(ILogger<ScreenshotService>? log = null, ScreenshotOptions? options = null)
+    /// <param name="indicator">
+    /// S-11: the control indicator whose windows must never be in a picture; every frame is
+    /// acquired inside its <see cref="IControlIndicator.SuspendForCapture"/>. Null = nothing to keep out.
+    /// </param>
+    public ScreenshotService(ILogger<ScreenshotService>? log = null, ScreenshotOptions? options = null, IControlIndicator? indicator = null)
     {
         _log = log ?? (ILogger)NullLogger<ScreenshotService>.Instance;
         _options = options ?? ScreenshotOptions.Default;
+        _indicator = indicator;
     }
 
     private readonly ScreenshotOptions _options;
+    private readonly IControlIndicator? _indicator;
     private readonly object _wgcGate = new();
     private WgcCaptureBackend? _wgc;
 
@@ -92,7 +98,12 @@ public sealed class ScreenshotService : IScreenshotService, IDisposable
         int screenH = PInvoke.GetSystemMetrics(SYSTEM_METRICS_INDEX.SM_CYSCREEN);
         var r = region ?? new ScreenRegion(0, 0, screenW, screenH);
 
-        var (frame, produced) = AcquireFrame(r, backend);
+        // S-11: one suspension around the grab (including an auto->gdi fallback). A no-op when the
+        // indicator's display affinity already keeps it out of every capture.
+        SKBitmap frame;
+        string produced;
+        using (_indicator?.SuspendForCapture())
+            (frame, produced) = AcquireFrame(r, backend);
         using (frame)
         {
             ct.ThrowIfCancellationRequested();

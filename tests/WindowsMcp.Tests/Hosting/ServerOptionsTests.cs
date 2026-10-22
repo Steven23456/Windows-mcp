@@ -1,4 +1,5 @@
 using FluentAssertions;
+using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Hosting;
 
 namespace WindowsMcp.Tests.Hosting;
@@ -790,5 +791,180 @@ public class ServerOptionsTests
         ServerOptions.Usage.Should().Contain("WINDOWSMCP_SCREENSHOT_BACKEND");
         foreach (var value in new[] { "auto", "gdi", "wgc" })
             ServerOptions.Usage.Should().Contain(value, "the help text lists what the option accepts");
+    }
+
+    // ---- S-11 (R1) - --control-indicator / WINDOWSMCP_CONTROL_INDICATOR and --control-hotkey ----
+    // Two process options that configure a tool-layer courtesy rather than a listener, so - like
+    // --flash - they are parsed BEFORE the stdio early return and apply to both transports. The
+    // switch has --flash's ParseSwitch semantics exactly; the hotkey goes through HotkeyParser
+    // (HotkeyParserTests owns the combination rules; these rows prove the option reaches it).
+
+    private static readonly HotkeyChord CtrlAltF12 = new(HotkeyChord.ModControl | HotkeyChord.ModAlt, 0x7B, "Ctrl+Alt+F12");
+
+    [Fact]
+    public void Control_indicator_is_on_by_default_under_both_transports()
+    {
+        Parse().ControlIndicator.Should().BeTrue("the indicator is opt-OUT, like the capture flash");
+        Parse("--transport", "http").ControlIndicator.Should().BeTrue("it matters most when the controller is remote");
+        ServerOptions.Stdio.ControlIndicator.Should().BeTrue("the no-argument configuration carries the default too");
+    }
+
+    [Fact]
+    public void Control_hotkey_defaults_to_ctrl_alt_shift_backspace_under_both_transports()
+    {
+        Parse().ControlHotkey.Should().Be(HotkeyChord.Default);
+        Parse("--transport", "http").ControlHotkey.Should().Be(HotkeyChord.Default);
+        ServerOptions.Stdio.ControlHotkey.Should().Be(HotkeyChord.Default);
+        HotkeyChord.Default.Display.Should().Be("Ctrl+Alt+Shift+Backspace", "upstream's combination");
+    }
+
+    [Fact]
+    public void Control_indicator_applies_to_stdio_too_it_is_not_an_http_only_option()
+    {
+        var fromFlag = Parse("--control-indicator", "off");
+
+        fromFlag.Transport.Should().Be(TransportKind.Stdio);
+        fromFlag.ControlIndicator.Should().BeFalse();
+
+        ServerOptions.Parse([], Env(("WINDOWSMCP_CONTROL_INDICATOR", "off"))).ControlIndicator.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Control_hotkey_applies_to_stdio_too_it_is_not_an_http_only_option()
+    {
+        var fromFlag = Parse("--control-hotkey", "ctrl+alt+f12");
+
+        fromFlag.Transport.Should().Be(TransportKind.Stdio);
+        fromFlag.ControlHotkey.Should().Be(CtrlAltF12);
+
+        ServerOptions.Parse([], Env(("WINDOWSMCP_CONTROL_HOTKEY", "ctrl+alt+f12"))).ControlHotkey.Should().Be(CtrlAltF12);
+    }
+
+    [Fact]
+    public void Control_options_come_from_the_environment_under_http_as_well()
+    {
+        var o = ServerOptions.Parse(["--transport", "http"],
+            Env(("WINDOWSMCP_CONTROL_INDICATOR", "off"), ("WINDOWSMCP_CONTROL_HOTKEY", "ctrl+alt+f12")));
+
+        o.Transport.Should().Be(TransportKind.Http);
+        o.ControlIndicator.Should().BeFalse();
+        o.ControlHotkey.Should().Be(CtrlAltF12);
+    }
+
+    [Fact]
+    public void Control_options_on_the_http_command_line_are_honoured()
+    {
+        var o = Parse("--transport", "http", "--control-indicator", "off", "--control-hotkey=ctrl+alt+f12");
+
+        o.ControlIndicator.Should().BeFalse();
+        o.ControlHotkey.Should().Be(CtrlAltF12, "the HTTP path builds its own record; the new options must not be lost there");
+    }
+
+    [Theory]
+    [MemberData(nameof(BooleanValues))]
+    public void Control_indicator_accepts_on_off_true_false_one_zero_in_any_case(string raw, bool expected)
+    {
+        Parse("--control-indicator", raw).ControlIndicator.Should().Be(expected);
+        Parse("--control-indicator=" + raw).ControlIndicator.Should().Be(expected);
+        ServerOptions.Parse([], Env(("WINDOWSMCP_CONTROL_INDICATOR", raw))).ControlIndicator.Should().Be(expected);
+    }
+
+    [Fact]
+    public void Control_options_on_the_command_line_beat_the_environment()
+    {
+        var env = Env(("WINDOWSMCP_CONTROL_INDICATOR", "on"), ("WINDOWSMCP_CONTROL_HOTKEY", "ctrl+alt+shift+f13"));
+
+        var o = ServerOptions.Parse(["--control-indicator", "off", "--control-hotkey", "ctrl+alt+f12"], env);
+
+        o.ControlIndicator.Should().BeFalse();
+        o.ControlHotkey.Should().Be(CtrlAltF12);
+    }
+
+    [Fact]
+    public void Blank_control_options_in_the_environment_count_as_unset()
+    {
+        ServerOptions.Parse([], Env(("WINDOWSMCP_CONTROL_INDICATOR", "   "))).ControlIndicator.Should().BeTrue();
+        ServerOptions.Parse([], Env(("WINDOWSMCP_CONTROL_INDICATOR", ""))).ControlIndicator.Should().BeTrue();
+        ServerOptions.Parse([], Env(("WINDOWSMCP_CONTROL_HOTKEY", "   "))).ControlHotkey.Should().Be(HotkeyChord.Default);
+        ServerOptions.Parse([], Env(("WINDOWSMCP_CONTROL_HOTKEY", ""))).ControlHotkey.Should().Be(HotkeyChord.Default);
+    }
+
+    [Theory]
+    [InlineData("yes")]
+    [InlineData("no")]
+    [InlineData("2")]
+    [InlineData(" on")]          // no surrounding whitespace, like --flash
+    [InlineData("on ")]
+    public void Invalid_control_indicator_values_are_rejected_from_the_command_line(string raw)
+    {
+        var act = () => Parse("--control-indicator", raw);
+
+        var message = act.Should().Throw<OptionsException>().Which.Message;
+        message.Should().NotContain("Unknown option", "--control-indicator is a known option");
+        message.Should().Contain("control-indicator", "the message names the option");
+        message.Should().Contain("off", "the message names the accepted values");
+    }
+
+    [Fact]
+    public void Invalid_control_indicator_values_are_rejected_from_the_environment_too()
+    {
+        var act = () => ServerOptions.Parse([], Env(("WINDOWSMCP_CONTROL_INDICATOR", "yes")));
+
+        act.Should().Throw<OptionsException>().Which.Message.Should().Contain("control-indicator");
+    }
+
+    [Theory]
+    [InlineData("backspace")]        // no modifier
+    [InlineData("ctrl+a+b")]         // a non-modifier before the last part
+    [InlineData("ctrl+alt")]         // a modifier as the last part
+    [InlineData("ctrl+bogus")]       // an unknown key
+    [InlineData("shift+a")]          // F3: Shift alone is ordinary typing
+    [InlineData("shift+f13")]
+    public void Invalid_control_hotkeys_are_rejected_naming_the_option(string raw)
+    {
+        var fromFlag = () => Parse("--control-hotkey", raw);
+        var fromEnv = () => ServerOptions.Parse([], Env(("WINDOWSMCP_CONTROL_HOTKEY", raw)));
+        var underHttp = () => Parse("--transport", "http", "--control-hotkey", raw);
+
+        foreach (var act in new[] { fromFlag, fromEnv, underHttp })
+        {
+            var message = act.Should().Throw<OptionsException>().Which.Message;
+            message.Should().NotContain("Unknown option", "--control-hotkey is a known option");
+            message.Should().Contain("control-hotkey", "the message names the option");
+        }
+    }
+
+    [Theory]
+    [InlineData("--control-indicator")]
+    [InlineData("--control-hotkey")]
+    public void Control_options_without_a_value_are_an_error(string flag)
+    {
+        var missing = () => Parse(flag);
+        var empty = () => Parse(flag + "=");
+
+        missing.Should().Throw<OptionsException>().WithMessage("*requires a value*");
+        empty.Should().Throw<OptionsException>().WithMessage("*requires a value*");
+    }
+
+    [Theory]
+    [InlineData("--control-indicator", "on", "off")]
+    [InlineData("--control-hotkey", "ctrl+alt+f12", "ctrl+alt+f11")]
+    public void Repeated_control_options_are_an_error(string flag, string first, string second)
+    {
+        var act = () => Parse(flag, first, flag, second);
+
+        act.Should().Throw<OptionsException>().WithMessage("*more than once*");
+    }
+
+    [Fact]
+    public void Usage_documents_the_control_indicator_options()
+    {
+        var usage = ServerOptions.Usage;
+
+        usage.Should().Contain("--control-indicator");
+        usage.Should().Contain("--control-hotkey");
+        usage.Should().Contain("WINDOWSMCP_CONTROL_INDICATOR");
+        usage.Should().Contain("WINDOWSMCP_CONTROL_HOTKEY");
+        usage.Should().ContainEquivalentOf("ctrl+alt+shift+backspace", "the operator has to know the default combination to use it");
     }
 }

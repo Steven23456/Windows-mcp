@@ -2,6 +2,51 @@
 
 ### Added
 
+- **An "AI is in control" indicator and a takeover hotkey** (parity S-11, a deliberate deviation
+  from upstream). While a driving tool runs — `click`, `drag`, `hover`, `type`, `key`, `shortcut`,
+  `scroll`, `multi_select`, `multi_edit`, `interact_element`, `file_dialog`, `focus`,
+  `switch_to_window` (`Hosting/DrivingTools.cs`) — a blue ring follows the pointer and a dark pill
+  banner, centred just below the top of the work area of the pointer's monitor and scaled to its
+  DPI, reads `AI is controlling mouse & keyboard · Ctrl+Alt+Shift+Backspace to take over`. It stays
+  up while any driving call is in flight (refcounted: HTTP clients can overlap) and fades 5 s
+  after the last one ends. Pressing the combination hides it at once, and the next tool result —
+  from any tool, an error result included — carries one extra, last text block, once:
+  `Note: the user pressed Ctrl+Alt+Shift+Backspace at 14:03:12 (4 s ago) and took over the mouse
+  and keyboard; the screen may have changed since your last snapshot.` A call the client
+  cancelled, or one that faulted into the SDK's masking, leaves the note pending for the next.
+  **Nothing is refused, delayed or cancelled, and physical input is never blocked**: upstream
+  0.8.8's desktop-control gate refused the agent whenever the user touched the mouse (#457) and
+  latched on a missed key-up (#456), so only the visible half is ported and moving the mouse is
+  never a takeover. The combination is registered only while the indicator is up, so other
+  applications have it the rest of the time; when it cannot be registered (another application
+  holds it, or Windows reserves it) the banner drops the hint and a warning is logged once.
+  Neither window is ever in a capture — `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` on
+  Windows 10 2004+ (build ≥ 19041; verified on real pixels with both `gdi` and `wgc`), and below
+  that build `ScreenshotService.CaptureAsync`, the one path `screenshot`, its annotated form and
+  `ocr` share, hides them around each grab through `IControlIndicator.SuspendForCapture()`. Both
+  are click-through, non-activating, untitled tool windows, so `window(action:"list")` and
+  `snapshot` never see them; with no interactive window station everything is a silent no-op, a
+  show waits at most ~50 ms, and a fault in the indicator can never fail a call. New options,
+  both transports: `--control-indicator on|off` / `WINDOWSMCP_CONTROL_INDICATOR` (default on; off
+  creates nothing and registers nothing) and `--control-hotkey <combo>` /
+  `WINDOWSMCP_CONTROL_HOTKEY` (default `ctrl+alt+shift+backspace`; ctrl, alt or win must be
+  written — shift alone, or a modifier the keyboard layout implies for the key, does not count, so
+  the combination never takes a key people type; implied modifiers are still registered). New
+  `IControlIndicator`/`ControlIndicator`, registered always (39 → 40 services) with nothing created
+  until the first driving call; `Models/ControlIndicatorDtos.cs` (`HotkeyChord`,
+  `ControlIndicatorOptions`, `TakeoverRecord`); the pure `Services/ControlIndicatorState.cs`
+  (refcount, a fade measured on the monotonic clock, the pending takeover) and
+  `Services/ControlIndicatorArt.cs` (SkiaSharp); `Services/LayeredWindow.cs` (see *Changed*);
+  `Hosting/HotkeyParser.cs` and `Hosting/DrivingTools.cs`. The call-tool filter in
+  `WindowsMcpHost.AddWindowsMcp` brackets driving calls and appends the note; `RegisterHotKey`,
+  `UnregisterHotKey` and `SetWindowDisplayAffinity` join `NativeMethods.txt`. No new tool (still
+  69) and no tool parameter changed. Tests: `HttpTransportTests`' harness runs with the indicator
+  off; `ControlIndicatorDesktopTests` and `ControlIndicatorPointerTests` set per-monitor-v2 DPI
+  awareness process-wide (the server's mode), so UIAutomation classes that run after them in the
+  same process inherit it, and `ControlIndicatorPointerTests` moves the real pointer (attended
+  runs only). Known limitations — the agent's own `shortcut` with exactly the takeover chord reads
+  as a takeover, and over HTTP with several clients the note goes to whichever call completes
+  first — are in the design note: `docs/design/S-11-control-indicator.md`.
 - **`build.ps1` at the repo root (dev infrastructure).** `.\build.ps1` is a shortcut that runs
   `scripts/build-release.ps1` — still the one place the publish flags live — and passes on its
   exit code, producing `bundle/WindowsMcp.exe`; README "Build" now leads with it.
@@ -429,6 +474,10 @@
 
 ### Changed
 
+- **`FlashOverlay` paints through the shared `LayeredWindow`** (S-11). The overlay window's
+  creation, the DIB + `UpdateLayeredWindow` paint and the top-most, non-activating show moved out
+  of `FlashOverlay` into `Services/LayeredWindow.cs`, which the control indicator's two windows
+  use too. The glow looks and behaves as before.
 - **`scrape` returns a JSON result object, not a markdown string** (parity C-5 — a contract
   change). The tool used to answer with the converted markdown and nothing else; it now returns
   `{Source, Url, Title, Chars, Truncated, Content, Summarized, Model, Note}` with the text in
@@ -746,6 +795,51 @@
 
 ### Fixed
 
+- **The overlay window class's procedure lives as long as the class** (found while extracting
+  `LayeredWindow` for S-11). `FlashOverlay` registered its process-lifetime window class with a
+  per-instance window-procedure delegate; a second instance reused the class, so once the first
+  instance was collected, Windows would have dispatched the second one's messages through a freed
+  delegate. `LayeredWindow` now holds one static procedure for every class it registers. Latent in
+  production, which creates one `FlashOverlay` per process.
+- **`launch("vs code")` opens Visual Studio Code, not "QR Code Scanner"; abbreviations match.**
+  The B-8 fuzzy stage scored a name only by `max(PartialRatio, TokenSetRatio)`, which gives
+  `vs code` 73 against both Visual Studio Code and "QR Code Scanner" (they share only "code"), and
+  the tie went to the shorter name. `AppCatalog.Match` now also asks the new
+  `FuzzyMatch.AbbreviationUnread` whether the request **abbreviates** the name: its words are read
+  in order from the name's first word with no name word skipped, each request word of 2+
+  characters as a word prefix or as the initials of the next two or more name words; a request
+  read entirely as initials must reach the last word, and the best reading is the one with the
+  fewest name words left unread. Such a name scores 95 less one per unread word when that beats
+  the scorers, so `vs code` gives Visual Studio Code 95 and its Insiders build 94, `wt` reads
+  Windows Terminal and `ssms` SQL Server Management Studio, while `mps` does not read "VLC media
+  player skinned", `uy` does not read "Uninstall YubiKey Manager" and `7z` does not read "7-Zip
+  File Manager". The search is memoized, so a crafted name cannot make it exponential. Exact and
+  prefix matching are unchanged, and 95 stays below a scorer's 100.
+- **An ambiguous abbreviation is refused instead of guessed.** When two or more apps tie at the
+  top fuzzy score and at least one of them got it only through an abbreviation, `launch` starts
+  nothing and returns the `ArgumentException` naming them: `'wt' could mean more than one app:
+  'Windows Terminal' (95), 'Windows Tools' (95). Use more of the name.` It is deliberately not a
+  `KeyNotFoundException`, so `AppCatalogService.ResolveAsync` does not refresh the catalog for it
+  (a fresh catalog would be just as ambiguous). Ties the scorers alone decide still go to the
+  shortest name. `IAppCatalogService.ResolveAsync` and `AppMatch` document the refusal.
+- **One unreadable Start Menu folder no longer empties the shortcut half of the catalog.**
+  `Directory.EnumerateFiles` is lazy, so a subfolder the user could not read threw from inside the
+  loop, outside its `try`, and the source's catch then dropped every shortcut from **both** roots.
+  `AppCatalogService.ScanStartMenu(roots)` now walks with `EnumerationOptions`
+  (`IgnoreInaccessible`, `AttributesToSkip = 0` so Hidden and System folders such as
+  Administrative Tools are still listed, as before, `*.lnk` ignoring case) and stops
+  `MaxStartMenuDepth` = 8 folders below a root, so a junction back to a root cannot loop; a
+  per-root `try` keeps whatever a broken walk had already read.
+- **Tests / CI: the app-catalog Integration tests no longer assume this machine's apps.** CI on
+  `main` was red in three `AppCatalogServiceIntegrationTests`: the GitHub Windows runner has
+  Calculator and Notepad as Start Menu shortcuts, not packaged apps, and has no VS Code. The
+  Calculator/Notepad test now accepts either form (an existing `.lnk`, or an AUMID), and the
+  VS Code test is a new `[StartMenuShortcutFact("Visual Studio Code")]` that skips, naming the
+  shortcut and both roots, when no such shortcut exists — it decides through the same
+  `ScanStartMenu`. New `[JunctionFact]` fixture and `AppCatalogServiceStartMenuScanTests`
+  (recursion, case, Hidden/System, the depth cap, and deny-ACL and junction Integration tests).
+  No new tool or service: still 69 tools and 40 services. Design note:
+  `docs/design/B-8-launch-catalog.md`.
 - **HTTP-mode log lines carry a local timestamp, and the plain-HTTP warning is one of them.**
   Over `--transport http` nothing prefixes the server's stderr — a console window, a redirected
   file, a scheduled task's log — so no entry could be placed in time. Each one now starts with

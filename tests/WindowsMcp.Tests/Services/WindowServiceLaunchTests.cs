@@ -181,6 +181,25 @@ public class WindowServiceLaunchTests
         activator.Calls.Should().BeEmpty("nothing is started when nothing matched");
     }
 
+    [Fact]
+    public async Task LaunchAsync_lets_an_ambiguous_name_reach_the_caller_and_starts_nothing()
+    {
+        // fix/app-catalog-matching: "wt" reads two apps equally and the catalog refuses with an
+        // ArgumentException naming both. Launch must neither pick one nor swallow the question.
+        const string ambiguity = "'wt' could mean more than one app: 'Windows Terminal' (95), 'Windows Tools' (95). Use more of the name.";
+        var catalog = new Mock<IAppCatalogService>();
+        catalog.Setup(c => c.ResolveAsync("wt", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException(ambiguity, "name"));
+        var activator = new RecordingActivator();
+
+        var act = () => Service(catalog.Object, activator).LaunchAsync("wt", false, 10_000);
+
+        (await act.Should().ThrowExactlyAsync<ArgumentException>()).Which.Message
+            .Should().Contain("'Windows Terminal' (95)").And.Contain("'Windows Tools' (95)");
+        activator.Calls.Should().BeEmpty("an ambiguous name starts nothing");
+        catalog.Verify(c => c.ResolveAsync("wt", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     // ---- the wait, and not waiting ------------------------------------------------------------
 
     [Fact]

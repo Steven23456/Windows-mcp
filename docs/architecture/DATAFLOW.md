@@ -36,6 +36,12 @@ How a tool call travels from the AI agent to the Windows API and back:
      │◄─────────────────┤                      │                   │
 ```
 
+Between the transport and the tool method sits one call-tool filter
+(`WindowsMcpHost.AddWindowsMcp`): it turns a caller-facing exception into a readable error result
+(see "Which exception the caller sees"), runs a driving tool inside the control indicator's
+`BeginAction`/`EndAction` and appends a pending takeover note to the result (see "Control
+Indicator Flow").
+
 All tool methods follow the same shape:
 ```csharp
 [McpServerTool, Description("...")]
@@ -372,7 +378,11 @@ PowerShell.
     │   PackageManager.FindPackagesForUser("") → GetAppListEntriesAsync()
     │   (display name + AUMID), merged by AppCatalog.Merge, cached 5 min
     ├─► AppCatalog.Match: exact → prefix (shortest name) → fuzzy
-    │   max(PartialRatio, TokenSetRatio) ≥ 70 (highest, ties shortest name)
+    │   max(PartialRatio, TokenSetRatio, 95 − unread words when the request
+    │   abbreviates the name) ≥ 70 (highest, ties shortest name)
+    ├─► a top tie with an abbreviation in it → ArgumentException naming the
+    │   tied names ("'wt' could mean more than one app: …"); no refresh,
+    │   nothing launched
     ├─► a miss refreshes the cache ONCE, then re-matches
     └─► still nothing → KeyNotFoundException naming the five nearest with scores
     └─► IAppActivator.ActivatePackaged(AUMID)      → pid   (packaged)
@@ -603,6 +613,63 @@ station shows nothing). With `--profile-snapshot` the tool's own stages (`resolv
 (`capture`, `cursor`, `resize`, `encode` — the service wins a name clash) into the metadata
 `stages` object, and the same numbers go to stderr at Information.
 
+**Control indicator (S-11).** `CaptureAsync` acquires the frame — including an `auto` → GDI
+fallback — inside one `IControlIndicator.SuspendForCapture()` scope, so the ring and banner are
+never in a `screenshot`, an annotated one or an `ocr` read. On Windows 10 2004+ the windows carry
+`WDA_EXCLUDEFROMCAPTURE` and the scope is a no-op; below that build it takes them down before the
+grab and lets them back when it is disposed. A capture never starts the indicator's thread.
+
+---
+
+## Control Indicator Flow (S-11)
+
+How a driving tool shows the ring and banner, and how a takeover reaches the agent. Nothing in
+this flow refuses, delays or cancels a call, and no physical input is blocked:
+
+```
+call-tool filter (WindowsMcpHost.AddWindowsMcp)
+        │
+  name in DrivingTools.Names?  (click, drag, hover, type, key, shortcut, scroll, multi_select,
+        │                       multi_edit, interact_element, file_dialog, focus, switch_to_window)
+  ┌─────┴────────────────────────────┐
+  │ yes                              │ no
+  ▼                                  │
+BeginAction()  ── refcount++, clear  │
+  │  any dismissal; one tick on the  │
+  │  overlay thread, waited ≤ 50 ms: │
+  │  RegisterHotKey + paint + show   │
+  ▼                                  ▼
+await next(ctx)  — the tool runs unchanged (a caller-facing exception becomes an error result)
+  │
+  ▼  (finally)
+EndAction()  ── refcount--; the last one starts the 5 s fade (monotonic clock)
+  │
+  ▼
+call cancelled?  ── yes → leave any takeover pending; return the result
+  │ no
+  ▼
+ConsumeTakeover() → TakeoverRecord?  ── null → return the result unchanged
+  │ a record
+  ▼
+result.Content += TextContentBlock("Note: the user pressed <Hotkey> at HH:mm:ss (N s ago) and
+                  took over the mouse and keyboard; the screen may have changed since your last
+                  snapshot.")          ← any tool, an IsError result included; delivered once
+
+overlay thread (16 ms tick while shown, 100 ms otherwise):
+  ShouldShow? ── yes, not shown → Show (register the hotkey, paint at the pointer, show)
+              ── no, shown      → Hide (unregister the hotkey, hide)
+  shown → follow the pointer (ring), the pointer's monitor (banner)
+  WM_HOTKEY while shown → dismiss at once, record {At = now (UTC), Hotkey}; the next BeginAction
+                          shows it again
+```
+
+Every indicator call in the filter is wrapped so that a fault in it is swallowed: the indicator
+can never fail or skip a tool call. A tool that throws a non-caller-facing exception leaves the
+filter before `ConsumeTakeover` (the SDK masks it), so that takeover too waits for the next
+result. A response lost **after** the filter returns still spends the note — the cancellation
+check narrows that window but cannot close it. With `--control-indicator off`, every member is a
+no-op and nothing is created or registered.
+
 ---
 
 ## WaitFor Data Flow (Polling Loop)
@@ -678,11 +745,13 @@ Host.CreateApplicationBuilder(args)
         │
         ▼
 builder.Services.AddSingleton<IInputService, InputService>()
-  ...  (39 services + the ScreenshotOptions record from --screenshot-scale,
+  ...  (40 services + the ScreenshotOptions record from --screenshot-scale,
        --flash, --profile-snapshot and --screenshot-backend, the
        UiTreeOptions record from --max-tree-elements and --profile-snapshot,
-       and the TransportOptions record from --transport: Stateless over HTTP,
-       which is how WebTools knows sampling cannot reach the client there)
+       the TransportOptions record from --transport: Stateless over HTTP,
+       which is how WebTools knows sampling cannot reach the client there,
+       and the ControlIndicatorOptions record from --control-indicator and
+       --control-hotkey)
         │
         ▼
 builder.AddWindowsMcp(options)    ← Hosting/WindowsMcpHost: AddMcpServer(...) + filter + WithToolsFromAssembly()
@@ -886,6 +955,10 @@ All tool methods return `Task<string>` — except `screenshot`, which returns
 the path. With `annotate:true` a second `TextContentBlock` — the rendered element list — sits
 between the two, so an inline annotated capture carries three blocks and a file one carries two.
 
+After a takeover (S-11), the next result of **any** tool — an error result included — carries
+one more `TextContentBlock`, last, appended by the call-tool filter: `Note: the user pressed
+<Hotkey> at HH:mm:ss (N s ago) and took over the mouse and keyboard; …`. It appears once.
+
 ### JSON Response Examples
 
 ```jsonc
@@ -941,6 +1014,7 @@ Scrollable (1):
 | `ShellTools` heartbeat | Progress notification every 10s during a foreground `powershell` call | Lets spec-compliant clients reset their request timeout |
 | `JobService` | Background jobs poll-based; per-job 60-min backstop | Runs outside the PowerShell serialization gate |
 | `FlashOverlay` | The post-capture glow is up for 3.5 s, then taken down by its own timer — and unconditionally at the start of the next capture | `Show`/`Hide` marshal to the overlay thread and wait for it, bounded by a 2 s call timeout; both are silent no-ops with no interactive window station |
+| `ControlIndicator` (S-11) | `BeginAction` waits at most 50 ms for the overlay thread to show the indicator; the thread ticks every 16 ms while it is shown (pointer follow + fade check) and every 100 ms otherwise; the indicator fades 5 s after the last driving call ends | The tool is never held up beyond that 50 ms and never refused. Below Windows 10 2004, `SuspendForCapture` waits up to 2 s for the windows to come down before a grab; with display affinity (2004+) it costs nothing |
 | `NotificationService` | One retry, 1 s later, when the toast fails with `COMException 0x80070490` (element not found) — the platform has not picked a freshly written AppUserModelId registration up yet | The delay is injected, so the unit tests do not pay it; a second failure is `shown:false` with the reason in `note`, never a throw |
 | `UIAutomationService.FindPageDocument` | `use_dom` only: up to 3 attempts for the `RootWebArea` document, 150 ms apart, no pause after the last | Chromium builds its accessibility tree lazily on the first query, so attempt 1 can miss a page that is there |
 | MCP SDK transport (stdio or HTTP) | No artificial pauses — reads JSON-RPC frames continuously | Contrast: Python `pg.PAUSE = 1.0` |

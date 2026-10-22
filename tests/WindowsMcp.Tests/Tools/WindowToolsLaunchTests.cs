@@ -189,6 +189,24 @@ public class WindowToolsLaunchTests
             .Should().Contain("Nearest", "the five nearest names are the whole value of a miss");
     }
 
+    [Fact]
+    public async Task Launch_lets_an_ambiguous_name_reach_the_caller_with_both_candidates()
+    {
+        // The catalog's ambiguity refusal is an ArgumentException (caller-facing, ToolErrors); the
+        // tool must pass it through exactly, message intact, and must not retry or pick an app.
+        const string ambiguity = "'wt' could mean more than one app: 'Windows Terminal' (95), 'Windows Tools' (95). Use more of the name.";
+        var mock = new Mock<IWindowService>();
+        mock.Setup(s => s.LaunchAsync("wt", true, 10_000, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException(ambiguity));
+
+        var act = () => NewTools(mock.Object).Launch("wt");
+
+        (await act.Should().ThrowExactlyAsync<ArgumentException>()).Which.Message.Should().Be(ambiguity,
+            "the tied names and the advice are the whole value of the refusal");
+        mock.Verify(s => s.LaunchAsync("wt", true, 10_000, It.IsAny<CancellationToken>()), Times.Once);
+        mock.VerifyNoOtherCalls();
+    }
+
     // ---- the description is the spec the model reads -------------------------------------------
 
     [Fact]
@@ -205,6 +223,20 @@ public class WindowToolsLaunchTests
             .And.ContainEquivalentOf("timeout_ms");
         description.Should().NotContain("Uses ShellExecute so Start Menu shortcuts and PATH are resolved",
             "that was the whole pre-B-8 description and it is no longer what the tool does");
+    }
+
+    [Fact]
+    public void Launch_description_advertises_the_ambiguity_refusal_and_what_to_do_about_it()
+    {
+        // fix/app-catalog-matching: an abbreviation that fits two apps equally ("wt": Windows
+        // Terminal and Windows Tools) is refused, not resolved by name length. A client model reads
+        // the description as the spec; without this it would take the refusal for a bug.
+        var description = typeof(WindowTools).GetMethod(nameof(WindowTools.Launch))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should().ContainEquivalentOf("refused", "the refusal is part of the contract, not a failure")
+            .And.ContainEquivalentOf("naming both", "the error names the tied apps, so the model can choose")
+            .And.ContainEquivalentOf("more of the name", "the model is told how to recover: resend a longer name");
     }
 
     [Theory]

@@ -182,10 +182,12 @@ public class AppCatalogTests
     // ---- Match: fuzzy ------------------------------------------------------------------------
 
     [Theory]
-    // request, the entry it must resolve to, the score max(PartialRatio, TokenSetRatio) gives
+    // request, the entry it must resolve to, and the score: max(PartialRatio, TokenSetRatio, 95
+    // when FuzzyMatch.AbbreviationCovers the name). "vs code" was 73 on the two scorers alone; it
+    // is 95 because "vs" is the initials of "Visual Studio" (fix/app-catalog-matching).
     [InlineData("edge", "Microsoft Edge", 100)]
     [InlineData("code", "Visual Studio Code", 100)]
-    [InlineData("vs code", "Visual Studio Code", 73)]
+    [InlineData("vs code", "Visual Studio Code", 95)]
     [InlineData("visual code", "Visual Studio Code", 100)]
     [InlineData("terminal", "Windows Terminal", 100)]
     public void Match_falls_back_to_fuzzy_and_reports_the_score(string request, string expected, int score)
@@ -355,5 +357,233 @@ public class AppCatalogTests
 
         match.Score.Should().Be(100, "the request is a substring of both");
         match.Entry.Name.Should().Be("Alpha xyz app", "same score, same length: the name decides, so the answer is stable");
+    }
+
+    // ---- Match: initials (fix/app-catalog-matching) ---------------------------------------------
+    //
+    // The fuzzy stage's score is max(PartialRatio, TokenSetRatio, 95 - unread when
+    // FuzzyMatch.AbbreviationUnread(request, name) >= 0); the strategy stays "fuzzy", and the exact
+    // and prefix stages are unchanged and still run first. A top-score tie in which some entry got
+    // its score only from the abbreviation is refused (ArgumentException) rather than broken by
+    // name length. FuzzyMatchTests pins the reading rule itself; these pin what it does to a resolve.
+
+    /// <summary>The pair that broke on a real box: both share only "code" with "vs code" and score
+    /// the same 73, so the old tie-break (shortest name) opened the QR scanner.</summary>
+    private static readonly AppEntry[] CatalogQr =
+    [
+        Packaged("QR Code Scanner", "Contoso.QrCodeScanner_8wekyb3d8bbwe"),
+        Shortcut("Visual Studio Code"),
+    ];
+
+    [Theory]
+    [InlineData("vs code")]
+    [InlineData("VS CODE")]
+    [InlineData("Vs Code")]
+    public void Match_reads_vs_as_the_initials_of_Visual_Studio_not_a_tie_with_QR_Code_Scanner(string request)
+    {
+        var match = AppCatalog.Match(CatalogQr, request);
+
+        match.Entry.Name.Should().Be("Visual Studio Code",
+            "'vs' is the initials of 'Visual Studio'; QR Code Scanner shares only 'code' with the request");
+        match.Strategy.Should().Be("fuzzy", "an abbreviation is a fuzzy-stage score, not a new strategy");
+        match.Score.Should().Be(95, "a covering abbreviation scores 95 - above the 73 both names get from the two scorers");
+    }
+
+    [Fact]
+    public void Match_finds_an_app_by_the_initials_of_its_whole_name()
+    {
+        // "vsc" scores 67 against Visual Studio Code and 67 against QR Code Scanner on the two
+        // scorers - a miss today. Its letters are the name's initials.
+        var match = AppCatalog.Match(CatalogQr, "vsc");
+
+        match.Entry.Name.Should().Be("Visual Studio Code");
+        match.Strategy.Should().Be("fuzzy");
+        match.Score.Should().Be(95);
+    }
+
+    [Fact]
+    public void Match_finds_Windows_Terminal_by_wt_and_not_WordPad()
+    {
+        // Both score 50 on the two scorers, under the floor - a miss today. "wt" is the initials
+        // of "Windows Terminal"; "WordPad" is one word and has no two-word initials.
+        var catalog = new[] { Packaged("Windows Terminal", "Microsoft.WindowsTerminal_8wekyb3d8bbwe"), Shortcut("WordPad") };
+
+        var match = AppCatalog.Match(catalog, "wt");
+
+        match.Entry.Name.Should().Be("Windows Terminal");
+        match.Strategy.Should().Be("fuzzy");
+        match.Score.Should().Be(95);
+    }
+
+    [Fact]
+    public void Match_does_not_skip_a_leading_word_to_read_initials()
+    {
+        // Round 2 (strict rule): an abbreviation is anchored at the name's first token. Round 1
+        // skipped "Microsoft" and scored this 95; now "vs" cannot read "microsoft", so the name
+        // stands on the two scorers' 73, exactly as on main.
+        var match = AppCatalog.Match([Shortcut("Microsoft Visual Studio Code")], "vs code");
+
+        match.Entry.Name.Should().Be("Microsoft Visual Studio Code");
+        match.Strategy.Should().Be("fuzzy");
+        match.Score.Should().Be(73, "the abbreviation does not apply; max(PartialRatio 71, TokenSetRatio 73) is the score");
+    }
+
+    [Theory]
+    [InlineData("VS Code", "exact")]
+    [InlineData("VS Code Portable", "prefix")]
+    public void Match_exact_and_prefix_still_run_before_an_abbreviation(string other, string strategy)
+    {
+        // Guard: the initials rule is part of the fuzzy stage. A name the request IS, or starts,
+        // is not a guess and must not lose to "Visual Studio Code" at 95.
+        var catalog = new[] { Shortcut("Visual Studio Code"), Shortcut(other) };
+
+        var match = AppCatalog.Match(catalog, "vs code");
+
+        match.Entry.Name.Should().Be(other);
+        match.Strategy.Should().Be(strategy);
+        match.Score.Should().Be(100);
+    }
+
+    [Fact]
+    public void Match_an_abbreviation_at_95_loses_to_a_name_a_scorer_gives_100()
+    {
+        // Guard: 95 is a score inside max(), not a stage that preempts the scorers. "term" is the
+        // initials of "Tiny Easy Remote Manager" (95) and a substring of "Windows Terminal" (100).
+        var catalog = new[] { Shortcut("Tiny Easy Remote Manager"), Packaged("Windows Terminal") };
+
+        var match = AppCatalog.Match(catalog, "term");
+
+        match.Entry.Name.Should().Be("Windows Terminal");
+        match.Score.Should().Be(100);
+        match.Strategy.Should().Be("fuzzy");
+    }
+
+    [Fact]
+    public void Match_ms_edge_keeps_its_scorer_score_because_ms_is_not_initials()
+    {
+        // Guard: "ms" is neither a prefix of "Microsoft" nor the initials "me", so the resolve
+        // stands on the two scorers' 73 - an implementation that loosened the rule would say 95.
+        var match = AppCatalog.Match([Shortcut("Microsoft Edge")], "ms edge");
+
+        match.Entry.Name.Should().Be("Microsoft Edge");
+        match.Score.Should().Be(73);
+    }
+
+    [Fact]
+    public void Match_a_request_with_no_tokens_is_still_a_miss()
+    {
+        // Guard: "---" passes the blank-name check but has no tokens. "Every token is covered" is
+        // vacuously true of none; read that way, every entry scores 95 and launch("---") opens
+        // Notepad (the shortest name). It must stay the miss it is on the two scorers.
+        var act = () => AppCatalog.Match(CatalogA, "---");
+
+        act.Should().Throw<KeyNotFoundException>().WithMessage("*---*");
+    }
+
+    // ---- Match: the strict abbreviation rule on real Start Menu names (round 2) -----------------
+    //
+    // Every row below is a name review-agent found on a real catalog, where the round-1 rule
+    // turned a refusal into a confident launch of the wrong app, or picked between two apps by
+    // name length. Scores were checked against a reference walk of the rule and the scorers.
+
+    private static AppEntry[] Catalog(params string[] names) => names.Select(n => Shortcut(n)).ToArray();
+
+    [Fact]
+    public void Match_refuses_wt_when_it_abbreviates_Windows_Terminal_and_Windows_Tools_equally()
+    {
+        // Both read "wt" completely (95); WordPad does not (50). Round 1 broke the tie by length and
+        // opened Windows Tools. A tie that only the abbreviation created is a question for the
+        // model, not a coin toss - and it is an ArgumentException (the request is ambiguous), NOT a
+        // KeyNotFoundException: the service must not refresh the catalog looking for a better one.
+        var act = () => AppCatalog.Match(Catalog("Windows Terminal", "Windows Tools", "WordPad"), "wt");
+
+        var message = act.Should().ThrowExactly<ArgumentException>().Which.Message;
+        message.Should().Contain("'wt'", "the model needs to see the request it sent");
+        message.Should().Contain("'Windows Terminal' (95)").And.Contain("'Windows Tools' (95)",
+            "every tied entry is named with its score, so the model can pick one and ask again");
+        message.Should().NotContain("WordPad", "only the tied entries are candidates");
+        message.Should().NotContain("(Parameter",
+            "launch's parameter is app_name: an ArgumentException parameter suffix naming 'name' would mislead the model");
+    }
+
+    [Fact]
+    public void Match_refuses_a_tie_between_a_scorer_95_and_an_abbreviation_95()
+    {
+        // The mixed case: "VZ Codebase Explorer" is one character off the request (PartialRatio and
+        // TokenSetRatio 95); "Visual Studio Codebase Explorer" reaches 95 only by reading "vs" as
+        // its initials (its scorers give 92). One of the two tied entries got there through the
+        // abbreviation, so the tie is refused instead of going to the shorter name.
+        // (Constructed - no natural Start Menu pair with a scorer at exactly 95 was found.)
+        var act = () => AppCatalog.Match(
+            Catalog("Visual Studio Codebase Explorer", "VZ Codebase Explorer"), "vs codebase explorer");
+
+        var message = act.Should().ThrowExactly<ArgumentException>().Which.Message;
+        message.Should().Contain("'vs codebase explorer'")
+            .And.Contain("'Visual Studio Codebase Explorer' (95)")
+            .And.Contain("'VZ Codebase Explorer' (95)");
+    }
+
+    [Fact]
+    public void Match_an_abbreviation_that_only_equals_the_scorers_does_not_make_a_tie_ambiguous()
+    {
+        // The boundary of "reaches the top score ONLY through the abbreviation (its scorers are
+        // lower)". "vs code" reads this long name with 22 tokens unread: 95 - 22 = 73, exactly what
+        // its scorers give anyway. So both tied entries are scorer entries, and the tie keeps the
+        // shortest-name rule from main - no refusal. (Constructed; real names are not this long.)
+        var longName = "Visual Studio Code " + string.Join(' ', Enumerable.Repeat("x", 22));
+        var match = AppCatalog.Match(Catalog("QR Code Scanner", longName), "vs code");
+
+        match.Entry.Name.Should().Be("QR Code Scanner", "a scorer-only tie goes to the shorter name, as before");
+        match.Score.Should().Be(73);
+    }
+
+    [Fact]
+    public void Match_vs_code_takes_Visual_Studio_Code_over_its_Insiders_build_without_refusing()
+    {
+        // "vs code" reads both, but Insiders leaves one token unread (94): no tie, no refusal.
+        var match = AppCatalog.Match(
+            Catalog("Visual Studio Code", "Visual Studio Code Insiders", "QR Code Scanner"), "vs code");
+
+        match.Entry.Name.Should().Be("Visual Studio Code");
+        match.Strategy.Should().Be("fuzzy");
+        match.Score.Should().Be(95);
+    }
+
+    [Fact]
+    public void Match_scores_an_abbreviation_95_less_one_per_unread_trailing_token()
+    {
+        var match = AppCatalog.Match(Catalog("Visual Studio Code Insiders", "QR Code Scanner"), "vs code");
+
+        match.Entry.Name.Should().Be("Visual Studio Code Insiders");
+        match.Strategy.Should().Be("fuzzy");
+        match.Score.Should().Be(94, "one trailing token ('insiders') is left unread: 95 - 1");
+    }
+
+    [Theory]
+    // (request, the catalog, the entry it must resolve to, its score)
+    [InlineData("mps", new[] { "Maps", "VLC media player skinned" }, "Maps", 86)]                     // round 1: VLC (initials of tokens 2-4)
+    [InlineData("dcp", new[] { "dhcp", "Developer Command Prompt for VS" }, "dhcp", 86)]               // round 1: the prompt (initials stop short)
+    [InlineData("sm", new[] { "Server Manager", "SQL Server Management Studio" }, "Server Manager", 95)]
+    [InlineData("mt", new[] { "Movies & TV", "Microsoft To Do" }, "Movies & TV", 95)]
+    public void Match_resolves_real_start_menu_names_the_strict_rule_reads(
+        string request, string[] names, string expected, int score)
+    {
+        var match = AppCatalog.Match(Catalog(names), request);
+
+        match.Entry.Name.Should().Be(expected);
+        match.Strategy.Should().Be("fuzzy");
+        match.Score.Should().Be(score);
+    }
+
+    [Theory]
+    [InlineData("7z", new[] { "7-Zip File Manager", "7-Zip Help" })]   // initials must reach the last token: a miss, as on main
+    [InlineData("uy", new[] { "Uninstall YubiKey Manager", "Notepad" })] // round 1: Uninstall YubiKey Manager
+    [InlineData("16", new[] { "Python 3.13 (64-bit)" })]                // round 1: Python ([1]3 [6]4)
+    public void Match_refuses_a_name_the_strict_rule_does_not_read(string request, string[] names)
+    {
+        var act = () => AppCatalog.Match(Catalog(names), request);
+
+        act.Should().ThrowExactly<KeyNotFoundException>().WithMessage($"*'{request}'*",
+            "nothing reads the request and no scorer reaches 70: opening an uninstaller is worse than saying no");
     }
 }

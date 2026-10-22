@@ -16,7 +16,9 @@ public record AppEntry(string Name, string Kind, string Target, string Source);
 /// B-8: the catalog entry a requested name resolved to. <paramref name="Strategy"/> is
 /// <c>exact</c> (the name, ordinal ignoring case), <c>prefix</c> (the request is a prefix of the
 /// name; the shortest such name wins) or <c>fuzzy</c>
-/// (<c>max(PartialRatio, TokenSetRatio) &gt;= 70</c>, highest wins, ties by the shortest name).
+/// (<c>max(PartialRatio, TokenSetRatio)</c>, or 95 less the unread words when the request
+/// abbreviates the name from its first word; at least 70, highest wins, ties by the shortest name
+/// unless an abbreviation is in the tie, which is refused as ambiguous).
 /// <paramref name="Score"/> is 100 for the first two and the fuzzy score for the last.
 /// </summary>
 public record AppMatch(AppEntry Entry, int Score, string Strategy);
