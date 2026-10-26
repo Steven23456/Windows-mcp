@@ -15,6 +15,9 @@ public sealed class AppCatalogService : IAppCatalogService
     /// <summary>Roadmap C7: five minutes. Enumerating a few hundred packages is not free.</summary>
     internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
 
+    /// <summary>How many folders below a Start Menu root the scan reads; real menus nest three or four.</summary>
+    internal const int MaxStartMenuDepth = 8;
+
     /// <summary>The real sources: both Start Menu folders and the WinRT package manager.</summary>
     public AppCatalogService() : this(null, null, null) { }
 
@@ -98,25 +101,48 @@ public sealed class AppCatalogService : IAppCatalogService
     }
 
     /// <summary>Every <c>.lnk</c> under both Start Menu roots; the file name is the app's name.</summary>
-    private static IEnumerable<AppEntry> ScanStartMenu()
+    private static IEnumerable<AppEntry> ScanStartMenu() => ScanStartMenu(
+    [
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Microsoft", "Windows", "Start Menu", "Programs"),
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Microsoft", "Windows", "Start Menu", "Programs"),
+    ]);
+
+    /// <summary>
+    /// Every <c>.lnk</c> under <paramref name="roots"/>, recursively, as (file name without the
+    /// extension, "shortcut", full path, root). A missing root, an unreadable root or an unreadable
+    /// subfolder is passed over; everything else is still listed.
+    /// </summary>
+    /// <remarks>
+    /// The walk is lazy, so an unreadable folder used to throw from inside the loop, and the
+    /// caller's catch then dropped every shortcut from both roots. <c>IgnoreInaccessible</c> skips
+    /// such a folder; anything else that breaks a walk keeps what it had read. Nothing is skipped
+    /// for its attributes (the options' default skips Hidden and System, and Windows marks
+    /// desktop.ini folders such as Administrative Tools System), and the walk stops
+    /// <see cref="MaxStartMenuDepth"/> folders down so a junction back to a root cannot loop.
+    /// </remarks>
+    internal static IReadOnlyList<AppEntry> ScanStartMenu(IEnumerable<string> roots)
     {
-        var roots = new[]
+        var options = new EnumerationOptions
         {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Microsoft", "Windows", "Start Menu", "Programs"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Microsoft", "Windows", "Start Menu", "Programs"),
+            RecurseSubdirectories = true,
+            MaxRecursionDepth = MaxStartMenuDepth,
+            IgnoreInaccessible = true,
+            AttributesToSkip = 0,
+            MatchCasing = MatchCasing.CaseInsensitive,
         };
         var entries = new List<AppEntry>();
         foreach (var root in roots)
         {
             if (!Directory.Exists(root)) continue;
-            IEnumerable<string> files;
-            try { files = Directory.EnumerateFiles(root, "*.lnk", SearchOption.AllDirectories); }
-            catch { continue; }
-            foreach (var file in files)
+            try
             {
-                var name = Path.GetFileNameWithoutExtension(file);
-                if (name.Length > 0) entries.Add(new AppEntry(name, "shortcut", file, root));
+                foreach (var file in Directory.EnumerateFiles(root, "*.lnk", options))
+                {
+                    var name = Path.GetFileNameWithoutExtension(file);
+                    if (name.Length > 0) entries.Add(new AppEntry(name, "shortcut", file, root));
+                }
             }
+            catch { /* the rest of this root broke mid-walk: keep what was read, go on to the next */ }
         }
         return entries;
     }

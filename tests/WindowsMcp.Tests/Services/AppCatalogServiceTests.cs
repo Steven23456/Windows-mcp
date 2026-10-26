@@ -153,7 +153,26 @@ public class AppCatalogServiceTests
 
         match.Entry.Name.Should().Be("Visual Studio Code");
         match.Strategy.Should().Be("fuzzy");
-        match.Score.Should().Be(73, "the score the shared FuzzyMatch gives, passed through");
+        match.Score.Should().Be(95,
+            "the score AppCatalog.Match gives - 'vs' abbreviates 'Visual Studio' (fix/app-catalog-matching) - passed through");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_lets_an_ambiguous_abbreviation_through_without_refreshing()
+    {
+        // "wt" reads Windows Terminal and Windows Tools equally: the matcher refuses with an
+        // ArgumentException. That is not a miss - a fresh catalog would be just as ambiguous - so
+        // the refresh-on-miss (KeyNotFoundException only) must not run: each source is read once.
+        var shortcuts = new CountingSource(Shortcut("Windows Terminal"), Shortcut("Windows Tools"));
+        var packaged = new CountingSource();
+        var service = Service(shortcuts, packaged, new FakeClock());
+
+        var act = () => service.ResolveAsync("wt");
+
+        (await act.Should().ThrowExactlyAsync<ArgumentException>()).Which.Message
+            .Should().Contain("'Windows Terminal' (95)").And.Contain("'Windows Tools' (95)");
+        shortcuts.Reads.Should().Be(1, "an ambiguous request is not a miss, so nothing is re-enumerated");
+        packaged.Reads.Should().Be(1);
     }
 
     [Fact]

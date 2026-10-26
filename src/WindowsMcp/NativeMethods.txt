@@ -71,6 +71,9 @@ BringWindowToTop
 GetCurrentThreadId
 keybd_event
 GetDpiForMonitor
+RegisterHotKey
+UnregisterHotKey
+SetWindowDisplayAffinity
 EnumDisplaySettings
 MONITORINFOEXW
 DEVMODEW

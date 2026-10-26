@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
+using SkiaSharp;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
 using WindowsMcp.Hosting;
@@ -408,6 +409,256 @@ public class WindowsMcpHostTests
 
         (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().NotContain("wgc",
             "the default is auto: a refusing compositor is answered with GDI, silently");
+    }
+
+    // ---- S-11 (R1, R6): the control indicator crosses into the tool layer -----------------------
+    // ServerOptions is internal, so ControlIndicatorOptions is the public record the indicator is
+    // constructed with (roadmap C7). Both it and IControlIndicator are registered unconditionally:
+    // the call-tool filter and ScreenshotService depend on IControlIndicator, so a missing
+    // registration under --control-indicator off would be a DI failure, not a quiet no-op.
+
+    private static ServiceProvider Build(ServerOptions options, Action<IServiceCollection> configure)
+    {
+        var builder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings());
+        builder.AddWindowsMcp(options);
+        configure(builder.Services);
+        return builder.Services.BuildServiceProvider();
+    }
+
+    private static readonly HotkeyChord F13Chord =
+        new(HotkeyChord.ModControl | HotkeyChord.ModAlt | HotkeyChord.ModShift, 0x7C, "Ctrl+Alt+Shift+F13");
+
+    [Fact]
+    public void ControlIndicatorOptions_Default_is_on_with_upstreams_combination_and_a_five_second_fade()
+    {
+        ControlIndicatorOptions.Default.Enabled.Should().BeTrue();
+        ControlIndicatorOptions.Default.Hotkey.Should().Be(HotkeyChord.Default);
+        ControlIndicatorOptions.Default.Linger.Should().Be(TimeSpan.FromSeconds(5), "it fades 5 s after the last driving call ends");
+        HotkeyChord.Default.Should().Be(new HotkeyChord(
+            HotkeyChord.ModControl | HotkeyChord.ModAlt | HotkeyChord.ModShift, 0x08, "Ctrl+Alt+Shift+Backspace"));
+    }
+
+    [Fact]
+    public void HotkeyChord_modifier_flags_are_RegisterHotKeys()
+    {
+        // MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN: the values go straight to RegisterHotKey.
+        HotkeyChord.ModAlt.Should().Be(1u);
+        HotkeyChord.ModControl.Should().Be(2u);
+        HotkeyChord.ModShift.Should().Be(4u);
+        HotkeyChord.ModWin.Should().Be(8u);
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_default_control_indicator_options_when_none_were_configured()
+    {
+        using var provider = Build(ServerOptions.Stdio);
+
+        provider.GetRequiredService<ControlIndicatorOptions>().Should().Be(ControlIndicatorOptions.Default);
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_control_indicator_options_from_the_server_options()
+    {
+        using var provider = Build(ServerOptions.Stdio with { ControlIndicator = false, ControlHotkey = F13Chord });
+
+        var options = provider.GetRequiredService<ControlIndicatorOptions>();
+
+        options.Enabled.Should().BeFalse("--control-indicator off must reach the indicator, not be re-read from the environment");
+        options.Hotkey.Should().Be(F13Chord, "--control-hotkey must reach the indicator");
+        options.Linger.Should().Be(TimeSpan.FromSeconds(5), "the fade is not an option");
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_control_indicator_options_under_http_too()
+    {
+        using var provider = Build(ServerOptions.Stdio with { Transport = TransportKind.Http, ControlHotkey = F13Chord });
+
+        provider.GetRequiredService<ControlIndicatorOptions>().Should().Be(new ControlIndicatorOptions(true, F13Chord, TimeSpan.FromSeconds(5)),
+            "on by default under both transports - it matters most when the controller is remote");
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_control_indicator_options_as_a_singleton()
+    {
+        using var provider = Build(ServerOptions.Stdio);
+
+        provider.GetRequiredService<ControlIndicatorOptions>()
+            .Should().BeSameAs(provider.GetRequiredService<ControlIndicatorOptions>());
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_control_indicator_as_a_singleton()
+    {
+        using var provider = Build(ServerOptions.Stdio);
+
+        var indicator = provider.GetRequiredService<IControlIndicator>();
+
+        indicator.Should().BeOfType<ControlIndicator>();
+        indicator.Should().BeSameAs(provider.GetRequiredService<IControlIndicator>(),
+            "one indicator per process: two would fight over the hotkey and draw two rings");
+        indicator.Should().BeAssignableTo<IDisposable>("the container disposes the singleton, taking the windows and the hotkey with it");
+    }
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_control_indicator_even_when_it_is_off()
+    {
+        using var provider = Build(ServerOptions.Stdio with { ControlIndicator = false });
+
+        provider.GetService<IControlIndicator>().Should().NotBeNull(
+            "the filter and the screenshot service still resolve it; off means it does nothing, not that it is missing");
+    }
+
+    [Fact]
+    public void The_resolved_control_indicator_honours_the_off_switch()
+    {
+        // The record above is not the point - the indicator HONOURING it is. If the container built
+        // the indicator from ControlIndicatorOptions.Default instead of the registered record, this
+        // BeginAction would create windows and register the hotkey.
+        using var provider = Build(ServerOptions.Stdio with { ControlIndicator = false });
+        var indicator = (ControlIndicator)provider.GetRequiredService<IControlIndicator>();
+
+        indicator.BeginAction();
+        try
+        {
+            indicator.IsVisible.Should().BeFalse("--control-indicator off shows nothing");
+            indicator.RingHandle.Should().Be(0, "when it is off nothing is created");
+            indicator.BannerHandle.Should().Be(0);
+            indicator.IsHotkeyRegistered.Should().BeFalse("and the combination is never registered");
+        }
+        finally
+        {
+            indicator.EndAction();
+        }
+    }
+
+    /// <summary>A stand-in indicator that only records whether a capture suspension is open.</summary>
+    private sealed class SuspensionProbe : IControlIndicator
+    {
+        private int _open;
+        public bool IsOpen => Volatile.Read(ref _open) > 0;
+        public int Opened { get; private set; }
+        public void BeginAction() { }
+        public void EndAction() { }
+        public bool IsVisible => true;
+        public bool IsCaptureExcluded => false;
+        public TakeoverRecord? ConsumeTakeover() => null;
+
+        public IDisposable SuspendForCapture()
+        {
+            Opened++;
+            Interlocked.Increment(ref _open);
+            return new Scope(this);
+        }
+
+        private sealed class Scope(SuspensionProbe owner) : IDisposable
+        {
+            private int _done;
+            public void Dispose()
+            {
+                if (Interlocked.Exchange(ref _done, 1) == 0) Interlocked.Decrement(ref owner._open);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task The_container_gives_the_screenshot_service_the_registered_indicator()
+    {
+        // R6's wiring half: ScreenshotService takes IControlIndicator as an OPTIONAL constructor
+        // argument, so a registration that bypassed it (a factory that news the service up with
+        // only the old arguments) would compile, resolve, and let the ring into every picture.
+        var probe = new SuspensionProbe();
+        using var provider = Build(ServerOptions.Stdio with { ScreenshotBackend = "wgc" },
+            s => s.AddSingleton<IControlIndicator>(probe));
+        var service = (ScreenshotService)provider.GetRequiredService<IScreenshotService>();
+        var openWhenGrabbed = false;
+        service.WgcFrameSource = _ =>
+        {
+            openWhenGrabbed = probe.IsOpen;
+            var bmp = new SKBitmap(new SKImageInfo(8, 8, SKColorType.Bgra8888, SKAlphaType.Premul));
+            bmp.Erase(SKColors.Gray);
+            return bmp;
+        };
+
+        await service.CaptureAsync(new ScreenRegion(0, 0, 8, 8), new CaptureOptions(ImageFormat.Png, MaxWidth: 0, MaxHeight: 0));
+
+        probe.Opened.Should().Be(1, "the container's indicator is the one the capture suspends");
+        openWhenGrabbed.Should().BeTrue("the frame is acquired inside the suspension");
+        probe.IsOpen.Should().BeFalse("and the suspension is closed when the capture returns");
+    }
+
+    // ---- S-11 (R5): what the takeover note says ---------------------------------------------------
+    // TakeoverNote is pure - the clock is a parameter. ControlIndicatorFilterTests prove the note
+    // reaches the wire once, as the last block; these prove its content: the combination, that the
+    // user took over, WHEN in the server's local time, and how many whole seconds ago (never < 0).
+
+    // +09:00 on purpose: on any machine not on UTC+9 the record's own wall clock (14:03:07) is not
+    // the local time, so a note that printed At without converting it would show the wrong time.
+    private static readonly TakeoverRecord NoteTakeover =
+        new(new DateTimeOffset(2026, 10, 21, 14, 3, 7, TimeSpan.FromHours(9)), "Ctrl+Alt+Shift+F13");
+
+    /// <summary>The N of "N s ago" - signed, so a negative age would be read, not missed.</summary>
+    private static int AgeIn(string note)
+    {
+        var match = Regex.Match(note, @"(-?\d+) s ago");
+        match.Success.Should().BeTrue($"the note says how long ago the takeover was, as 'N s ago': {note}");
+        return int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+    }
+
+    [Fact]
+    public void TakeoverNote_says_the_user_took_over_and_with_which_combination()
+    {
+        var note = WindowsMcpHost.TakeoverNote(NoteTakeover, NoteTakeover.At.AddSeconds(3));
+
+        note.Should().ContainEquivalentOf("took over", "the agent is told the person at the machine took the controls back");
+        note.Should().Contain("Ctrl+Alt+Shift+F13", "and which combination did it - the configured one's display text");
+    }
+
+    [Fact]
+    public void TakeoverNote_says_when_in_the_servers_local_time()
+    {
+        var local = NoteTakeover.At.ToLocalTime().ToString("HH:mm:ss", CultureInfo.CurrentCulture);
+
+        var note = WindowsMcpHost.TakeoverNote(NoteTakeover, NoteTakeover.At.AddSeconds(3));
+
+        note.Should().Contain(local, "the moment of the takeover, on the clock of the machine where it happened");
+        if (TimeZoneInfo.Local.GetUtcOffset(NoteTakeover.At.UtcDateTime) != NoteTakeover.At.Offset)
+            note.Should().NotContain("14:03:07", "the record's own offset is not the server's: the time is converted, not echoed");
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(0.4, 0)]
+    [InlineData(1, 1)]
+    [InlineData(42, 42)]
+    [InlineData(600, 600)]
+    public void TakeoverNote_says_how_many_whole_seconds_ago_it_happened(double secondsLater, int expected)
+    {
+        var note = WindowsMcpHost.TakeoverNote(NoteTakeover, NoteTakeover.At.AddSeconds(secondsLater));
+
+        AgeIn(note).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(-0.5)]
+    [InlineData(-5)]
+    [InlineData(-3600)]
+    public void TakeoverNote_never_reports_a_negative_age_when_the_clock_is_behind_the_record(double secondsLater)
+    {
+        // The record is stamped on the overlay thread and the note built on a pool thread later; the
+        // system clock can be stepped back in between (an NTP correction, a manual change).
+        var note = WindowsMcpHost.TakeoverNote(NoteTakeover, NoteTakeover.At.AddSeconds(secondsLater));
+
+        AgeIn(note).Should().Be(0, "a takeover cannot be in the future; a stepped-back clock reads as 'just now'");
+    }
+
+    [Fact]
+    public void TakeoverNote_for_two_different_moments_differs_only_by_when()
+    {
+        var a = WindowsMcpHost.TakeoverNote(NoteTakeover, NoteTakeover.At.AddSeconds(5));
+        var b = WindowsMcpHost.TakeoverNote(NoteTakeover with { At = NoteTakeover.At.AddMinutes(17) }, NoteTakeover.At.AddMinutes(17).AddSeconds(5));
+
+        a.Should().NotBe(b, "the time is in the note");
+        AgeIn(a).Should().Be(AgeIn(b), "the age is measured from each record's own moment");
     }
 
     // ---- HTTP log timestamps (fix/http-log-timestamps) ---------------------------------------

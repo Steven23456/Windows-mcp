@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using FluentAssertions;
 using WindowsMcp.Services;
+using WindowsMcp.Tests.Fixtures;
 using Xunit;
 
 namespace WindowsMcp.Tests.Services;
@@ -37,14 +38,26 @@ public class AppCatalogServiceIntegrationTests
     [Theory]
     [InlineData("Calculator")]
     [InlineData("Notepad")]
-    public async Task ListAsync_contains_the_packaged_apps_every_Windows_11_has(string name)
+    public async Task ListAsync_contains_Calculator_and_Notepad_as_a_shortcut_or_a_packaged_app(string name)
     {
+        // Both are assumed installed; their FORM is the machine's business. A Windows 11 desktop
+        // ships them as MSIX packages with no .lnk in either Start Menu root; the GitHub Windows
+        // runner image has them only as Start Menu shortcuts. Either way the entry has to carry a
+        // target the launcher can use - an existing .lnk for ShellExecute, or an AUMID.
         var list = await NewService().ListAsync();
 
         var entry = list.Should().ContainSingle(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Subject;
-        entry.Kind.Should().Be("packaged", "these ship as MSIX apps, not as Start Menu shortcuts");
-        entry.Target.Should().Contain("!", "a packaged entry's target is an AUMID: <family>!<app id>");
-        entry.Source.Should().StartWith("package:");
+        entry.Kind.Should().BeOneOf(["shortcut", "packaged"], "the catalog has exactly two sources");
+        if (entry.Kind == "shortcut")
+        {
+            entry.Target.Should().EndWith(".lnk", "a shortcut entry's target is the .lnk ShellExecute opens");
+            File.Exists(entry.Target).Should().BeTrue("the shortcut the entry names has to exist");
+        }
+        else
+        {
+            entry.Target.Should().Contain("!", "a packaged entry's target is an AUMID: <family>!<app id>");
+            entry.Source.Should().StartWith("package:");
+        }
     }
 
     [Fact]
@@ -132,13 +145,16 @@ public class AppCatalogServiceIntegrationTests
         match.Score.Should().BeGreaterThanOrEqualTo(70);
     }
 
-    [Fact]
+    [StartMenuShortcutFact("Visual Studio Code")]
     public async Task ResolveAsync_finds_Visual_Studio_Code_by_its_full_name_and_by_vs_code()
     {
-        // Environmental precondition, called out on its own so a box without VS Code fails only
-        // this test: the "done when" bar names launch("visual studio code"), and the catalog is
-        // where that resolution has to work. The app is never launched by the suite - it is far
-        // too heavy - so this is the whole proof for it.
+        // The "done when" bar names launch("visual studio code"), and the catalog is where that
+        // resolution has to work. The app is never launched by the suite - it is far too heavy -
+        // so this is the whole proof for it. Skipped, with the reason, on a machine with no
+        // "Visual Studio Code" shortcut in either Start Menu root (the GitHub runner has Visual
+        // Studio but not VS Code, and "visual studio code" rightly resolves to the former there).
+        // On a box that has it, "vs code" must not lose to any other name that merely contains
+        // "code" (a Store "QR Code Scanner" won the shortest-name tie before initials counted).
         var service = NewService();
 
         (await service.ResolveAsync("visual studio code")).Entry.Name.Should().Be("Visual Studio Code");
