@@ -20,8 +20,8 @@
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^26.6.5",
-    "@yao-pkg/pkg": "^6.23.0",
+    "@types/node": "^26.6.6",
+    "@yao-pkg/pkg": "^6.24.0",
     "typescript": "^7.0.2"
   },
   "engines": {
