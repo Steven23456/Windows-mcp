@@ -255,6 +255,20 @@ characters goes through the clipboard as one paste and the previous clipboard te
 times in one call (ten Down arrows), and `key(key, hold_ms: 2000)` holds a non-modifier key down
 for up to 10 s and then releases it; the two cannot be combined.
 
+`click`, `type`, `key`, `shortcut`, `scroll`, `drag` and `interact_element` take
+`observe: "none" | "foreground" | "window"` and `settle_ms` (0–5000, default 250). With
+`none` (the default) the result is exactly as before. Otherwise the tool waits `settle_ms` after
+the action, takes a snapshot, and appends it to the same text result after a blank line and a
+one-line header, so the first line is still the action's own answer — one call instead of act,
+`wait`, `snapshot`. The observation also lists the popups of the observed window's process (an
+open menu, a dropdown, a tooltip), which `snapshot` does not, so clicking a menu returns its items.
+`window` is the window the target element belongs to — an owned dialog is its own window — looked
+up before the action; it needs an `element_id` (`drag`: the destination element, else the
+origin), so `key`, `shortcut` and coordinate targets refuse it, and if the action closed that
+window the foreground window is observed instead. The observation is a real snapshot: it
+replaces the `el_N` ids of every earlier one. A snapshot that fails afterwards does not fail the
+action — the result ends with a note saying the action was performed and must not be repeated.
+
 `multi_select(targets_json, ctrl?)` and `multi_edit(entries_json)` do a whole batch in one call.
 `targets_json` is a JSON array of `{x, y}` points or `{element_id}` objects (a JSON string holding
 that array is accepted too); `multi_edit`'s entries add `text` (required) plus optional `clear`

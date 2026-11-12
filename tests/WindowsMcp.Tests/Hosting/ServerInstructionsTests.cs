@@ -566,9 +566,14 @@ public class ServerInstructionsTests
     /// Active_window_reads_the_inventory_and_nothing_else, and
     /// WaitForFindPathIntegrationTests.Element_waits_never_take_a_snapshot (Integration: the find
     /// path reads the live top-level window list).</item>
+    /// <item>E-5: every tool with an observe parameter takes a snapshot when observe is not none:
+    /// ObservationToolsTests.Observe_foreground_acts_then_waits_settle_ms_then_takes_one_foreground_snapshot /
+    /// Observe_left_at_its_default_returns_todays_result_byte_for_byte_and_takes_no_snapshot.</item>
     /// </list>
     /// This row pins that the text names exactly those evictors, so a new one has to be added here
-    /// and given its own pair of tests.
+    /// and given its own pair of tests. The observing tools are not a hard-coded list: they are the
+    /// discovered tools whose schema takes observe, and the line covers all of them by naming the
+    /// parameter (written bare, by the text's convention for parameters).
     /// </summary>
     [Fact]
     public void Text_names_each_call_that_replaces_snapshot_ids()
@@ -579,8 +584,43 @@ public class ServerInstructionsTests
         line.Should().Contain("`screenshot` with annotate:true");
         line.Should().Contain("`wait_for` on text or focus");
         line.Should().Contain("`scrape` with source dom");
-        BacktickedIdentifiers(line).Should().BeEquivalentTo(["snapshot", "screenshot", "wait_for", "scrape"],
-            "the four calls that walk through SnapshotAsync, and no other tool");
+
+        var observing = ObservingTools();
+        observing.Should().Contain(["click", "interact_element"], "non-vacuity: the E-5 tools take observe");
+        line.Should().MatchRegex(@"\bobserve\b",
+            "an action with observe ends with a snapshot, so the line that lists what kills ids must name it");
+        string[] snapshotCallers = ["snapshot", "screenshot", "wait_for", "scrape"];
+        var named = BacktickedIdentifiers(line);
+        named.Should().Contain(snapshotCallers);
+        named.Should().BeSubsetOf(snapshotCallers.Concat(observing),
+            "the calls that walk through SnapshotAsync, and no other tool");
+    }
+
+    /// <summary>E-5: the discovered tools whose schema takes observe - each of them can end with a snapshot.</summary>
+    private static string[] ObservingTools() =>
+        ProtocolTools()
+            .Where(t => t.InputSchema.GetProperty("properties").TryGetProperty("observe", out _))
+            .Select(t => t.Name)
+            .ToArray();
+
+    /// <summary>
+    /// E-5: the loop says an action can return its own snapshot, which saves the re-snapshot
+    /// turn - in the loop (before "Rules:"), written as the argument a client passes, and true
+    /// of every observing tool (each takes observe as a string).
+    /// </summary>
+    [Fact]
+    public void The_loop_says_an_action_can_return_its_own_snapshot_with_observe_foreground()
+    {
+        var rules = Array.IndexOf(Lines, "Rules:");
+        rules.Should().BePositive("the text has a Rules: section after the loop");
+
+        Lines.Take(rules).Should().Contain(l => l.Contains("observe:foreground", StringComparison.Ordinal),
+            "the UI loop tells the model an action can return its own snapshot with observe:foreground");
+        var observing = ObservingTools();
+        observing.Should().NotBeEmpty();
+        foreach (var tool in observing)
+            SchemaOf(tool).GetProperty("properties").GetProperty("observe").GetProperty("type").GetString()
+                .Should().Be("string", "{0} takes observe:foreground as the text writes it", tool);
     }
 
     // ---- helpers for the behaviour rows ---------------------------------------------------------

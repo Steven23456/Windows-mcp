@@ -132,7 +132,7 @@ internal sealed class ElementCache<T> where T : class
             throw new KeyNotFoundException(
                 $"Element '{id}' has expired: a newer snapshot replaced it, or it aged out of the element cache. " +
                 "These take a snapshot too: wait_for with a text or focus condition, screenshot with annotate, " +
-                "and scrape with source 'dom'. Take a new snapshot (or run find_element again) and use the id it returns.");
+                "scrape with source 'dom', and any action with observe. Take a new snapshot (or run find_element again) and use the id it returns.");
         throw new KeyNotFoundException(
             $"Unknown element id '{id}': no such id was issued. Ids come from snapshot, find_element or get_state.");
     }

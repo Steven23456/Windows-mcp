@@ -870,7 +870,8 @@ public class InputToolsKeyRepeatHoldTests
         var properties = schema.GetProperty("properties");
 
         properties.EnumerateObject().Select(p => p.Name).Should()
-            .BeEquivalentTo(new[] { "key", "repeat", "hold_ms" }, "the CancellationToken is bound by the SDK");
+            .BeEquivalentTo(new[] { "key", "repeat", "hold_ms", "observe", "settle_ms" },   // E-5 adds the last two
+                "the CancellationToken is bound by the SDK");
         properties.GetProperty("repeat").GetProperty("type").GetString().Should().Be("integer");
         properties.GetProperty("hold_ms").GetProperty("type").GetString().Should().Be("integer");
         schema.GetProperty("required").EnumerateArray().Select(e => e.GetString()).Should().Equal(new[] { "key" });

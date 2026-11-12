@@ -7,21 +7,21 @@
 [Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1,
 phase 3's A-2/A-3/A-4, phase 4's A-6 and phase 5's A-14, A-12 (phase 1), A-10 and A-5 (phase 1),
 then all of section B and all of section C (C-7, C-4, C-2, C-3, C-1, C-6, C-5), D-10/D-11, S-11,
-E-1, E-2, E-3 and E-4 (with D-20).
+E-1, E-2, E-3, E-4 (with D-20) and E-5.
 SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
-This is the working list of everything upstream can do that this server cannot (plus thirty-eight
+This is the working list of everything upstream can do that this server cannot (plus forty-five
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 and D-10/D-11
 logged 2026-11-10 — **all eleven are now fixed** — then D-12…D-18, logged 2026-11-11 by the
 D-10/D-11 review, D-19…D-22, logged 2026-11-12 during E-1, D-23…D-27, logged 2026-11-12
-during E-2, D-28…D-32, logged 2026-11-12 by the E-3 review, and D-33…D-38, logged 2026-11-12
-during E-4, all still open except D-31, which E-3's review round fixed, and D-20, which E-4
-fixed; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
+during E-2, D-28…D-32, logged 2026-11-12 by the E-3 review, D-33…D-38, logged 2026-11-12
+during E-4, and D-39…D-45, logged 2026-11-12 during E-5, all still open except D-31, which E-3's
+review round fixed, and D-20, which E-4 fixed; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
 phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and phase 5 shipped A-14,
 A-12 phase 1, A-10 and A-5 phase 1 — so every section-A row is ticked, with only A-5's Firefox
 phase left open and A-12's phase 2 deliberately not planned; section B is ticked too, and
-C-5/C-6 close section C — section S, D-12…D-38 (less D-20 and D-31) and section E are the work that is left; section E
+C-5/C-6 close section C — section S, D-12…D-45 (less D-20 and D-31) and section E are the work that is left; section E
 is not upstream parity but an agent-efficiency backlog from a review of this server's own tools).
 Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
@@ -148,11 +148,18 @@ function names are the stable anchor.
 | D-36 | `wait_for element_enabled` judges only the first page (20) of matches | P3 | S | E-4 | ☐ |
 | D-37 | No seam for the find's UIA condition factory: a failure to build a condition cannot be tested | P3 | S | E-4 | ☐ |
 | D-38 | `snapshot(root:<id>)` — walk one element's subtree — is unbuilt | P3 | S–M | E-4 | ☐ |
+| D-39 | `snapshot` leaves out a window's open popups (menu, dropdown, tooltip); only an `observe` shows them | P2 | S | E-5 | ☐ |
+| D-40 | `type`, `shortcut`, `scroll`, `drag` and `interact_element` take no cancellation token: their up-to-5 s settle wait and observation snapshot cannot be cancelled | P3 | S | E-5 | ☐ |
+| D-41 | A snapshot whose call was cancelled still completes on the UIA thread and evicts the previous snapshot's ids | P3 | S | — | ☐ |
+| D-42 | An observation takes no `max_elements` and no `use_dom` | P3 | S | E-5 | ☐ |
+| D-43 | In desktop scope an owned dialog's rows appear twice: inside its owner and as its own window | P3 | S | — | ☐ |
+| D-44 | `FlashOverlayTests.A_visible_overlay_is_not_in_the_window_inventory` is outside the desktop test collection and can flake beside tests that open windows | P3 | S | — | ☐ |
+| D-45 | The takeover hotkey does not interrupt an observation's settle wait or snapshot | P3 | S | S-11, E-5, D-29 | ☐ |
 | E-1 | Server instructions in the MCP handshake | P1 | S | — | ☑ |
 | E-2 | `interact_element`: expand, collapse, set_value, scroll_into_view | P1 | S | D-10 | ☑ |
 | E-3 | `click` modifiers; `key` repeat and hold | P2 | S | — | ☑ |
 | E-4 | `find_element` filters: automation id, control type, class, within, paging | P2 | M | — | ☑ |
-| E-5 | `observe`: action tools return the state they produced | P1 | M | D-11 | ☐ |
+| E-5 | `observe`: action tools return the state they produced | P1 | M | D-11 · [E-5](design/E-5-observe.md) | ☑ |
 | E-6 | `sequence`: an ordered batch of UI steps in one call | P2 | M | E-5, S-11 | ☐ |
 | E-7 | Capture by window / element; OCR word positions | P2 | M | — | ☐ |
 | E-8 | Session state: elevation, lock, secure desktop | P2 | S–M | — | ☐ |
@@ -162,8 +169,9 @@ function names are the stable anchor.
 
 **Suggested order.** **Defects D-1 … D-11 are done** (D-12 … D-18, logged 2026-11-11 by the
 D-10/D-11 review, D-19 … D-22, logged 2026-11-12 during E-1, D-23 … D-27, logged 2026-11-12
-during E-2, D-28 … D-32, logged 2026-11-12 by the E-3 review, and D-33 … D-38, logged 2026-11-12
-during E-4, are open — except D-31, fixed in E-3's review round, and D-20, fixed by E-4), and
+during E-2, D-28 … D-32, logged 2026-11-12 by the E-3 review, D-33 … D-38, logged 2026-11-12
+during E-4, and D-39 … D-45, logged 2026-11-12 during E-5, are open — except D-31, fixed in E-3's
+review round, and D-20, fixed by E-4), and
 **so are sections
 A, B and C** (A-5's Firefox phase and
 D-2's `interact_element(type) clear` are the open sub-items; A-12's phase 2 is not planned). What
@@ -179,9 +187,9 @@ opt-in sampling and the annotation table, per-item test seeds) is in
 **Section E (added 2026-11-10) is not upstream parity.** It comes from a review of this server's
 own tool surface for how many round trips and tokens an AI client spends driving it, and the same
 review logged D-10 and D-11 (both done 2026-11-11, so E-2 and E-5 are unblocked). E-1, E-2,
-E-3 and E-4 are done (2026-11-12). Order for the rest:
-E-5, E-6, E-7, E-8, E-9, E-10. E-11 is last and conditional: measure the snapshot
-cost after E-5 before committing to it. `todo.md` still records every UI-automation tool as never
+E-3, E-4 and E-5 are done (2026-11-12). Order for the rest:
+E-6, E-7, E-8, E-9, E-10. E-11 is last and conditional: measure the snapshot
+cost after E-5 (now possible) before committing to it. `todo.md` still records every UI-automation tool as never
 verified live — that sweep outranks any E item that builds on those tools.
 
 ---
@@ -1235,6 +1243,155 @@ re-issued.
 refused; an expired or destroyed root is refused before any walk.
 
 **Done when.** A dialog the client holds an id for is snapshotted on its own in one call.
+
+### D-39 — `snapshot` does not show a window's open popups  `P2 · S`
+- [ ] Not started
+
+**Found during E-5 (2026-11-12), read from the source and seen on a real WinForms menu.**
+
+**Ours today.** An open menu, a combo box's dropdown or a tooltip is its own untitled top-level
+window, so the window inventory (`WindowFilter`) leaves it out and no scope walks it. E-5 added
+`SnapshotRequest.IncludePopups`, which walks the observed process's unlisted on-screen top-level
+windows, but only an observation sets it: the `snapshot` tool never does. So `click` on a menu
+followed by `snapshot(scope:"foreground")` does not show the menu's items — only
+`click(observe:"foreground")` does (`ObserveRealContextMenuIntegrationTests.Without_popups_the_menu_is_not_in_the_forms_snapshot`
+pins the current behaviour at the service).
+
+**Sketch.** Set `IncludePopups` for `snapshot`'s `foreground` and `window` scopes (decide in a note
+whether it is a parameter or always on; desktop scope would need its own rule, since every process
+is in scope there), and say so in the description.
+
+**Touches.** `Tools/UIAutomationTools.cs` (`Snapshot`), its description, `skills/windows/SKILL.md`.
+
+**Tests.** A foreground/window snapshot with an open popup of the same process lists its items;
+the desktop scope is unchanged (or changes as the note decides).
+
+**Done when.** `snapshot` after opening a menu lists the menu's items.
+
+### D-40 — Five observing tools cannot cancel their settle wait or observation  `P3 · S`
+- [ ] Not started
+
+**Found during E-5 (2026-11-12), read from the source.**
+
+**Ours today.** `click` and `key` take the request's `CancellationToken` and pass it to
+`Observation.AroundAsync`; `type`, `shortcut`, `scroll`, `drag` and `interact_element` have no
+token parameter and pass `CancellationToken.None`. With `observe` set, a cancelled call to one of
+those five still sleeps up to `settle_ms` (5 s at most) and then takes the whole snapshot.
+
+**Sketch.** Add the trailing `CancellationToken ct = default` (kept out of the schema by the SDK)
+to the five tools and pass it to `AroundAsync`; decide per tool whether the action itself takes
+it too (E-3 did this for `click` and `key`, with a release guarantee for held keys).
+
+**Touches.** `Tools/InputTools.cs`, `Tools/UIAutomationTools.cs`, the descriptions (`CancelNote`).
+
+**Tests.** A cancelled token during the settle wait ends each of the five promptly with no snapshot
+taken.
+
+**Done when.** Every observing tool's settle wait and snapshot honour the request's cancellation.
+
+### D-41 — A cancelled snapshot still runs and evicts the previous snapshot's ids  `P3 · S`
+- [ ] Not started
+
+**Found during E-5 (2026-11-12), read from the source; pre-existing since A-2.**
+
+**Ours today.** `UIAutomationService.OnStaAsync` completes the caller's task as cancelled when the
+token fires, but a work item already running on the UIA thread is not stopped: `SnapshotAsync`'s
+walk finishes, evicts the ids the previous snapshot issued and mints new ones nobody receives. A
+caller that cancelled a snapshot (or an observation, D-40 aside) is left holding ids that are now
+expired, with no snapshot to replace them.
+
+**Sketch.** Check the token inside the walk (per window and per budget take) and before the
+eviction, so a cancelled snapshot evicts nothing; or evict only when the result is delivered.
+
+**Touches.** `Services/UIAutomationService.cs` (`SnapshotAsync`, `OnStaAsync`),
+`Services/UiTree/UiTraverser.cs`.
+
+**Tests.** A snapshot cancelled mid-walk leaves the previous snapshot's ids resolvable.
+
+**Done when.** Cancelling a snapshot never invalidates the ids the caller already holds.
+
+### D-42 — An observation takes no `max_elements` and no `use_dom`  `P3 · S`
+- [ ] Not started
+
+**Found during E-5 (2026-11-12), read from the source.**
+
+**Ours today.** `Observation.AppendAsync` builds `SnapshotRequest(scope, WindowHwnd, IncludePopups:
+true)` with the server's default budget (`--max-tree-elements`, 500) and `UseDom` off. A truncated
+observation says so and sends the caller to `snapshot` for the rest, and an action in a browser
+page observes the whole browser window, address bar and tab strip included — both cost the
+second call `observe` exists to save.
+
+**Sketch.** Decide whether the seven tools gain `observe_max_elements` / `observe_use_dom` (seven
+more schema rows each) or whether `observe` stays minimal and the header's pointer is the answer;
+record the decision either way.
+
+**Touches.** `Tools/Observation.cs`, `Tools/InputTools.cs`, `Tools/UIAutomationTools.cs`.
+
+**Tests.** If built: the request carries the values; out-of-range is refused before any input.
+
+**Done when.** Decided, with the reason recorded here.
+
+### D-43 — In desktop scope an owned dialog's rows appear twice  `P3 · S`
+- [ ] Not started
+
+**Found during E-5 (2026-11-12) while resolving owned windows; pre-existing since A-2. Not pinned
+by a test.**
+
+**Ours today.** UI Automation nests an owned window (a dialog) under its owner, and the window
+inventory lists the dialog as a top-level window of its own. `snapshot(scope:"desktop")` walks
+both roots, so every control in the dialog is listed twice, once under the owner and once under
+the dialog — with two different `el_N` ids — and spends the element budget twice.
+
+**Sketch.** When walking a window, skip descendants that are themselves the root of another
+inventory window in scope (compare `NativeWindowHandle` against the target set), so each control
+is listed once, under its own window.
+
+**Touches.** `Services/UiTree/UiTraverser.cs`, `Services/UIAutomationService.cs` (`SnapshotAsync`).
+
+**Tests.** A desktop snapshot of an owner with an owned dialog lists each dialog control once,
+under the dialog's title.
+
+**Done when.** No element appears twice in one snapshot.
+
+### D-44 — An overlay inventory test can flake beside tests that open windows  `P3 · S`
+- [ ] Not started
+
+**Found during E-5 (2026-11-12): test hygiene, not a runtime defect.**
+
+**Ours today.** `FlashOverlayTests.A_visible_overlay_is_not_in_the_window_inventory` reads the
+real window inventory, but `FlashOverlayTests` is not in `DesktopCollection`, so xUnit can run it
+in parallel with the Integration classes that do open real windows (E-5's
+`OwnedWindowFamily`, E-4's `OwnedFindFiltersWindow`, E-2's `OwnedPatternControlsWindow`). A
+window appearing or vanishing between its two reads can turn it red.
+
+**Sketch.** Put the class (or that test) in `[Collection(DesktopCollection.Name)]`, or compare
+only the overlay's own handle.
+
+**Touches.** `tests/.../Services/FlashOverlayTests.cs`.
+
+**Tests.** The test itself; a full `Category!=UIAutomation` run alongside the window fixtures.
+
+**Done when.** The test reads the inventory only while no other desktop test is running.
+
+### D-45 — The takeover hotkey does not interrupt an observation  `P3 · S`
+- [ ] Not started
+
+**Found during E-5 (2026-11-12), read from the source; same family as D-29.**
+
+**Ours today.** S-11's takeover hotkey is indicator-only: it hides the ring and banner and puts a
+note on the next result, but cancels nothing. An action with `observe` therefore still waits
+`settle_ms` (up to 5 s) and takes its snapshot after the person pressed the hotkey; the snapshot
+reads the screen the person is now using and replaces the agent's snapshot ids.
+
+**Sketch.** Fold into D-29's mechanism: a takeover links into the call's token, and the
+observation's wait and snapshot observe it (which needs D-40 for the five token-less tools).
+
+**Touches.** `Tools/Observation.cs`, `Hosting/WindowsMcpHost.cs`, `Services/ControlIndicator.cs`.
+
+**Tests.** A takeover during the settle wait ends the call with the action's result, no snapshot,
+and the takeover note.
+
+**Done when.** Pressing the takeover hotkey during an observation stops it.
 
 ---
 
@@ -2298,7 +2455,7 @@ third-party dialog were not run. Neighbour gaps found and not fixed are D-33 …
 closed by this item.
 
 ### E-5 — `observe`: action tools return the state they produced  `P1 · M`
-- [ ] Not started
+- [x] Done 2026-11-12 — [design note](design/E-5-observe.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (not verified live)
 
 **Ours today.** `click`, `type`, `key`, `shortcut`, `scroll`, `drag` and `interact_element` return
 an echo of what they did. Learning what happened costs a `wait_for` or `wait` and then a
@@ -2320,6 +2477,49 @@ output for the right scope; the snapshot runs after the input, not before; a thr
 yields the action result plus a note; `settle_ms` bounds.
 
 **Done when.** Clicking a menu returns the opened menu's items in the same call.
+
+**As landed:** one helper, `Tools/Observation.cs` (`AroundAsync`), behind all seven tools, each
+now a thin wrapper `=> Observation.AroundAsync(...)` over a private `XxxCore` holding the old body.
+`observe` is `none` (default) | `foreground` | `window`, any case; `settle_ms` 0-5000, default 250.
+**A deliberate departure from the sketch:** the observation is not a second content block but is
+appended to the **same text result** — a blank line, a one-line header, then
+`SnapshotRenderer.Render` of the snapshot — because these tools return a string that hundreds of
+tests and existing clients read; the first line of an observed result is still the old output
+exactly, and `observe:none` is byte-identical. The header names what was observed and after how
+long, says that earlier `el_N` ids are no longer valid, and, when the walk was truncated, points
+at `snapshot` with scope, window or `max_elements`. Beyond the sketch: (1) `observe:window` is
+resolved **before** the action by the new `IUIAutomationService.GetElementWindowAsync`, from the
+element's nearest native handle (itself, else an ancestor that is not the desktop root, at most
+200 levels) through Win32 `GetAncestor(GA_ROOT)` — UI Automation nests an owned dialog under its
+owner, so the top of the UIA tree would answer the wrong window; an unknown, expired or destroyed
+id, or an element with no determinable window, refuses the call with nothing sent. It needs an
+element target (`key`, `shortcut` and coordinate/cursor/focus targets refuse it; `drag` uses the
+destination element, else the origin). (2) `SnapshotRequest.WindowHwnd` snapshots that one window
+by handle whether or not the filtered inventory lists it (untitled and tool windows work — the
+service builds an `UnlistedWindow` row and takes the title from UIA), and a handle that no longer
+names a window is a `KeyNotFoundException`; the observation then falls back to the foreground
+window and its header says the element's window is gone. (3) `SnapshotRequest.IncludePopups` —
+set by every observation, never by the `snapshot` tool (D-39) — also walks the observed process's
+other on-screen top-level windows that the inventory does not list (menus, dropdowns, tooltips),
+after the window itself, under the same budget: that is what makes the done-when possible, since
+an open menu is its own untitled top-level window. (4) Order: observe and `settle_ms` are
+validated, and the window looked up, before the tool's own argument checks and before any input;
+an action that throws observes nothing; a snapshot that fails afterwards (other than a
+cancellation) becomes one line after the result — `Observation failed: <why> The action above was
+performed, so do not repeat it; call snapshot to see the result.` — never an error. Only `click`
+and `key` pass the request's token (D-40). The `snapshot` description, `ElementCache`'s expired-id
+message and the server instructions (1 978 characters) now list "any action with observe" among
+the calls that replace snapshot ids. Tests: `ObservationToolsTests`, `ObservationSurfaceTests`,
+`UIAutomationServiceElementWindowTests`, `UIAutomationSnapshotWindowHandleTests` and
+`UIAutomationSnapshotPopupsTests` (Unit), and on real windows with the real `WindowService`
+(Integration): `UIAutomationServiceElementWindowIntegrationTests`,
+`UIAutomationServiceObserveWindowsIntegrationTests` (`Fixtures/OwnedWindowFamily.cs`: owner, owned
+dialog, untitled, tool and popup windows) and `ObserveRealContextMenuIntegrationTests`. **The "done
+when" bar is met in a test, not live:** a real WinForms `ContextMenuStrip`, opened from code in a
+child PowerShell process, is listed item by item by an observation-shaped snapshot of its form
+(by handle, with popups); the click-through-the-tool half is covered by the mocked unit tests. The
+`UIAutomation` category and a third-party app were not run. Neighbour gaps found and not fixed are
+D-39 … D-45.
 
 ### E-6 — `sequence`: an ordered batch of UI steps in one call  `P2 · M`
 - [ ] Not started

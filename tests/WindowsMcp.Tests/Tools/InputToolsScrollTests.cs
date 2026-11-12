@@ -169,7 +169,7 @@ public class InputToolsScrollTests
         var parameters = typeof(InputTools).GetMethod(nameof(InputTools.Scroll))!.GetParameters();
 
         parameters.Select(p => p.Name).Should().Equal(
-            "direction", "amount", "x", "y", "element_id", "shift_wheel");
+            "direction", "amount", "x", "y", "element_id", "shift_wheel", "observe", "settle_ms");   // E-5 appends the last two
         parameters[0].HasDefaultValue.Should().BeFalse("the direction is the one required argument");
         parameters.Skip(1).Should().OnlyContain(p => p.HasDefaultValue);
     }

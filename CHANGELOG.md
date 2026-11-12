@@ -2,6 +2,60 @@
 
 ### Added
 
+- **Action tools can return the state they produced: `observe` and `settle_ms`** (E-5). `click`,
+  `type`, `key`, `shortcut`, `scroll`, `drag` and `interact_element` take `observe` (`none`, the
+  default, | `foreground` | `window`, any case) and `settle_ms` (0-5000, default 250), so one UI
+  step is one call instead of act, wait, snapshot:
+  - `observe:none` returns exactly what the tool returned before. Otherwise, after the action the
+    tool waits `settle_ms`, takes a snapshot, and appends to the **same text result** a blank line,
+    a one-line header (`Observed the foreground window after 250 ms (a new snapshot: el_N ids from
+    earlier snapshots are no longer valid):`) and the snapshot's compact text — so the first line
+    of the result is still the old output, and nothing that read it breaks. (The checklist sketch
+    said "a second block"; appending to the one string was chosen deliberately because these tools
+    return a string that existing clients and tests read.) A truncated observation says so in its
+    header and points at `snapshot` with scope, window or `max_elements`.
+  - It is a real snapshot: it **replaces every earlier snapshot's element ids**, as `snapshot`
+    does, and it walks the server's default element budget. It also walks the **popups of the
+    observed window's process** — an open menu, a dropdown, a tooltip: untitled top-level windows
+    the window inventory does not list — after the window itself, so clicking a menu returns the
+    menu's items in the same call. The plain `snapshot` tool still does not include popups
+    (parity D-39).
+  - `observe:window` observes the top-level window the target element belongs to, resolved
+    **before** the action from the nearest native handle via Win32 `GetAncestor(GA_ROOT)`, so an
+    element in an owned dialog answers the dialog, not its owner (UI Automation nests owned windows
+    under the owner). It needs an element target: `key`, `shortcut` and a coordinate, cursor or
+    focus target refuse it; `drag` uses the destination element, else the origin element. An
+    unknown, expired or destroyed id, or an element whose window cannot be determined, refuses
+    the call with nothing sent. A window observed by handle need not be in the inventory
+    (untitled and tool windows work); if the action closed it (a dialog's OK button), the
+    foreground window is observed instead and the header says so.
+  - `observe` and `settle_ms` are validated, and the window looked up, before the tool's own
+    argument checks and before any input; an action that throws observes nothing. A snapshot that
+    fails afterwards never fails the action: the result is followed by `Observation failed: <why>
+    The action above was performed, so do not repeat it; call snapshot to see the result.` Only
+    `click` and `key` carry the request's cancellation token — cancelling them during the settle
+    wait or the snapshot drops the result although the action was performed; the other five
+    tools' wait and snapshot cannot be cancelled (parity D-40).
+  New `IUIAutomationService.GetElementWindowAsync(elementId, ct)` → the window handle;
+  `SnapshotRequest` gains `WindowHwnd` (with `Scope == Window`, one window by handle instead of a
+  title — refused with a title or another scope; a handle that no longer names a window is a
+  `KeyNotFoundException`) and `IncludePopups`. One shared helper, `Tools/Observation.cs`
+  (`AroundAsync`, with a `Delay` seam), behind thin wrappers over private `XxxCore` methods in
+  `Tools/InputTools.cs` and `Tools/UIAutomationTools.cs`; `UIAutomationService` gains
+  `UnlistedWindow` and the `RootWindowOf` / `ElementFromHandle` test seams, and
+  `NativeMethods.txt` gains `GetAncestor`. The seven descriptions gain the observe paragraph; the
+  `snapshot` description, the expired-id message (`ElementCache`) and the server instructions
+  (`Hosting/ServerInstructions.cs`, now 1 978 characters) name "any action with observe" among
+  the calls that replace snapshot ids, and the instructions say observe:foreground returns the new
+  snapshot with the action. No tool added (still 69), no new service. Tests:
+  `ObservationToolsTests`, `ObservationSurfaceTests`, `UIAutomationServiceElementWindowTests`,
+  `UIAutomationSnapshotWindowHandleTests` and `UIAutomationSnapshotPopupsTests` (Unit), and
+  `UIAutomationServiceElementWindowIntegrationTests`,
+  `UIAutomationServiceObserveWindowsIntegrationTests` (real owner, owned-dialog, untitled, tool and
+  popup windows in `Fixtures/OwnedWindowFamily.cs`, the real `WindowService`) and
+  `ObserveRealContextMenuIntegrationTests` (a real WinForms `ContextMenuStrip` in a child
+  PowerShell process, opened from code) as Integration. Not verified live: the `UIAutomation`
+  category and a third-party app were not run. Gaps found and not fixed are parity D-39 … D-45.
 - **`find_element` filters by automation id, control type and class, searches inside an element,
   and pages** (E-4). Six parameters on an existing tool, so an unnamed icon button is one call by
   a stable property, and a dialog the caller already holds is searched on its own:

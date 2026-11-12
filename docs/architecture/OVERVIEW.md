@@ -27,6 +27,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 | **DPI-Aware** | Per-Monitor DPI Awareness V2 enabled at startup for correct multi-monitor coordinate handling |
 | **UTF-8 Stdio** | Output encoding forced to UTF-8 before host starts — prevents buffering bugs on Windows |
 | **Dual Transport** | stdio (default) or Streamable HTTP/HTTPS on a TCP port, gated by a bearer API key — opt-in via `--transport http` |
+| **Act and Observe** | `click`, `type`, `key`, `shortcut`, `scroll`, `drag` and `interact_element` take `observe` (`none` default \| `foreground` \| `window`) and `settle_ms`: after the action the tool waits, takes a snapshot — including the observed process's open menus, dropdowns and tooltips — and appends it to the same result, so one UI step is one call (E-5, `Tools/Observation.cs`) |
 | **Server Instructions** | The `initialize` result carries a sub-2 000-character playbook (`Hosting/ServerInstructions.cs`) on both transports — the snapshot → act → confirm loop and the safety rails — so a client without the plugin skill still gets them |
 | **Visible Control** | While a tool drives the mouse or keyboard, a person at the machine sees a ring around the pointer and a banner naming the takeover hotkey (default Ctrl+Alt+Shift+Backspace); pressing it hides them and the agent's next result says so. Never in a capture, never refuses or blocks anything; `--control-indicator off` turns it off |
 
@@ -98,6 +99,14 @@ Windows-MCP exposes **69 MCP tools** across 19 tool classes:
 | `MultiEdit` | Click and type a JSON array of entries — a target plus `text` and the optional `clear`/`press_enter` — through the same path as `type`; same resolve-first and stop-at-first-failure rules, `method` per entry |
 | `Clipboard` | Get or set clipboard text |
 
+`Click`, `Drag`, `Type`, `Key`, `Shortcut` and `Scroll` — and `InteractElement` below — also take
+`observe` and `settle_ms` (E-5): `none` (default) returns exactly the result described here;
+`foreground`, or `window` (the top-level window the target element belongs to, resolved before
+the action; not on `Key`/`Shortcut`), waits `settle_ms` (0–5000, default 250) and appends a header
+and a fresh snapshot of that window and its process's popups to the same text. The observation
+replaces every earlier snapshot's `el_N` ids; a snapshot that fails afterwards is a note after
+the result, never an error.
+
 ### UI Automation Tools (`UIAutomationTools` — 9 tools)
 | Tool | Purpose |
 |------|---------|
@@ -105,7 +114,7 @@ Windows-MCP exposes **69 MCP tools** across 19 tool classes:
 | `GetState` | Capture the UI element tree of the foreground window (three levels deep, bounded by the element budget) |
 | `FindElement` | Find elements whose name contains text (optional), narrowed by kind (any / interactive / text / scrollable), `automation_id` (exact), `control_type` and `class_name`, in the foreground window, a named window, the desktop or `within` an element already held (its descendants); returns a page `{Matches, Total, Offset, Truncated}` (`max_results` 1–100, default 20, and `offset`), each match carrying `AutomationId`/`ClassName` when the control has them |
 | `GetElement` | Get properties of a specific UI element by id, answered under that id |
-| `InteractElement` | Act on a UI element by id: click / invoke / toggle / select / focus / type / expand / collapse / set_value / scroll_into_view, through the UIA pattern or a physical fallback; returns which one fired and what the control shows afterwards. An unsupported pattern, or a control that reports disabled, is refused naming the control — the disabled one before anything is touched (`scroll_into_view`, which moves only the view, is allowed on a disabled control) |
+| `InteractElement` | Act on a UI element by id: click / invoke / toggle / select / focus / type / expand / collapse / set_value / scroll_into_view, through the UIA pattern or a physical fallback; returns which one fired and what the control shows afterwards. An unsupported pattern, or a control that reports disabled, is refused naming the control — the disabled one before anything is touched (`scroll_into_view`, which moves only the view, is allowed on a disabled control). `observe`/`settle_ms` as on the input tools above (E-5) |
 | `GetText` | Extract text content from a UI element |
 | `GetTable` | Extract tabular data from a grid/table element |
 | `AssertElement` | Assert element state (exists / enabled / checked / visible / focused / value with `expected`); `PASS` or `FAIL: <state> — observed <what was found>` |

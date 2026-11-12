@@ -131,7 +131,11 @@ public record SnapshotRequest(
     string? WindowTitle = null,
     bool IncludeTree = false,
     int MaxElements = 0,
-    bool UseDom = false);
+    bool UseDom = false,
+    // E-5: with Scope == Window, the one inventory window with this handle, instead of a title.
+    long WindowHwnd = 0,
+    // E-5 R3: also walk the same process's other on-screen top-level windows (an open menu, a dropdown, a tooltip).
+    bool IncludePopups = false);
 
 /// <summary>
 /// A-4 (roadmap C7): the process-level element budget, set from <c>WINDOWSMCP_MAX_TREE_ELEMENTS</c>

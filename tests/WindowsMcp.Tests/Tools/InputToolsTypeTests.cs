@@ -246,7 +246,7 @@ public class InputToolsTypeTests
         var parameters = typeof(InputTools).GetMethod(nameof(InputTools.Type))!.GetParameters();
 
         parameters.Select(p => p.Name).Should().Equal(
-            "text", "x", "y", "element_id", "clear", "caret", "press_enter", "pace_ms");
+            "text", "x", "y", "element_id", "clear", "caret", "press_enter", "pace_ms", "observe", "settle_ms");   // E-5 appends the last two
         parameters[0].HasDefaultValue.Should().BeFalse("the text is the one required argument");
         parameters.Skip(1).Should().OnlyContain(p => p.HasDefaultValue, "`type(text)` must keep working");
     }

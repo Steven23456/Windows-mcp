@@ -41,7 +41,7 @@ The MCP server **runs unelevated**. Admin-only operations — `registry_set` und
 | List/inspect/kill a process | `process`, `process_inspect` |
 | Read/search/hash a file | `file_read`, `file_search`, `file_hash`, `file_info` |
 | Read a registry value | `registry_get` |
-| Drive a GUI app | `snapshot` → `interact_element`/`click`/`type` → `assert_element` |
+| Drive a GUI app | `snapshot` → `interact_element`/`click`/`type` (with `observe` to get the new state back) → `assert_element` |
 | One-off scripting no tool covers | `powershell` (`background: true` for long runs, then `job`; `timeout_seconds` to bound one call) |
 
 If a `windows-mcp` tool isn't loaded, fetch its schema via `ToolSearch select:mcp__plugin_windows-mcp_Windows-mcp__<tool>`.
@@ -108,16 +108,23 @@ Run all four and compose the results into one health summary with a per-area ver
 
 ```
 snapshot                                    (windows, cursor, every el_N with a centre + action)
-  → interact_element / click / type / key   (act, using the el_N ids or their centres)
+  → interact_element / click / type / key   (act, using the el_N ids or their centres;
+      with observe:"foreground"|"window"      add observe and the result ends with the new
+                                              snapshot — no separate re-read needed)
   → assert_element / wait_for               (confirm the state changed)
   → wait                                    (only when nothing is assertable: a fixed pause)
-  → snapshot                                (re-read: ids are stale after acting)
+  → snapshot                                (re-read when you did not observe: ids are stale after acting)
   → repeat
 ```
 
 **Start the loop with `snapshot`.** One call returns what used to take `window(action:"list")` + `get_state` + a `find_element` per control: the z-ordered window list, the active window, the cursor, and every interactive element as a row `el_N (x,y) type "name" [action: …]` — the centre coordinates are virtual-desktop pixels `click`/`drag`/`scroll` take unchanged (or pass the `el_N` id itself and let them resolve the centre), and the action tag (`click`/`fill`/`toggle`/`select`/`slide`/`scroll`) says which verb the control expects. Scrollable regions follow with their `[v: N%] [h: N%]` and a `[reached top]`/`[reached bottom]` tag. The default output is compact text; ask for `format:"json"` only when something must be parsed (`include_tree:true` adds the element tree there).
 
-Pass those `el_N` ids straight to `interact_element`, `get_element`, `get_text`, `click`, `type`, `scroll` and `drag`, or click the printed centre. **The ids are only valid until the next `snapshot`** — a new one evicts the previous one's ids, and so do the calls that walk the desktop the same way: `screenshot(annotate:true)`, `wait_for` with `text_exists`/`focused_element` (every poll), and `scrape(source:"dom")`. Ids from `find_element` and `get_state` survive a snapshot but sit in a 5 000-entry cache where the least recently used age out. A dead id is refused as *expired* (take a new snapshot) or *unknown* (never issued); `get_element` answers under the id you passed. So re-snapshot after acting rather than reusing a row from two turns ago. Read, act, confirm, re-read; don't chain blind actions.
+Pass those `el_N` ids straight to `interact_element`, `get_element`, `get_text`, `click`, `type`, `scroll` and `drag`, or click the printed centre. **The ids are only valid until the next `snapshot`** — a new one evicts the previous one's ids, and so do the calls that walk the desktop the same way: `screenshot(annotate:true)`, `wait_for` with `text_exists`/`focused_element` (every poll), `scrape(source:"dom")`, and any action with `observe` (its appended snapshot issues the new ids). Ids from `find_element` and `get_state` survive a snapshot but sit in a 5 000-entry cache where the least recently used age out. A dead id is refused as *expired* (take a new snapshot) or *unknown* (never issued); `get_element` answers under the id you passed. So re-snapshot after acting rather than reusing a row from two turns ago. Read, act, confirm, re-read; don't chain blind actions.
+
+**Act and observe in one call.** `click`, `type`, `key`, `shortcut`, `scroll`, `drag` and `interact_element` take `observe` and `settle_ms`. With `observe:"foreground"` (or `"window"`) the tool acts, waits `settle_ms`, takes a snapshot and appends it to the same result after a blank line and a header — the first line is still the tool's usual answer — so "click the menu, read what opened" is one call instead of act → `wait` → `snapshot`. The observation also lists the **popups** of the observed window's process (an opened menu, a dropdown, a tooltip), which a plain `snapshot` does not; after opening a menu, observe rather than re-snapshot. Use the ids in that appended snapshot: it replaced every earlier one.
+- **`foreground`** is the default choice: it follows a click that opens a new window or dialog. **`window`** observes the window the target *element* belongs to (needs an `element_id`; for `drag`, the destination element, else the origin) — an owned dialog counts as its own window, and an untitled or tool window works too. Use it when the foreground may be something else (a notification, another app) or the window is not the active one. `key`, `shortcut` and a coordinate/cursor target refuse `window`. If the action closed that window (a dialog's OK), the header says so and shows the foreground window instead.
+- **`settle_ms`** (0-5000, default 250) is how long the UI gets to react before the snapshot. Raise it for an app that animates or loads after a click (a dialog opening, a page navigating: 500-1500); keep the default for a menu or a checkbox. If the observation still shows the old state, follow with `wait_for` on what you expect rather than repeating the action.
+- **The action is never repeated for you and never undone:** `Observation failed: … The action above was performed, so do not repeat it` means exactly that — call `snapshot` instead. A header that says *truncated* means the observation hit the element budget; call `snapshot` with `scope`/`window`/`max_elements` for the rest. Leave `observe` off (the default) when you will not read the result, or are about to act again by coordinates: the snapshot is a full walk and costs tokens.
 
 **Never sleep through the `powershell` tool.** Between an action and the next `snapshot`, use `wait` (`seconds`, more than 0 and at most 60, fractions allowed) — it pauses in-process, costs no PowerShell cold start and doesn't take the serialization gate. Prefer `wait_for` whenever the thing you are waiting on is *observable* (an element appearing): it polls and returns as soon as the condition holds instead of burning a fixed pause, and it is the right call for anything longer than a minute. `wait` is the fallback for the un-assertable — an animation settling, a splash screen, a save that shows no new control.
 

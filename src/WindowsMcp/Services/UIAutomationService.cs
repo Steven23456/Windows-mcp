@@ -61,6 +61,7 @@ public sealed class UIAutomationService : IUIAutomationService
         _log = log ?? (ILogger)NullLogger<UIAutomationService>.Instance;
         _automation = new UIA3Automation();
         ParentOf = ControlViewParent;
+        ElementFromHandle = handle => _automation.FromHandle(handle);
         _staThread = new Thread(WorkerLoop) { IsBackground = true, Name = "WindowsMcp-UA-STA" };
         _staThread.SetApartmentState(ApartmentState.STA);
         _staThread.Start();
@@ -270,10 +271,22 @@ public sealed class UIAutomationService : IUIAutomationService
     {
         ct.ThrowIfCancellationRequested();
         if (_disposed != 0) throw new ObjectDisposedException(nameof(UIAutomationService));
-        if (request.Scope == SnapshotScope.Window && string.IsNullOrWhiteSpace(request.WindowTitle))
-            throw new ArgumentException("scope=window requires windowTitle: the title of the window to snapshot.", nameof(request.WindowTitle));
-        if (request.Scope != SnapshotScope.Window && request.WindowTitle is not null)
-            throw new ArgumentException("windowTitle is only used with scope=window.", nameof(request.WindowTitle));
+        if (request.WindowHwnd != 0)
+        {
+            // E-5: one window by handle. A handle names exactly one window, so it is not combined
+            // with a title, and it means nothing to the other scopes.
+            if (request.Scope != SnapshotScope.Window)
+                throw new ArgumentException("windowHwnd is only used with scope=window.", nameof(request.WindowHwnd));
+            if (!string.IsNullOrWhiteSpace(request.WindowTitle))   // a blank title is no title, as in the branch below
+                throw new ArgumentException("Give a window title or a window handle, not both.", nameof(request.WindowHwnd));
+        }
+        else
+        {
+            if (request.Scope == SnapshotScope.Window && string.IsNullOrWhiteSpace(request.WindowTitle))
+                throw new ArgumentException("scope=window requires windowTitle: the title of the window to snapshot.", nameof(request.WindowTitle));
+            if (request.Scope != SnapshotScope.Window && request.WindowTitle is not null)
+                throw new ArgumentException("windowTitle is only used with scope=window.", nameof(request.WindowTitle));
+        }
         if (request.MaxElements < 0)
             throw new ArgumentException($"maxElements must be 0 (the server default) or positive, got {request.MaxElements}", nameof(request.MaxElements));
 
@@ -289,10 +302,15 @@ public sealed class UIAutomationService : IUIAutomationService
         var cursorMonitor = CursorMath.MonitorIndexOf(cursor.X, cursor.Y, monitors);
         headerMs = sw.ElapsedMilliseconds;
 
+        bool byHandle = request.WindowHwnd != 0;
         var targets = request.Scope switch
         {
             SnapshotScope.Desktop => windows.Where(w => w.State != WindowState.Minimized).ToArray(),
             SnapshotScope.Foreground => active is null ? Array.Empty<WindowInfo>() : [active],
+            // By handle the inventory is only where the title comes from: it leaves out untitled
+            // and tool windows, and a window missing from it is not a window that closed. Whether
+            // the window exists is asked of the handle itself, in the walk below.
+            _ when byHandle => [windows.FirstOrDefault(w => w.Hwnd == request.WindowHwnd) ?? UnlistedWindow(request.WindowHwnd)],
             _ => MatchWindows(windows, request.WindowTitle!),
         };
 
@@ -304,6 +322,17 @@ public sealed class UIAutomationService : IUIAutomationService
             // page); NoPage = a browser window with no page document, walked whole (A-5).
             var perWindow = new List<(string Title, IReadOnlyList<UiWalkEntry> Entries, DomState Dom)>();
 
+            // E-5: what was walked, so the same process's popups can be found and nothing is walked twice.
+            var walkedHandles = new HashSet<long>();
+            var walkedPids = new HashSet<int>();
+            void Walked(AutomationElement root, long hwnd, int pid)
+            {
+                if (hwnd == 0 && root.Properties.NativeWindowHandle.TryGetValue(out var h)) hwnd = h.ToInt64();
+                if (pid == 0 && root.Properties.ProcessId.TryGetValue(out var p)) pid = p;
+                if (hwnd != 0) walkedHandles.Add(hwnd);
+                if (pid != 0) walkedPids.Add(pid);
+            }
+
             if (request.Scope == SnapshotScope.Foreground && active is null)
             {
                 // No inventory entry is flagged active (the desktop, a cloaked window): fall back
@@ -311,16 +340,35 @@ public sealed class UIAutomationService : IUIAutomationService
                 // IsBrowser either, so DOM mode does not apply here.
                 var root = GetForegroundRoot();
                 perWindow.Add((TryGetName(root), traverser.Walk(root, TryGetName(root), budget), DomState.None));
+                try { Walked(root, 0, 0); } catch (Exception ex) when (ex is not OperationCanceledException) { }
             }
 
             foreach (var w in targets)
             {
                 if (budget.Truncated) break;
                 if (w.Hwnd == 0) continue;
+
+                AutomationElement? root = null;
+                Exception? unresolved = null;
+                try { root = ElementFromHandle((nint)w.Hwnd); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { unresolved = ex; }
+
+                // E-5: a window asked for by handle either exists or the caller is told it does
+                // not. Skipping it quietly would hand back an empty snapshot under a header that
+                // says the window was observed.
+                if (byHandle && (root is null || IsGone(root)))
+                    throw new KeyNotFoundException($"No open window with handle {w.Hwnd} (0x{w.Hwnd:X}): it has closed.", unresolved);
+                if (root is null)
+                {
+                    LogSkipped($"window '{w.Title}'", unresolved ?? new InvalidOperationException("no automation element for the window handle"));
+                    continue;
+                }
+
                 try
                 {
-                    var root = _automation.FromHandle((nint)w.Hwnd)
-                        ?? throw new InvalidOperationException("no automation element for the window handle");
+                    // An unlisted window (untitled, a tool window, a popup) has no inventory title.
+                    var title = w.Title.Length > 0 ? w.Title : TryGetName(root);
+                    Walked(root, w.Hwnd, w.Pid);
                     var dom = DomState.None;
                     if (request.UseDom && w.IsBrowser)
                     {
@@ -330,11 +378,49 @@ public sealed class UIAutomationService : IUIAutomationService
                         if (document is null) dom = DomState.NoPage;
                         else { root = document; dom = DomState.Page; }
                     }
-                    perWindow.Add((w.Title, traverser.Walk(root, w.Title, budget), dom));
+                    perWindow.Add((title, traverser.Walk(root, title, budget), dom));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     LogSkipped($"window '{w.Title}'", ex);
+                }
+            }
+
+            // E-5: an open menu, a combo dropdown or a tooltip is its own top-level window —
+            // untitled, so the inventory does not list it, and not a child of the window that
+            // opened it. An observation that left them out would not show the menu a click opened.
+            if (request.IncludePopups && request.Scope != SnapshotScope.Desktop && walkedPids.Count > 0)
+            {
+                var listed = windows.Select(w => w.Hwnd).ToHashSet();
+                AutomationElement[] topLevel;
+                try { topLevel = DesktopWindows is { } seam ? seam() : _automation.GetDesktop().FindAllChildren(); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LogSkipped("the desktop's window list", ex);
+                    topLevel = [];
+                }
+
+                foreach (var popup in topLevel)
+                {
+                    if (budget.Truncated) break;
+                    try
+                    {
+                        long hwnd = popup.Properties.NativeWindowHandle.TryGetValue(out var h) ? h.ToInt64() : 0;
+                        if (hwnd != 0 && (listed.Contains(hwnd) || walkedHandles.Contains(hwnd))) continue;
+                        if (!popup.Properties.ProcessId.TryGetValue(out var pid) || !walkedPids.Contains(pid)) continue;
+                        if (popup.Properties.IsOffscreen.ValueOrDefault) continue;
+                        var bounds = popup.Properties.BoundingRectangle.ValueOrDefault;
+                        if (bounds.Width <= 0 || bounds.Height <= 0) continue;
+
+                        var name = TryGetName(popup);
+                        var label = name.Length > 0 ? name : "popup";
+                        if (hwnd != 0) walkedHandles.Add(hwnd);
+                        perWindow.Add((label, traverser.Walk(popup, label, budget), DomState.None));
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        LogSkipped("a popup window", ex);
+                    }
                 }
             }
 
@@ -401,6 +487,74 @@ public sealed class UIAutomationService : IUIAutomationService
             CaptureMs: sw.ElapsedMilliseconds,
             Stages: stages,
             Pages: walked.Pages);
+    }
+
+    /// <summary>E-5: a stand-in inventory row for a window the inventory leaves out (untitled, a tool window, a popup).</summary>
+    private static WindowInfo UnlistedWindow(long hwnd)
+        => new("", hwnd, 0, "", WindowState.Normal, new Bounds(0, 0, 0, 0), -1, false, false, -1);
+
+    /// <summary>How far up <see cref="GetElementWindowAsync"/> looks for an element with a native handle.</summary>
+    private const int MaxWindowAncestorLevels = 200;
+
+    /// <summary>
+    /// E-5: the native handle of the top-level window <paramref name="elementId"/> belongs to.
+    /// The nearest element with a native handle — the element itself, else an ancestor — is asked
+    /// for its Win32 ROOT window, which stops at an owned dialog instead of crossing to its owner
+    /// (UI Automation nests an owned window under the owner, so walking to the top of the UIA tree
+    /// answers the wrong window). The desktop root is never the answer. An unknown, expired or
+    /// destroyed element is refused as every element call refuses it.
+    /// </summary>
+    public Task<long> GetElementWindowAsync(string elementId, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return OnStaAsync(() => Refusing(elementId, "observe", el =>
+        {
+            if (IsGone(el)) throw UiRefusals.Gone(elementId);
+
+            // An element with a handle of its own is answered by that handle's root window, and a
+            // root that cannot be found is the refusal: walking on would name an ancestor's window.
+            long root = RootOf(el);
+            if (NativeHandleOf(el) == 0)
+            {
+                // An ancestor counts only while it has a parent of its own: the one without is the
+                // desktop root, and its handle would make observe:window the whole desktop. A walk
+                // that fails part-way is "cannot say", never "this is the top".
+                var parent = SafeParent(el);
+                for (int level = 0; parent is not null && level < MaxWindowAncestorLevels; level++)
+                {
+                    var grandparent = SafeParent(parent);
+                    if (grandparent is null) break;
+                    if (NativeHandleOf(parent) != 0) { root = RootOf(parent); break; }
+                    parent = grandparent;
+                }
+            }
+
+            return root != 0
+                ? root
+                : throw new InvalidOperationException(
+                    $"The window that {Describe(el)} ({elementId}) belongs to could not be determined. Use observe:foreground.");
+        }), ct);
+
+        AutomationElement? SafeParent(AutomationElement of)
+        {
+            try { return ParentOf(of); }
+            // A timeout is a hung provider and propagates (R23); any other failure is "no parent".
+            catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException) { return null; }
+        }
+
+        long RootOf(AutomationElement of)
+        {
+            nint handle = NativeHandleOf(of);
+            if (handle == 0) return 0;
+            try { return RootWindowOf(handle).ToInt64(); }
+            catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException) { return 0; }
+        }
+    }
+
+    private static nint NativeHandleOf(AutomationElement el)
+    {
+        try { return el.Properties.NativeWindowHandle.TryGetValue(out var handle) ? handle : 0; }
+        catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException) { return 0; }
     }
 
     /// <summary>How one window was walked for a snapshot (A-5).</summary>
@@ -1055,6 +1209,18 @@ public sealed class UIAutomationService : IUIAutomationService
     /// several fake roots. Null (always, outside tests) means the live desktop.
     /// </summary>
     internal Func<AutomationElement[]>? DesktopWindows { get; set; }
+
+    /// <summary>E-5: Win32 GetAncestor(GA_ROOT) — a handle's root window, which stops at an owned window. A seam for fake handles.</summary>
+    internal Func<nint, nint> RootWindowOf { get; set; } = Win32RootWindow;
+
+    private static unsafe nint Win32RootWindow(nint handle)
+        => (nint)PInvoke.GetAncestor(new Windows.Win32.Foundation.HWND((void*)handle), Windows.Win32.UI.WindowsAndMessaging.GET_ANCESTOR_FLAGS.GA_ROOT).Value;
+
+    /// <summary>
+    /// E-5 R2: the UIA element for a window handle (null or a throw = no such window). Every window root a
+    /// snapshot resolves goes through it, so a headless test can hand the walk a fake root.
+    /// </summary>
+    internal Func<nint, AutomationElement?> ElementFromHandle { get; set; }
 
     private AutomationElement? ControlViewParent(AutomationElement el)
     {
