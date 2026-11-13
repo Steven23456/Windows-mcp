@@ -654,7 +654,9 @@ public sealed class UIAutomationService : IUIAutomationService
         ct.ThrowIfCancellationRequested();
         return OnStaAsync(() => Refusing(elementId, "observe", el =>
         {
-            if (IsGone(el)) throw UiRefusals.Gone(elementId);
+            // ClosedNotHung, not IsGone: a liveness read that times out is a hung provider, and
+            // this lookup runs before an action that must not then be sent to it.
+            if (ClosedNotHung(el)) throw UiRefusals.Gone(elementId);
 
             // An element with a handle of its own is answered by that handle's root window, and a
             // root that cannot be found is the refusal: walking on would name an ancestor's window.

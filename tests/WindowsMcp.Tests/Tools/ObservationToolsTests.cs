@@ -838,7 +838,7 @@ public sealed class ObservationToolsTests
     {
         var data = new TheoryData<string, string>();
         foreach (var tool in new[] { "click", "type", "scroll", "drag", "interact_element" })
-            foreach (var kind in new[] { "expired", "gone" })
+            foreach (var kind in new[] { "expired", "gone", "timeout" })
                 data.Add(tool, kind);
         return data;
     }
@@ -848,9 +848,13 @@ public sealed class ObservationToolsTests
     public async Task A_window_lookup_refusal_is_the_tools_refusal_and_no_input_is_sent(string tool, string kind)
     {
         var rig = new Rig();
-        Exception refusal = kind == "expired"
-            ? new KeyNotFoundException("Element 'el_12' has expired (wmcp-e5)")
-            : new InvalidOperationException("Element 'el_12' is no longer available (wmcp-e5)");
+        Exception refusal = kind switch
+        {
+            "expired" => new KeyNotFoundException("Element 'el_12' has expired (wmcp-e5)"),
+            // PR #43 X1: a hung provider during the lookup is refused before acting, like the others.
+            "timeout" => new TimeoutException("window lookup timed out (wmcp-e5)"),
+            _ => new InvalidOperationException("Element 'el_12' is no longer available (wmcp-e5)"),
+        };
         rig.WindowFailure = refusal;
 
         Func<Task> act = () => rig.Act(tool, "window");

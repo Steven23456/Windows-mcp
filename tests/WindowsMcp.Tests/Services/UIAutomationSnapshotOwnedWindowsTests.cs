@@ -432,6 +432,22 @@ public sealed class ObserveWindowTimeoutTests : IDisposable
     }
 
     [Fact]
+    public async Task X1_observe_window_whose_lookup_liveness_read_times_out_is_refused_before_the_action()
+    {
+        // Through the real service: the element's process-id read hangs, its handle would answer.
+        var hung = new TimeoutException("process id read timed out (wmcp-e5)");
+        var id = Issue(_fakes.Window("OK", Handle, pidFailure: hung));
+        _svc.ElementFromHandle = _ => null;
+        bool acted = false;
+
+        Func<Task> act = () => new Observation(_svc).AroundAsync("window", 0, id, CancellationToken.None,
+            () => { acted = true; return Task.FromResult("acted"); });
+
+        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
+        acted.Should().BeFalse("the window is resolved before the action, so the action is never sent to a hung provider");
+    }
+
+    [Fact]
     public async Task Observe_window_whose_window_really_closed_still_falls_back_to_the_foreground()
     {
         // Guard: KeyNotFound (null / gone) keeps the fallback.

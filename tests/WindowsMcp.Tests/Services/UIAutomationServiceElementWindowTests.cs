@@ -89,7 +89,8 @@ public sealed class UIAutomationServiceElementWindowTests : IDisposable
     /// <param name="handle">What the NativeWindowHandle read answers; null = not supported.</param>
     /// <param name="processId">What the ProcessId read answers (0 = a destroyed Win32 control).</param>
     /// <param name="issue">Put the element in the service's cache (only the element asked about needs an id).</param>
-    private Fake Arrange(string name, int controlType, int? handle, int processId = 4242, bool issue = false, bool handleThrows = false)
+    private Fake Arrange(string name, int controlType, int? handle, int processId = 4242, bool issue = false, bool handleThrows = false,
+        Exception? pidFailure = null)
     {
         var lib = _automation.PropertyLibrary.Element;
         var framework = new Mock<FrameworkAutomationElementBase>(MockBehavior.Strict, _automation);
@@ -103,7 +104,7 @@ public sealed class UIAutomationServiceElementWindowTests : IDisposable
                 if (handleThrows) throw new COMException("handle read failed (wmcp-e5)", unchecked((int)0x80004005));
                 return handle is { } h ? h : NotSupported;
             }
-            if (id == lib.ProcessId.Id) return processId;
+            if (id == lib.ProcessId.Id) return pidFailure is not null ? throw pidFailure : processId;
             if (id == lib.Name.Id) return name;
             if (id == lib.ControlType.Id) return controlType;
             if (id == lib.IsEnabled.Id) return true;
@@ -462,6 +463,49 @@ public sealed class UIAutomationServiceElementWindowTests : IDisposable
 
         (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message
             .Should().Contain($"Element '{dead.Id}' is no longer available");
+    }
+
+    // ---- PR #43 X1: a liveness read that times out is not "alive" -----------------------------------
+
+    [Fact]
+    public async Task X1_a_timeout_reading_the_process_id_propagates_and_nothing_else_is_read()
+    {
+        // The reviewer's regression: the process-id read hangs, the handle reads would answer. A
+        // hung provider is neither alive nor gone, and the action must not be sent to it.
+        var hung = new TimeoutException("process id read timed out (wmcp-e5)");
+        var desktop = Desktop();
+        var window = Arrange("Save As", WindowType, WindowHandle);
+        var button = Arrange("OK", ButtonType, 0x2222, issue: true, pidFailure: hung);
+        Parents((button, window), (window, desktop));
+
+        Func<Task> act = () => _svc.GetElementWindowAsync(button.Id);
+
+        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
+        button.HandleReads.Should().Be(0, "no handle read after the liveness read timed out");
+        _parentCalls.Should().Be(0, "no ParentOf call");
+        _rootQueries.Should().BeEmpty("no RootWindowOf call");
+    }
+
+    public static TheoryData<string> GoneShapedProbeFailures => new() { "not-available", "win32", "com" };
+
+    [Theory]
+    [MemberData(nameof(GoneShapedProbeFailures))]
+    public async Task X1_guard_a_gone_shaped_failure_of_the_process_id_read_is_still_the_gone_refusal(string kind)
+    {
+        Exception failure = kind switch
+        {
+            "not-available" => new FlaUI.Core.Exceptions.ElementNotAvailableException(),
+            "win32" => new System.ComponentModel.Win32Exception(unchecked((int)0x800706BA)),
+            _ => new COMException("RPC server unavailable (wmcp-e5)", unchecked((int)0x800706BA)),
+        };
+        var button = Arrange("OK", ButtonType, 0x2222, issue: true, pidFailure: failure);
+        Parents();
+
+        Func<Task> act = () => _svc.GetElementWindowAsync(button.Id);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message
+            .Should().Contain($"Element '{button.Id}' is no longer available");
+        _rootQueries.Should().BeEmpty();
     }
 
     [Fact]
