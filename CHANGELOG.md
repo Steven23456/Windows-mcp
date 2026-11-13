@@ -2,6 +2,116 @@
 
 ### Added
 
+- **Action tools can return the state they produced: `observe` and `settle_ms`** (E-5). `click`,
+  `type`, `key`, `shortcut`, `scroll`, `drag` and `interact_element` take `observe` (`none`, the
+  default, | `foreground` | `window`, any case) and `settle_ms` (0-5000, default 250), so one UI
+  step is one call instead of act, wait, snapshot:
+  - `observe:none` returns exactly what the tool returned before. Otherwise, after the action the
+    tool waits `settle_ms`, takes a snapshot, and appends to the **same text result** a blank line,
+    a one-line header (`Observed the foreground window after 250 ms (a new snapshot: el_N ids from
+    earlier snapshots are no longer valid):`) and the snapshot's compact text — so the first line
+    of the result is still the old output, and nothing that read it breaks. (The checklist sketch
+    said "a second block"; appending to the one string was chosen deliberately because these tools
+    return a string that existing clients and tests read.) A truncated observation says so in its
+    header and points at `snapshot` with scope, window or `max_elements`.
+  - **What popups say.** After the snapshot the observation appends, when there is any, a blank
+    line, `Popup text (not controls, no ids):` and one `<popup label>: <text>` line per named
+    non-interactive element of each window walked as a popup — an owned window lifted out of its
+    owner, or a desktop-level popup; never the target window or the foreground-fallback root — in
+    walk order (owned windows first), each text once per popup, line breaks collapsed, the text
+    clipped to 200 characters and the label folded to one line and clipped to 80, at most 50 lines (the 50th then `... (more popup text not shown)`). A popup's
+    own name counts only when nothing inside it spoke, so a tooltip is its text and a dialog
+    titled "Save As" does not add `Save As: Save As`. So hovering a control (`click` with
+    `clicks:0`) and observing returns its tooltip, and observing the window that opened a message
+    box returns its question. The text was already walked; before, it had no row (text is not a
+    control) and was dropped. New `SnapshotResult.PopupText` (`string[]?`, omitted from JSON when
+    null; null for every non-observation snapshot, so `snapshot`'s JSON and text are unchanged).
+  - It is a real snapshot: it **replaces every earlier snapshot's element ids**, as `snapshot`
+    does, and it walks the server's default element budget. It also walks the **popups of the
+    observed window's process** — an open menu, a dropdown, a tooltip: untitled top-level windows
+    the window inventory does not list — after the window itself, so clicking a menu returns the
+    menu's items in the same call. And because UI Automation nests an **owned** top-level window
+    (a dialog, an owned popup) under its owner — clipped to the owner's rectangle and under the
+    owner's title — an observation lifts each one out. The owned windows come from Win32's owner
+    relation, not a search of the UI tree: every visible top-level window whose owner chain
+    (`GetWindow(GW_OWNER)`, up to 32 links) reaches the observed window, so a dialog opened by a
+    dialog counts too, nearest first, then in z-order. Each is skipped by the owner's walk (never
+    entered) and walked as its own root,
+    clipped to its own rectangle and labelled with its inventory title, else its UIA name, else
+    `popup`, right after its owner. Its elements are visited and charged to the element budget
+    once, so with a short budget the owner's rows come first, then the owned window's. This holds
+    for the foreground fallback too (an untitled or tool window in front that the inventory does
+    not flag active; its root comes from the `UiRoots.FirstAvailable` ladder, which in an
+    observation stops at a timeout instead of falling to the next rung; a plain `snapshot` there
+    reads no native handle or process id of that root, as before). So an owned dialog reaching outside its owner is observed whole and once.
+    The plain `snapshot` tool includes neither popups nor this (parity D-39, D-43).
+  - `observe:window` observes the top-level window the target element belongs to, resolved
+    **before** the action from the nearest native handle via Win32 `GetAncestor(GA_ROOT)`, so an
+    element in an owned dialog answers the dialog, not its owner (UI Automation nests owned windows
+    under the owner). It needs an element target: `key`, `shortcut` and a coordinate, cursor or
+    focus target refuse it; `drag` uses the destination element, else the origin element. An
+    unknown, expired or destroyed id, or an element whose window cannot be determined, refuses
+    the call with nothing sent. A window observed by handle need not be in the inventory
+    (untitled and tool windows work); if the action closed it (a dialog's OK button), the
+    foreground window is observed instead and the header says so. A **timeout** while resolving or
+    probing that window (a hung provider) is not read as "closed": the result gets the failure
+    note below, and the foreground window is not shown in its place.
+  - `observe` and `settle_ms` are validated, and the window looked up, before the tool's own
+    argument checks and before any input; an action that throws observes nothing. A snapshot that
+    fails afterwards never fails the action: the result is followed by `Observation failed: <why>
+    The action above was performed, so do not repeat it; call snapshot to see the result.` Only
+    `click` and `key` carry the request's cancellation token — cancelling them during the settle
+    wait or the snapshot drops the result although the action was performed; the other five
+    tools' wait and snapshot cannot be cancelled (parity D-40). A UI Automation **timeout** (a
+    hung provider) from **any** step of an observation's snapshot — resolving the foreground,
+    title-matched or by-handle window (the foreground-root ladder included: a hung foreground
+    window no longer falls through to the focused element or the desktop root), finding its owned
+    windows, the name read that labels an unlisted, owned, fallback or popup window, any read in
+    the walk (the subtree cache fetch, every node property and pattern read, the children read),
+    or the popup pass (listing the desktop's windows; for one of the observed process's own
+    popups, its offscreen flag, bounds, label and walk) — ends in that same failure note rather
+    than a snapshot missing rows. The one exception: a desktop window that is only a popup
+    *candidate* — until its native handle and process id have answered and show it belongs to a
+    walked process — is skipped and logged when either read times out, so a hung window of an
+    unrelated application cannot fail the observation of a healthy one (parity D-47). Other failures
+    there keep their behaviour (a popup that cannot
+    be read is skipped and logged; a desktop list that cannot be read costs the popups, not the
+    snapshot), and the plain `snapshot` tool still logs and skips a window that times out.
+  New `IUIAutomationService.GetElementWindowAsync(elementId, ct)` → the window handle (its
+  liveness check is `ClosedNotHung`, so a timeout on that pre-action read refuses `observe:window`
+  before any input rather than reading as a destroyed element);
+  `SnapshotRequest` gains `WindowHwnd` (with `Scope == Window`, one window by handle instead of a
+  title — refused with a title or another scope; a handle that no longer names a window is a
+  `KeyNotFoundException`, a timeout resolving or probing it propagates as a `TimeoutException`)
+  and `IncludePopups` (the process's popups and the owned windows nested under each walked
+  window; `OwnedWindowsUnder`, `ClosedNotHung`, the per-window `WalkWindow`, and
+  `UiTraverser.Walk`'s optional `skipHandles` and `timeoutsPropagate`) and the `ForegroundRoot`
+  and `OwnedWindowsOf` (default `Win32OwnedWindows`: `EnumWindows` + `GetWindow(GW_OWNER)`) test
+  seams. One shared helper, `Tools/Observation.cs`
+  (`AroundAsync`, with a `Delay` seam), behind thin wrappers over private `XxxCore` methods in
+  `Tools/InputTools.cs` and `Tools/UIAutomationTools.cs`; `UIAutomationService` gains
+  `UnlistedWindow` and the `RootWindowOf` / `ElementFromHandle` test seams, and
+  `NativeMethods.txt` gains `GetAncestor` and `GetWindow`. The seven descriptions gain the observe paragraph; the
+  `snapshot` description, the expired-id message (`ElementCache`) and the server instructions
+  (`Hosting/ServerInstructions.cs`, now 1 978 characters) name "any action with observe" among
+  the calls that replace snapshot ids, and the instructions say observe:foreground returns the new
+  snapshot with the action. No tool added (still 69), no new service. Tests:
+  `ObservationToolsTests`, `ObservationSurfaceTests`, `UIAutomationServiceElementWindowTests`,
+  `UIAutomationSnapshotWindowHandleTests`, `UIAutomationSnapshotPopupsTests`,
+  `UIAutomationSnapshotOwnedWindowsTests`, `UIAutomationSnapshotOwnedWindowBudgetTests`,
+  `ObserveWindowTimeoutTests`, `UIAutomationSnapshotObservationTimeoutTests`,
+  `UiTraverserTimeoutTests`, `UIAutomationSnapshotObservationLabelTests`,
+  `UIAutomationSnapshotPopupTextTests`, `ObservePopupTextTests` and rows in `UiRootsTests` (Unit),
+  and
+  `UIAutomationServiceElementWindowIntegrationTests`,
+  `UIAutomationServiceObserveWindowsIntegrationTests` (real owner/owned-dialog pairs, a window
+  owned by an owned window, a hidden owned window, untitled, tool and popup windows in
+  `Fixtures/OwnedWindowFamily.cs`, the real `WindowService` and the real owner relation) and
+  `ObserveRealContextMenuIntegrationTests` (a real WinForms `ContextMenuStrip` in a child
+  PowerShell process, opened from code) and `ObservePopupTextIntegrationTests` (a real comctl32
+  tracking tooltip owned by its host, shown with no input, in `Fixtures/OwnedTrackingTooltip.cs`)
+  as Integration. Not verified live: the `UIAutomation`
+  category and a third-party app were not run. Gaps found and not fixed are parity D-39 … D-48.
 - **`find_element` filters by automation id, control type and class, searches inside an element,
   and pages** (E-4). Six parameters on an existing tool, so an unnamed icon button is one call by
   a stable property, and a dialog the caller already holds is searched on its own:

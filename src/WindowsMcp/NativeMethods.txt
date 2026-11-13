@@ -80,3 +80,5 @@ DEVMODEW
 VIRTUAL_KEY
 CreateFile
 GetFinalPathNameByHandle
+GetAncestor
+GetWindow

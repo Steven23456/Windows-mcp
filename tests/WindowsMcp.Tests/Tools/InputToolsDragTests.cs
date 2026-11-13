@@ -273,7 +273,8 @@ public class InputToolsDragTests
         var parameters = typeof(InputTools).GetMethod(nameof(InputTools.Drag))!.GetParameters();
 
         parameters.Select(p => p.Name).Should().Equal(
-            "from_x", "from_y", "to_x", "to_y", "element_id", "from_element_id", "button", "duration_ms", "steps");
+            "from_x", "from_y", "to_x", "to_y", "element_id", "from_element_id", "button", "duration_ms", "steps",
+            "observe", "settle_ms");   // E-5 appends these two (ObservationSurfaceTests)
         parameters.Should().OnlyContain(p => p.HasDefaultValue);
     }
 

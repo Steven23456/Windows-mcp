@@ -130,4 +130,115 @@ public class UiRootsTests
 
         act.Should().Throw<ArgumentException>();
     }
+
+    // ---- PR #43 U3: timeouts propagate when asked -------------------------------------------------
+    //
+    // An observation's foreground fallback must not turn a hung foreground window into a snapshot of
+    // the focused element or of the whole desktop under an "Observed the foreground window" header.
+
+    /// <summary>The three rungs; <paramref name="fail"/> names the one that throws <paramref name="ex"/>.</summary>
+    private static Func<Root?>[] Ladder(List<string> asked, string fail, Exception ex, bool foregroundIsNull = false) =>
+    [
+        () => { asked.Add("foreground"); return fail == "foreground" ? throw ex : foregroundIsNull ? null : Foreground; },
+        () => { asked.Add("focused"); return fail == "focused" ? throw ex : Focused; },
+        () => { asked.Add("desktop"); return fail == "desktop" ? throw ex : Desktop; },
+    ];
+
+    [Fact]
+    public void With_timeouts_propagating_a_hung_first_rung_propagates_and_no_later_rung_is_asked()
+    {
+        var hung = new TimeoutException("foreground window read timed out (wmcp-e5)");
+        var asked = new List<string>();
+
+        var act = () => UiRoots.FirstAvailable(true, Ladder(asked, "foreground", hung));
+
+        act.Should().Throw<TimeoutException>().Which.Should().BeSameAs(hung);
+        asked.Should().Equal(["foreground"], "not the focused element, and not the desktop");
+    }
+
+    [Fact]
+    public void With_timeouts_propagating_a_hung_middle_rung_propagates_and_the_desktop_is_not_asked()
+    {
+        var hung = new TimeoutException("focused element read timed out (wmcp-e5)");
+        var asked = new List<string>();
+
+        var act = () => UiRoots.FirstAvailable(true, Ladder(asked, "focused", hung, foregroundIsNull: true));
+
+        act.Should().Throw<TimeoutException>().Which.Should().BeSameAs(hung);
+        asked.Should().Equal(["foreground", "focused"]);
+    }
+
+    [Fact]
+    public void With_timeouts_propagating_a_hung_last_rung_propagates_as_the_last_rung_always_did()
+    {
+        var hung = new TimeoutException("desktop read timed out (wmcp-e5)");
+
+        var act = () => UiRoots.FirstAvailable<Root>(true, () => null, () => null, () => throw hung);
+
+        act.Should().Throw<TimeoutException>().Which.Should().BeSameAs(hung);
+    }
+
+    public static TheoryData<Exception> NotTimeouts => new()
+    {
+        new Win32Exception(unchecked((int)0x80004005), "Unexpected HRESULT"),
+        new InvalidOperationException("no foreground window (wmcp-e5)"),
+        new System.Runtime.InteropServices.COMException("RPC failed (wmcp-e5)", unchecked((int)0x800706BA)),
+    };
+
+    [Theory]
+    [MemberData(nameof(NotTimeouts))]
+    public void With_timeouts_propagating_any_other_failure_still_falls_through_to_the_next_rung(Exception failure)
+    {
+        var asked = new List<string>();
+
+        var root = UiRoots.FirstAvailable(true, Ladder(asked, "foreground", failure));
+
+        root.Should().BeSameAs(Focused);
+        asked.Should().Equal(["foreground", "focused"]);
+    }
+
+    [Fact]
+    public void With_timeouts_propagating_null_still_falls_through()
+    {
+        var asked = new List<string>();
+
+        var root = UiRoots.FirstAvailable(true, Ladder(asked, "none", new InvalidOperationException(), foregroundIsNull: true));
+
+        root.Should().BeSameAs(Focused);
+    }
+
+    [Fact]
+    public void With_timeouts_propagating_a_cancellation_still_propagates()
+    {
+        var cancelled = new OperationCanceledException();
+        var asked = new List<string>();
+
+        var act = () => UiRoots.FirstAvailable(true, Ladder(asked, "foreground", cancelled));
+
+        act.Should().Throw<OperationCanceledException>().Which.Should().BeSameAs(cancelled);
+        asked.Should().Equal(["foreground"]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(null)]
+    public void Without_propagation_a_timeout_falls_through_as_today(bool? explicitFalse)
+    {
+        // Guard: get_state and find keep the lenient ladder; the params-only overload means false.
+        var asked = new List<string>();
+        var ladder = Ladder(asked, "foreground", new TimeoutException("timed out (wmcp-e5)"));
+
+        var root = explicitFalse is null ? UiRoots.FirstAvailable(ladder) : UiRoots.FirstAvailable(false, ladder);
+
+        root.Should().BeSameAs(Focused);
+        asked.Should().Equal(["foreground", "focused"]);
+    }
+
+    [Fact]
+    public void The_propagating_overload_refuses_an_empty_ladder_too()
+    {
+        var act = () => UiRoots.FirstAvailable<Root>(true);
+
+        act.Should().Throw<ArgumentException>();
+    }
 }

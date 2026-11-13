@@ -25,7 +25,11 @@ public sealed class InputTools
         _input = input;
         _clipboard = clipboard;
         Uia = uia;
+        Observation = new Observation(uia);
     }
+
+    /// <summary>E-5: what observe takes after an action (the snapshot, its settle delay and its text).</summary>
+    internal Observation Observation { get; }
 
     private static MouseButton ParseButton(string s) => s.ToLowerInvariant() switch
     {
@@ -128,15 +132,20 @@ public sealed class InputTools
                 releaseFailure);
     }
 
-    [McpServerTool(Title = "Click", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Click at a point or on a snapshot element. Give x and y (physical virtual-desktop pixels: origin = top-left of the primary monitor, so monitors left of / above it have negative values; see multi_monitor) or element_id (an el_N id from snapshot/find_element; the click lands on the element's centre, and an off-screen element is refused with the reason). clicks: 1 single, 2 double, 3 triple, 0 = hover only (move the pointer there, press nothing). modifiers holds ctrl, shift and/or alt for the click (ctrl+shift; shift-click selects a range, ctrl-click adds to a selection): the pointer moves to the target before the keys go down, the click is sent, and the keys are released even if the click fails or the call is cancelled; a failed release is retried once, and if the release fails again the error names the key that may still be down and says the click was sent. Returns {action: click|hover, x, y, button, clicks, elementId?, name?, modifiers?}.")]
-    public async Task<string> Click(
+    [McpServerTool(Title = "Click", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Click at a point or on a snapshot element. Give x and y (physical virtual-desktop pixels: origin = top-left of the primary monitor, so monitors left of / above it have negative values; see multi_monitor) or element_id (an el_N id from snapshot/find_element; the click lands on the element's centre, and an off-screen element is refused with the reason). clicks: 1 single, 2 double, 3 triple, 0 = hover only (move the pointer there, press nothing). modifiers holds ctrl, shift and/or alt for the click (ctrl+shift; shift-click selects a range, ctrl-click adds to a selection): the pointer moves to the target before the keys go down, the click is sent, and the keys are released even if the click fails or the call is cancelled; a failed release is retried once, and if the release fails again the error names the key that may still be down and says the click was sent. Returns {action: click|hover, x, y, button, clicks, elementId?, name?, modifiers?}." + Observation.ToolNote + Observation.CancelNote)]
+    public Task<string> Click(
         [Description("X coordinate in physical pixels (virtual desktop); give with y, or use element_id")] int? x = null,
         [Description("Y coordinate in physical pixels (virtual desktop); give with x, or use element_id")] int? y = null,
         [Description("Element id (el_N) from snapshot or find_element; the click lands on its centre. Alternative to x/y")] string? element_id = null,
         [Description("Mouse button: left, right, or middle")] string button = "left",
         [Description("Number of clicks: 1 single, 2 double, 3 triple, 0 = hover only")] int clicks = 1,
         [Description("Keys to hold during the click: ctrl, shift, alt, joined with '+' (e.g. shift, ctrl+shift). They are released afterwards even if the click fails. Omit for a plain click")] string? modifiers = null,
+        [Description(Observation.ObserveParameter)] string observe = "none",
+        [Description(Observation.SettleParameter)] int settle_ms = 250,
         CancellationToken ct = default)
+        => Observation.AroundAsync(observe, settle_ms, element_id, ct, () => ClickCore(x, y, element_id, button, clicks, modifiers, ct));
+
+    private async Task<string> ClickCore(int? x, int? y, string? element_id, string button, int clicks, string? modifiers, CancellationToken ct)
     {
         var parsedButton = ParseButton(button);
         if (clicks < 0)
@@ -165,8 +174,8 @@ public sealed class InputTools
         return JsonSerializer.Serialize(new { action = "click", x = target.X, y = target.Y, button = parsedButton.ToString().ToLowerInvariant(), clicks, elementId = target.ElementId, name = target.Name, modifiers = held.Length == 0 ? null : string.Join('+', held) });
     }
 
-    [McpServerTool(Title = "Drag", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Drag with the button held: press at the origin, move through intermediate points (a first nudge past the system drag threshold, then 'steps' interpolated moves spread over duration_ms, so file managers, canvases and browser drag-and-drop recognise it), release on the destination. Destination: to_x/to_y or element_id (the element's centre). Origin: from_x/from_y, from_element_id, or nothing = the current cursor position. Coordinates are physical virtual-desktop pixels like click. duration_ms 0-10000 (default 300), steps 2-200 (default 20). Returns {fromX, fromY, toX, toY, button, durationMs, steps, fromTarget: point|element|cursor, elementId?, name?}.")]
-    public async Task<string> Drag(
+    [McpServerTool(Title = "Drag", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Drag with the button held: press at the origin, move through intermediate points (a first nudge past the system drag threshold, then 'steps' interpolated moves spread over duration_ms, so file managers, canvases and browser drag-and-drop recognise it), release on the destination. Destination: to_x/to_y or element_id (the element's centre). Origin: from_x/from_y, from_element_id, or nothing = the current cursor position. Coordinates are physical virtual-desktop pixels like click. duration_ms 0-10000 (default 300), steps 2-200 (default 20). Returns {fromX, fromY, toX, toY, button, durationMs, steps, fromTarget: point|element|cursor, elementId?, name?}." + Observation.ToolNote)]
+    public Task<string> Drag(
         [Description("Origin x; give with from_y, or use from_element_id, or omit both to start at the cursor")] int? from_x = null,
         [Description("Origin y; give with from_x")] int? from_y = null,
         [Description("Destination x; give with to_y, or use element_id")] int? to_x = null,
@@ -175,7 +184,12 @@ public sealed class InputTools
         [Description("Origin element id (el_N); the drag starts at its centre. Alternative to from_x/from_y")] string? from_element_id = null,
         [Description("Mouse button: left or right (middle is not supported)")] string button = "left",
         [Description("Total time of the motion in milliseconds, 0-10000")] int duration_ms = 300,
-        [Description("Number of intermediate moves, 2-200")] int steps = 20)
+        [Description("Number of intermediate moves, 2-200")] int steps = 20,
+        [Description(Observation.ObserveParameter)] string observe = "none",
+        [Description(Observation.SettleParameter)] int settle_ms = 250)
+        => Observation.AroundAsync(observe, settle_ms, element_id ?? from_element_id, CancellationToken.None, () => DragCore(from_x, from_y, to_x, to_y, element_id, from_element_id, button, duration_ms, steps));
+
+    private async Task<string> DragCore(int? from_x, int? from_y, int? to_x, int? to_y, string? element_id, string? from_element_id, string button, int duration_ms, int steps)
     {
         var parsedButton = ParseButton(button);
         if (duration_ms is < 0 or > 10000)
@@ -204,8 +218,8 @@ public sealed class InputTools
         return $"hovered at ({x},{y}) for {duration_ms}ms";
     }
 
-    [McpServerTool(Title = "Type text", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Type text. With no target it types at the current keyboard focus; with x/y or element_id (an el_N id from snapshot) it clicks that point or the element's centre first. clear:true selects all and deletes before typing (replace a field's content); caret: idle (default, type where the caret is) | start | end (move to the start/end of the text first); press_enter:true presses Enter last. Short text is typed key by key with newlines as Enter and tabs as Tab, paced by pace_ms; text of 200+ characters with no other control characters is pasted through the clipboard in one keystroke and the previous clipboard text is put back. Returns {typed, method: keys|paste, clipboardRestored?, x?, y?, elementId?, name?}.")]
-    public async Task<string> Type(
+    [McpServerTool(Title = "Type text", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Type text. With no target it types at the current keyboard focus; with x/y or element_id (an el_N id from snapshot) it clicks that point or the element's centre first. clear:true selects all and deletes before typing (replace a field's content); caret: idle (default, type where the caret is) | start | end (move to the start/end of the text first); press_enter:true presses Enter last. Short text is typed key by key with newlines as Enter and tabs as Tab, paced by pace_ms; text of 200+ characters with no other control characters is pasted through the clipboard in one keystroke and the previous clipboard text is put back. Returns {typed, method: keys|paste, clipboardRestored?, x?, y?, elementId?, name?}." + Observation.ToolNote)]
+    public Task<string> Type(
         [Description("Text to type")] string text,
         [Description("X of a point to click first; give with y, or use element_id; omit both to type at the focus")] int? x = null,
         [Description("Y of a point to click first; give with x")] int? y = null,
@@ -213,7 +227,12 @@ public sealed class InputTools
         [Description("Select all and delete before typing (replace the field's content)")] bool clear = false,
         [Description("idle (type at the caret) | start | end (move to the start/end of the text first)")] string caret = "idle",
         [Description("Press Enter after the text")] bool press_enter = false,
-        [Description("Milliseconds between keystrokes when typing key by key (0 or more)")] int pace_ms = 5)
+        [Description("Milliseconds between keystrokes when typing key by key (0 or more)")] int pace_ms = 5,
+        [Description(Observation.ObserveParameter)] string observe = "none",
+        [Description(Observation.SettleParameter)] int settle_ms = 250)
+        => Observation.AroundAsync(observe, settle_ms, element_id, CancellationToken.None, () => TypeCore(text, x, y, element_id, clear, caret, press_enter, pace_ms));
+
+    private async Task<string> TypeCore(string text, int? x, int? y, string? element_id, bool clear, string caret, bool press_enter, int pace_ms)
     {
         if (pace_ms < 0)
             throw new ArgumentException($"pace_ms must be 0 or more, got {pace_ms}", nameof(pace_ms));
@@ -240,11 +259,16 @@ public sealed class InputTools
         });
     }
 
-    [McpServerTool(Title = "Press key", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Press one key: a character (a, 7, /), f1-f24, or a name (enter, tab, esc, backspace, delete, up/down/left/right, home, end, pageup, pagedown, insert, win, printscreen). repeat presses it 1-100 times in one call (ten Down arrows: key:'down', repeat:10); hold_ms keeps it down for up to 10000 ms and then releases it, held and not auto-repeated, for apps that read key state. Use one or the other, not both: hold_ms above 0 needs repeat left at 1. Both take a non-modifier key (not ctrl, shift, alt or win: hold those with click's modifiers or shortcut), and a held key must need no modifier on the current layout. Letters are not case-sensitive: A is the a key (shortcut shift+a types a capital). A repeat that fails part-way reports how many presses landed. Returns 'pressed <key>', 'pressed <key> N times' or 'held <key> for M ms'. For chords use shortcut.")]
-    public async Task<string> Key([Description("Key: a character, f1-f24, or a key name")] string key,
+    [McpServerTool(Title = "Press key", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Press one key: a character (a, 7, /), f1-f24, or a name (enter, tab, esc, backspace, delete, up/down/left/right, home, end, pageup, pagedown, insert, win, printscreen). repeat presses it 1-100 times in one call (ten Down arrows: key:'down', repeat:10); hold_ms keeps it down for up to 10000 ms and then releases it, held and not auto-repeated, for apps that read key state. Use one or the other, not both: hold_ms above 0 needs repeat left at 1. Both take a non-modifier key (not ctrl, shift, alt or win: hold those with click's modifiers or shortcut), and a held key must need no modifier on the current layout. Letters are not case-sensitive: A is the a key (shortcut shift+a types a capital). A repeat that fails part-way reports how many presses landed. Returns 'pressed <key>', 'pressed <key> N times' or 'held <key> for M ms'. For chords use shortcut." + Observation.ToolNoteNoElement + Observation.CancelNote)]
+    public Task<string> Key([Description("Key: a character, f1-f24, or a key name")] string key,
         [Description("Press the key this many times, 1-100 (default 1). Leave it at 1 when hold_ms is set")] int repeat = 1,
         [Description("Hold the key down for this many milliseconds, 0-10000 (default 0 = a normal press). The key is held, it does not auto-repeat. Only with repeat left at 1")] int hold_ms = 0,
+        [Description(Observation.ObserveParameterNoElement)] string observe = "none",
+        [Description(Observation.SettleParameter)] int settle_ms = 250,
         CancellationToken ct = default)
+        => Observation.AroundAsync(observe, settle_ms, null, ct, () => KeyCore(key, repeat, hold_ms, ct));
+
+    private async Task<string> KeyCore(string key, int repeat, int hold_ms, CancellationToken ct)
     {
         if (repeat is < 1 or > 100)
             throw new ArgumentException($"repeat must be between 1 and 100, got {repeat}", nameof(repeat));
@@ -296,21 +320,31 @@ public sealed class InputTools
         return $"pressed {key} {repeat} times";
     }
 
-    [McpServerTool(Title = "Press shortcut", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Press a chord: ctrl+c, ctrl+shift+s, win+r, alt+f4, ctrl+1. A single key such as win (opens Start) also works. Join parts with '+'; write plus for the + key.")]
-    public async Task<string> Shortcut([Description("Chord, e.g. 'ctrl+c' or 'win+r'; a bare key like 'win' is allowed")] string shortcut)
+    [McpServerTool(Title = "Press shortcut", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Press a chord: ctrl+c, ctrl+shift+s, win+r, alt+f4, ctrl+1. A single key such as win (opens Start) also works. Join parts with '+'; write plus for the + key." + Observation.ToolNoteNoElement)]
+    public Task<string> Shortcut([Description("Chord, e.g. 'ctrl+c' or 'win+r'; a bare key like 'win' is allowed")] string shortcut,
+        [Description(Observation.ObserveParameterNoElement)] string observe = "none",
+        [Description(Observation.SettleParameter)] int settle_ms = 250)
+        => Observation.AroundAsync(observe, settle_ms, null, CancellationToken.None, () => ShortcutCore(shortcut));
+
+    private async Task<string> ShortcutCore(string shortcut)
     {
         await _input.PressShortcutAsync(shortcut);
         return $"pressed {shortcut}";
     }
 
-    [McpServerTool(Title = "Scroll", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Scroll the mouse wheel. Coordinates are optional: give x and y (physical virtual-desktop pixels like click) to scroll at a point, element_id (an el_N id from snapshot; its centre) to scroll a specific region, or neither to scroll whatever is under the current cursor. amount is wheel notches. shift_wheel:true with left/right holds Shift and uses the vertical wheel, the horizontal scroll for apps that ignore the horizontal wheel. Returns {direction, amount, x, y, target: point|element|cursor, shiftWheel, elementId?, name?}.")]
-    public async Task<string> Scroll(
+    [McpServerTool(Title = "Scroll", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false), Description("Scroll the mouse wheel. Coordinates are optional: give x and y (physical virtual-desktop pixels like click) to scroll at a point, element_id (an el_N id from snapshot; its centre) to scroll a specific region, or neither to scroll whatever is under the current cursor. amount is wheel notches. shift_wheel:true with left/right holds Shift and uses the vertical wheel, the horizontal scroll for apps that ignore the horizontal wheel. Returns {direction, amount, x, y, target: point|element|cursor, shiftWheel, elementId?, name?}." + Observation.ToolNote)]
+    public Task<string> Scroll(
         [Description("up|down|left|right")] string direction,
         [Description("Wheel notches (default 3)")] int amount = 3,
         [Description("X to scroll at; give with y, or use element_id, or omit both to scroll under the cursor")] int? x = null,
         [Description("Y to scroll at; give with x")] int? y = null,
         [Description("Element id (el_N) whose centre to scroll at. Alternative to x/y")] string? element_id = null,
-        [Description("For left/right only: hold Shift and use the vertical wheel instead of the horizontal wheel")] bool shift_wheel = false)
+        [Description("For left/right only: hold Shift and use the vertical wheel instead of the horizontal wheel")] bool shift_wheel = false,
+        [Description(Observation.ObserveParameter)] string observe = "none",
+        [Description(Observation.SettleParameter)] int settle_ms = 250)
+        => Observation.AroundAsync(observe, settle_ms, element_id, CancellationToken.None, () => ScrollCore(direction, amount, x, y, element_id, shift_wheel));
+
+    private async Task<string> ScrollCore(string direction, int amount, int? x, int? y, string? element_id, bool shift_wheel)
     {
         var dir = direction.ToLowerInvariant();
         if (shift_wheel && dir is not ("left" or "right"))

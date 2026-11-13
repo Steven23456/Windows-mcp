@@ -53,4 +53,11 @@ public interface IUIAutomationService : IDisposable
     /// budget's verdict (A-4). Element ids are valid until the next snapshot (roadmap C5).
     /// </summary>
     Task<SnapshotResult> SnapshotAsync(SnapshotRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// E-5: the native handle of the top-level window an element belongs to, for observe:window —
+    /// looked up before an action, because the action may destroy the element. An element in an
+    /// owned dialog answers the dialog, not its owner.
+    /// </summary>
+    Task<long> GetElementWindowAsync(string elementId, CancellationToken ct = default);
 }

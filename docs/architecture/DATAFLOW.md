@@ -145,14 +145,42 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
    │     IWindowService.ListAsync(...)               → Windows, WindowFilter.ActiveOf
    ├─► Roots by scope: desktop = every non-minimised window (topmost first),
    │   foreground = the active entry (else UIA's foreground window),
-   │   window = title match, exact then substring
+   │   window = title match, exact then substring — or, with WindowHwnd (E-5,
+   │   observe:window), that one handle, listed in the inventory or not
+   │   (UnlistedWindow); a handle that is gone → KeyNotFoundException,
+   │   a timeout resolving/probing it (ClosedNotHung) → TimeoutException
    ├─► use_dom: a target window with IsBrowser is re-rooted on its page —
    │   FindPageDocument (Document + AutomationId "RootWebArea", retried
    │   because Chromium fills its tree lazily); no page → the whole window
    │   is walked and the Pages entry carries DomCorrection.NoPageNote
    └─► [STA thread] one ElementBudget for the whole call;
        UiTraverser.Walk(root, title, budget) per window under one CacheRequest;
-       a window whose walk throws is logged and skipped
+       a window whose walk throws is logged and skipped;
+       IncludePopups (E-5 observations only, not scope=desktop):
+         per walked window (WalkWindow; not a DOM page; the foreground
+         fallback too; needs a native handle), OwnedWindowsUnder first gets
+         its owned top-level windows from Win32 (OwnedWindowsOf = EnumWindows
+         + GetWindow(GW_OWNER) chain ≤ 32 links, visible only, nearest first)
+         and resolves each with ElementFromHandle (skip + log if gone); the owner's
+         Walk(..., skipHandles) does not enter them, and each is walked as its
+         own root right after the owner (inventory title, else UIA name, else
+         "popup"), never twice — its elements charged to the budget once,
+         the owner's rows first;
+         then every on-screen, unlisted, not-yet-walked top-level window of a
+         walked process — an open menu, a dropdown, a tooltip — same budget;
+         with IncludePopups a TimeoutException from ANY step propagates
+         (resolving a foreground / title / by-handle target; the foreground
+         fallback's UiRoots ladder, which stops at a timeout instead of
+         falling to the focused element or the desktop root; the label
+         name read of an unlisted/owned/fallback/popup window; discovery;
+         bookkeeping; every read in Walk(..., timeoutsPropagate): cache
+         fetch, property/pattern reads, children; the popup pass: desktop
+         list, and for the observed process's own popup its offscreen flag,
+         bounds, label and walk) — EXCEPT a popup candidate: a timeout on a
+         desktop window's handle or process-id read, before it is known to
+         belong to a walked process, skips it (logged); without IncludePopups a
+         timeout is a logged skip and the walk swallows it, as before (D-5),
+         and the foreground fallback reads no handle or process id of its root
 
 3. Per walked node → el_N id (ids the previous snapshot issued are evicted
    first) → UiTree.Project:
@@ -272,6 +300,67 @@ Output: {…, "modifiers":"ctrl+shift"}
 A release that fails twice after the click was sent is an `InvalidOperationException` saying the
 click was sent and naming the keys that may still be down; a failure of the click itself is
 rethrown unchanged.
+
+---
+
+## Observe Data Flow (E-5: action → settle → snapshot)
+
+`click`, `type`, `key`, `shortcut`, `scroll`, `drag` and `interact_element` each run their body
+(`XxxCore`) inside `Observation.AroundAsync`. With `observe:"none"` (the default) the only extra
+work is the parameter check and the result is the body's string untouched.
+
+```
+1. MCP Request: click(element_id="el_7", observe="window", settle_ms=400)
+
+2. Observation.PrepareAsync — before anything is sent
+   ├─► observe ∈ none|foreground|window (any case)   else ArgumentException
+   ├─► settle_ms ∈ 0..5000 (checked even for none)   else ArgumentException
+   └─► window only:
+         no element id (key, shortcut, x/y, cursor)  → ArgumentException "Use observe:foreground."
+         IUIAutomationService.GetElementWindowAsync("el_7")      [STA, Refusing]
+           el_7 or its nearest ancestor with a native handle
+             → RootWindowOf(handle) = GetAncestor(GA_ROOT)        (an owned dialog
+                                                                    answers itself)
+           unknown / expired / gone / undeterminable → refused, nothing sent
+           liveness = ClosedNotHung: a timeout on it propagates, also before any input
+         → hwnd
+
+3. action()  = ClickCore(...)   — the tool's own argument checks, target resolution, input
+               (throws → propagates; nothing is observed)
+             → "{\"action\":\"click\",...}"
+
+4. Delay(settle_ms, ct)          — ct is the request's token for click and key, None otherwise
+
+5. IUIAutomationService.SnapshotAsync
+     foreground: SnapshotRequest(Foreground, IncludePopups: true)
+     window:     SnapshotRequest(Window, WindowHwnd: hwnd, IncludePopups: true)
+                   KeyNotFoundException (the click closed it) →
+                   SnapshotRequest(Foreground, IncludePopups: true), header says so;
+                   TimeoutException (hung, not closed) → no fallback: failure note
+   — a real snapshot: the previous snapshot's ids are evicted, new ones issued
+
+6. Result (one text block):
+     <action result>
+     <blank line>
+     Observed the element's window after 400 ms (a new snapshot: el_N ids from earlier
+     snapshots are no longer valid)[; truncated at the element limit, so call snapshot
+     with scope, window or max_elements for the rest]:
+     <SnapshotRenderer.Render(snapshot)>
+     [<blank line>
+      Popup text (not controls, no ids):          — only when snapshot.PopupText has lines:
+      <popup label>: <text>                         named non-interactive nodes of owned windows
+      ...]                                          and desktop popups, ≤ 50 lines, text ≤ 200
+                                                    chars, label one line ≤ 80
+
+   Step 5 throws (not a cancellation) →
+     <action result>
+     <blank line>
+     Observation failed: <caller-facing message | an unexpected fault (Type).> The action
+     above was performed, so do not repeat it; call snapshot to see the result.
+```
+
+The S-11 indicator brackets the whole call, settle wait and snapshot included, since the call-tool
+filter wraps the tool method; a takeover during the wait does not stop it (parity D-45).
 
 ---
 
@@ -1059,6 +1148,7 @@ Scrollable (1):
 | `InputService.DragAsync(…, durationMs, steps)` | `durationMs / steps` between the interpolated moves (default 300 ms / 20 = 15 ms), including after the last one; `durationMs:0` moves without pausing | A drop target needs real motion, not a teleport; the button is released in a `finally`, so a cancelled drag never leaves it down |
 | `wait` (`InputTools`) | The only tool whose *job* is a delay: one `Task.Delay(seconds)` on the request's cancellation token, `seconds` in (0, 60] | Validated in the tool before the delay; outside the range is an `ArgumentException` naming it and pointing at `wait_for`. No process is spawned — it replaces `powershell("Start-Sleep")`, which paid a cold start and took the serialization gate |
 | `key` (`InputTools`, E-3) | `repeat:N` waits `RepeatPace` (5 ms) between presses, never after the last; `hold_ms:M` (0–10000) is one key-down, a `Delay` of M ms on the request's token, one key-up | Both delays go through the internal `InputTools.Delay` seam so the unit tests do not sleep. A cancelled hold still releases the key (on a non-cancellable token); a held key is not auto-repeated |
+| `observe` (`Observation`, E-5) | After the action of `click`, `type`, `key`, `shortcut`, `scroll`, `drag` or `interact_element` with `observe` other than `none`: one `Delay` of `settle_ms` (0–5000, default 250; 0 skips it), then one snapshot | Through the internal `Observation.Delay` seam so the unit tests do not sleep. Cancellable only on `click` and `key` (the request's token); the other five wait it out (parity D-40) |
 | `launch`'s window wait | `LaunchWait.ForWindowAsync` reads the inventory immediately, then every 250 ms until `timeout_ms` (default 10 000, max 60 000); the last sleep is clamped to the remaining budget | A timeout is `WindowDetected:false` with the pid, never an exception — a packaged app or a browser may hand its window to another process |
 | `AppCatalogService` | The catalog is read from the Start Menu and the package manager at most once per 5 minutes; a resolve miss forces one extra refresh | Enumerating a few hundred packages costs ~1 s cold, which is why it is cached rather than read per `launch` |
 | `ProcessService.ListAsync(ProcessListOptions)` | One 250 ms window (`CpuSampleWindow`) between the two `TotalProcessorTime` readings of every plain `process(list)` | Each reading is timestamped per process, so a walk of a few hundred processes does not over-credit the ones read first. `orphans`, `includeLineage`, `groupByRoot` and the `ListAsync(nameFilter)` overload do not sample and pay nothing; the delay is injected, so the unit tests do not pay it either |

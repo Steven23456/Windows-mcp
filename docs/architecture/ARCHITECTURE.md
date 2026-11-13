@@ -142,8 +142,8 @@ public sealed class InputTools
 
 | Tool Class | Tools | Services Injected |
 |------------|-------|------------------|
-| `InputTools` | 11 | `IInputService`, `IClipboardService`, `IUIAutomationService` (B-4: resolves `element_id` to a point) |
-| `UIAutomationTools` | 9 | `IUIAutomationService` |
+| `InputTools` | 11 | `IInputService`, `IClipboardService`, `IUIAutomationService` (B-4: resolves `element_id` to a point; E-5: the `Observation` it builds from it takes the observe snapshot) |
+| `UIAutomationTools` | 9 | `IUIAutomationService` (also behind `interact_element`'s E-5 `Observation`) |
 | `FileTools` | 9 | `IFileSystemService`, `IInputService`, `IFileStreamService` |
 | `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService` |
 | `WindowTools` | 5 | `IWindowService`, `IVirtualDesktopService` |
@@ -326,7 +326,10 @@ Windows-mcp.slnx
 │   │   │   ├── StartupTools.cs
 │   │   │   ├── IntegrityTools.cs
 │   │   │   ├── UsnTools.cs
-│   │   │   └── WatchTools.cs
+│   │   │   ├── WatchTools.cs
+│   │   │   ├── Observation.cs         (E-5: observe/settle_ms behind the seven action tools;
+│   │   │   │                           a helper, not a tool class)
+│   │   │   └── ISamplingClient.cs     (C-5: the sampling seam scrape's summarize uses)
 │   │   ├── Services/                      (40 service implementations + helpers)
 │   │   │   ├── InputService.cs            (+ TypePlanner, DragPath, IKeyboardSink and
 │   │   │   │                               SimulatorKeyboardSink — B-1's typing plan and

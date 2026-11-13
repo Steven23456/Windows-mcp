@@ -524,6 +524,21 @@ public class ElementCacheTests
         message.Should().Contain("scrape", "source:dom is a snapshot walk too (R17)");
     }
 
+    [Fact]
+    public void Get_on_an_expired_id_names_an_action_with_observe_among_the_snapshot_takers()
+    {
+        // E-5: click, type, key, shortcut, scroll, drag and interact_element with observe other
+        // than none end with a snapshot, which expires the ids of the one before it. A caller that
+        // observed and then used an id from its earlier snapshot has to be able to read why.
+        var cache = new ElementCache<Probe>(2);
+        var gone = cache.AddSnapshot(P("s"));
+        cache.EvictSnapshot();
+
+        var act = () => cache.Get(gone);
+
+        act.Should().Throw<KeyNotFoundException>().Which.Message.Should().Contain("observe");
+    }
+
     // ---- R18: Remove ---------------------------------------------------------------------------
 
     [Fact]

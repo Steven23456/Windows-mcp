@@ -879,7 +879,7 @@ public class InputToolsClickModifiersTests
 
         properties.TryGetProperty("modifiers", out _).Should().BeTrue();
         properties.EnumerateObject().Select(p => p.Name).Should()
-            .BeEquivalentTo(new[] { "x", "y", "element_id", "button", "clicks", "modifiers" },
+            .BeEquivalentTo(new[] { "x", "y", "element_id", "button", "clicks", "modifiers", "observe", "settle_ms" },   // E-5 adds the last two
                 "the CancellationToken is bound by the SDK, not supplied by the client");
     }
 

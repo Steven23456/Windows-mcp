@@ -131,7 +131,11 @@ public record SnapshotRequest(
     string? WindowTitle = null,
     bool IncludeTree = false,
     int MaxElements = 0,
-    bool UseDom = false);
+    bool UseDom = false,
+    // E-5: with Scope == Window, the one inventory window with this handle, instead of a title.
+    long WindowHwnd = 0,
+    // E-5 R3: also walk the same process's other on-screen top-level windows (an open menu, a dropdown, a tooltip).
+    bool IncludePopups = false);
 
 /// <summary>
 /// A-4 (roadmap C7): the process-level element budget, set from <c>WINDOWSMCP_MAX_TREE_ELEMENTS</c>
@@ -236,7 +240,11 @@ public record SnapshotResult(
     int ElementCount,
     long CaptureMs,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StageTiming[]? Stages = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SnapshotPage[]? Pages = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SnapshotPage[]? Pages = null,
+    // E-5: for an observation only — what the popups it walked SAY: the plain text of each owned
+    // window lifted out of its owner and each desktop-level popup, as "<label>: <text>" lines.
+    // Text is not a control, so it has no row and no id; null for every other snapshot.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[]? PopupText = null);
 
 // ---- B-6 wait_for conditions --------------------------------------------------------------
 

@@ -24,7 +24,29 @@ internal sealed class UiTraverser
 
     internal UiTraverser(UIA3Automation automation) => _automation = automation;
 
-    internal IReadOnlyList<UiWalkEntry> Walk(AutomationElement root, string windowTitle, ElementBudget budget)
+    /// <summary>
+    /// E-5: set for the length of a <see cref="Walk"/> asked to let timeouts out. The reads below
+    /// are static helpers, each guarded on its own (D-5); this is how every one of them — the
+    /// cache fetch, each property and pattern read, the bounds — learns that for this walk a
+    /// timeout is not "unreadable" but a hung provider the caller must hear about. A walk runs on
+    /// one thread from start to finish, so the flag is per thread.
+    /// </summary>
+    [ThreadStatic] private static bool t_timeoutsPropagate;
+
+    /// <param name="skipHandles">
+    /// E-5: native handles of windows nested under <paramref name="root"/> that are walked as roots
+    /// of their own (owned dialogs and popups). The walk does not enter them, so their elements
+    /// are neither listed here nor charged to the budget here. Null (every caller but an
+    /// observation) reads no handle and changes nothing.
+    /// </param>
+    /// <param name="timeoutsPropagate">
+    /// E-5: for an observation, a provider that times out while its children are read ends the
+    /// walk with that <see cref="TimeoutException"/> instead of quietly leaving the subtree out —
+    /// the caller is then told the observation failed, not shown a window with rows missing.
+    /// False (every other caller) keeps the D-5 rule: nothing a dying element does fails a walk.
+    /// </param>
+    internal IReadOnlyList<UiWalkEntry> Walk(AutomationElement root, string windowTitle, ElementBudget budget,
+        IReadOnlySet<long>? skipHandles = null, bool timeoutsPropagate = false)
     {
         var entries = new List<UiWalkEntry>();
 
@@ -60,26 +82,38 @@ internal sealed class UiTraverser
         })
             request.Add(id);
 
+        bool outer = t_timeoutsPropagate;
+        t_timeoutsPropagate = timeoutsPropagate;
+        try
+        {
         using (request.Activate())
         {
             // Re-fetch the root under the request so its subtree comes back cached.
             AutomationElement cachedRoot;
             try { cachedRoot = root.FindFirst(TreeScope.Element, TrueCondition.Default) ?? root; }
+            catch (TimeoutException) when (t_timeoutsPropagate) { throw; }
             catch { cachedRoot = root; }
 
             var windowRect = ReadBounds(cachedRoot) ?? new Bounds(0, 0, 0, 0);
-            Visit(cachedRoot, windowTitle, windowRect, depth: 0, parentIndex: -1, budget, entries);
+            Visit(cachedRoot, windowTitle, windowRect, depth: 0, parentIndex: -1, budget, entries, skipHandles, timeoutsPropagate);
         }
+        }
+        finally { t_timeoutsPropagate = outer; }
         return entries;
     }
 
     private void Visit(AutomationElement el, string window, Bounds windowRect, int depth, int parentIndex,
-        ElementBudget budget, List<UiWalkEntry> entries)
+        ElementBudget budget, List<UiWalkEntry> entries, IReadOnlySet<long>? skipHandles, bool timeoutsPropagate)
     {
         if (budget.Truncated) return;
+        // The handle is in the cache request, so this costs no call to the provider.
+        if (skipHandles is not null && depth > 0
+            && skipHandles.Contains(Try(() => el.Properties.NativeWindowHandle.ValueOrDefault.ToInt64(), 0L)))
+            return;
 
         UiNode? node;
         try { node = ReadNode(el, window, windowRect, depth); }
+        catch (TimeoutException) when (t_timeoutsPropagate) { throw; }
         catch { return; }   // died between the fetch and the read: skip it and its subtree
 
         int myIndex = parentIndex;
@@ -91,20 +125,22 @@ internal sealed class UiTraverser
         }
 
         AutomationElement[] children;
-        try { children = Children(el); }
+        try { children = Children(el, timeoutsPropagate); }
+        catch (TimeoutException) when (timeoutsPropagate) { throw; }
         catch { return; }
 
         foreach (var child in children)
         {
             if (budget.Truncated) return;
-            Visit(child, window, windowRect, depth + 1, myIndex, budget, entries);
+            Visit(child, window, windowRect, depth + 1, myIndex, budget, entries, skipHandles, timeoutsPropagate);
         }
     }
 
     /// <summary>Cached children when the request delivered them, a live query otherwise.</summary>
-    private static AutomationElement[] Children(AutomationElement el)
+    private static AutomationElement[] Children(AutomationElement el, bool timeoutsPropagate)
     {
         try { return el.CachedChildren; }
+        catch (TimeoutException) when (timeoutsPropagate) { throw; }
         catch { return el.FindAllChildren(); }
     }
 
@@ -184,6 +220,7 @@ internal sealed class UiTraverser
             var b = el.Properties.BoundingRectangle.ValueOrDefault;
             return new Bounds((int)b.X, (int)b.Y, (int)b.Width, (int)b.Height);
         }
+        catch (TimeoutException) when (t_timeoutsPropagate) { throw; }
         catch { return null; }
     }
 
@@ -200,6 +237,8 @@ internal sealed class UiTraverser
 
     private static T Try<T>(Func<T> read, T fallback)
     {
-        try { return read(); } catch { return fallback; }
+        try { return read(); }
+        catch (TimeoutException) when (t_timeoutsPropagate) { throw; }
+        catch { return fallback; }
     }
 }
