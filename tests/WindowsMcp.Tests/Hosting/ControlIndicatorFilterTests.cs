@@ -54,7 +54,13 @@ public class ControlIndicatorFilterTests
         public McpClient Client { get; private set; } = null!;
 
         /// <summary>A takeover the indicator will hand to the next <c>ConsumeTakeover</c>, once - like the real one.</summary>
-        public void Pend(TakeoverRecord record) => Volatile.Write(ref _pending, record);
+        public void Pend(TakeoverRecord record)
+        {
+            Interlocked.Increment(ref _takeovers);   // E-6: like the real one, every recorded takeover moves the count
+            Volatile.Write(ref _pending, record);
+        }
+
+        private long _takeovers;
 
         public void ResetCalls()
         {
@@ -68,6 +74,9 @@ public class ControlIndicatorFilterTests
             rig.Indicator.Setup(i => i.BeginAction()).Callback(() => rig.Events.Enqueue("begin"));
             rig.Indicator.Setup(i => i.EndAction()).Callback(() => rig.Events.Enqueue("end"));
             rig.Indicator.Setup(i => i.ConsumeTakeover()).Returns(() => Interlocked.Exchange(ref rig._pending, null));
+            // E-6: like the real one, the flag reads the record without consuming it.
+            rig.Indicator.SetupGet(i => i.TakeoverPending).Returns(() => Volatile.Read(ref rig._pending) is not null);
+            rig.Indicator.SetupGet(i => i.TakeoverCount).Returns(() => Interlocked.Read(ref rig._takeovers));
             rig.Indicator.Setup(i => i.SuspendForCapture()).Returns(() => Mock.Of<IDisposable>());
 
             rig._server = await HttpTransportTests.Harness.StartAsync(configureServices: services =>
@@ -158,6 +167,7 @@ public class ControlIndicatorFilterTests
             ["file_dialog"] = new() { ["path"] = "note.txt" },
             ["focus"] = new() { ["title"] = "no such window" },
             ["switch_to_window"] = new() { ["title"] = "no such window" },
+            ["sequence"] = new() { ["steps_json"] = "[{\"tool\":\"key\",\"args\":{\"key\":\"a\"}}]" },
         };
         args.Keys.Should().BeEquivalentTo(DrivingToolsTests.DesignNoteNames, "the sweep covers the design note's whole list");
         await using var rig = await Rig.StartAsync();
@@ -394,6 +404,75 @@ public class ControlIndicatorFilterTests
         result.Content[result.Content.Count - 2].Should().BeOfType<ImageContentBlock>("the picture is untouched and directly before the note");
         ShouldEndWithTheNote(result);
         rig.Indicator.Verify(i => i.BeginAction(), Times.Never, "screenshot is not a driving tool");
+    }
+
+    // ---- E-6: a sequence the user took over --------------------------------------------------------
+
+    private static Dictionary<string, object?> SequenceArgs(params string[] keys) => new()
+    {
+        ["steps_json"] = "[" + string.Join(",", keys.Select(k => $$$"""{"tool":"key","args":{"key":"{{{k}}}"}}""")) + "]",
+    };
+
+    /// <summary>
+    /// <see cref="ShouldEndWithTheNote"/> for a sequence: its own JSON says "The user took over ..."
+    /// by design (the stop's <c>error</c>), so "took over" alone cannot tell the note from the
+    /// result. The filter's note is the one block naming the combination, and it is the last.
+    /// </summary>
+    private static void ShouldEndWithTheSequenceNote(CallToolResult result)
+    {
+        result.Content.Should().NotBeEmpty();
+        result.Content.Count(b => b is TextContentBlock t && t.Text.Contains(Hotkey, StringComparison.Ordinal))
+            .Should().Be(1, "the filter's note is delivered once, as one block");
+        var note = TextOf(result.Content[result.Content.Count - 1]);
+        note.Should().ContainEquivalentOf("took over", "the AI is told the user took the controls back");
+        note.Should().Contain(Hotkey, "and with which combination");
+    }
+
+    [Fact]
+    public async Task A_sequence_with_a_takeover_already_pending_runs_nothing_and_still_ends_with_the_note()
+    {
+        // The takeover was made while the indicator faded after the previous call. The sequence reads
+        // the flag before step 0, sends nothing, and leaves the record for the filter's note.
+        await using var rig = await Rig.StartAsync();
+        rig.Input.Setup(i => i.PressKeyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback((string key, CancellationToken _) => rig.Events.Enqueue($"key:{key}"))
+            .Returns(Task.CompletedTask);
+        rig.Pend(Takeover);
+
+        var result = await rig.CallAsync("sequence", SequenceArgs("a", "b"));
+
+        result.IsError.Should().NotBe(true, "a stopped batch is a normal result (B-7), not an error");
+        result.Content.Should().HaveCount(2, "the sequence's JSON, then the note");
+        var json = System.Text.Json.JsonDocument.Parse(TextOf(result.Content[0])).RootElement;
+        json.GetProperty("stoppedBy").GetString().Should().Be("takeover");
+        json.GetProperty("completed").GetInt32().Should().Be(0);
+        ShouldEndWithTheSequenceNote(result);
+        rig.Events.Should().Equal(["begin", "end"], "sequence is a driving tool, and no key was sent");
+        rig.Input.Verify(i => i.PressKeyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task A_takeover_between_steps_stops_the_sequence_and_the_note_is_the_last_block()
+    {
+        await using var rig = await Rig.StartAsync();
+        rig.Input.Setup(i => i.PressKeyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback((string key, CancellationToken _) =>
+            {
+                rig.Events.Enqueue($"key:{key}");
+                if (key == "b") rig.Pend(Takeover);   // the user presses the combination during step 1
+            })
+            .Returns(Task.CompletedTask);
+
+        var result = await rig.CallAsync("sequence", SequenceArgs("a", "b", "c"));
+
+        result.IsError.Should().NotBe(true);
+        result.Content.Should().HaveCount(2);
+        var json = System.Text.Json.JsonDocument.Parse(TextOf(result.Content[0])).RootElement;
+        json.GetProperty("stoppedBy").GetString().Should().Be("takeover");
+        json.GetProperty("completed").GetInt32().Should().Be(2);
+        json.GetProperty("error").GetString().Should().Be("The user took over the mouse and keyboard; step 2 was not run.");
+        ShouldEndWithTheSequenceNote(result);
+        rig.Events.Should().Equal(["begin", "key:a", "key:b", "end"], "one bracket around the whole batch; step 2 never ran");
     }
 
     // ---- F1: a takeover is never spent on a result the client will not read ------------------------

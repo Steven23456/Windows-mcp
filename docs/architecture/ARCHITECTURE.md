@@ -14,7 +14,7 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Tool Layer                                         │
-│                 (19 [McpServerToolType] classes, 69 tools)                   │
+│                 (20 [McpServerToolType] classes, 70 tools)                   │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐  │
 │  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │  │
 │  │ 11 tools   │ │  9 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │  │
@@ -25,7 +25,7 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
 │  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └────────────┘  │
 │  ShellTools(1) · JobTools(1) · DiskTools(1) · StorageTools(1)                │
 │  SecurityTools(3) · StartupTools(1) · IntegrityTools(1)                      │
-│  UsnTools(1) · WatchTools(1)                                                 │
+│  UsnTools(1) · WatchTools(1) · SequenceTools(1)                              │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │ constructor injection
                                     ▼
@@ -84,7 +84,7 @@ The MCP SDK (`ModelContextProtocol.Server`) handles all protocol concerns:
 - **Server Instructions (E-1)**: `ServerInstructions = ServerInstructions.Text` (`Hosting/ServerInstructions.cs`) — sent in the `initialize` result on both transports, so a client that never loads `skills/windows/SKILL.md` still gets the snapshot → act → confirm loop and the safety rails. At most 2 000 characters of printable ASCII with `\n` breaks; every sentence is a claim `ServerInstructionsTests` pins against the code (tool names, parameters, the never-ask list = every `Destructive` tool with no `confirm` parameter, the takeover note, what evicts snapshot ids)
 - **Shared wiring**: `WindowsMcpHost.AddWindowsMcp(options)` holds the service registrations, server identity and instructions, caller-facing error filter and tool discovery, so both transports are configured identically; only the transport call differs.
 - **Caller-facing errors**: the call-tool filter returns `ToolErrors.MessageFor(ex)` — the exception's own message, capped at 2 000 characters — for `ArgumentException`, `InvalidOperationException`, `KeyNotFoundException`, `IOException`, `UnauthorizedAccessException` and `TimeoutException` (`ToolErrors.IsCallerFacing`), the deliberate answers a caller must be able to read. Everything else keeps the SDK's `"An error occurred invoking '<tool>'."` masking, so a refusal a library or the OS raises in another type (FlaUI's exceptions, `Win32Exception`, `SecurityException`, an HRESULT) is translated where it is called (D-10: `UiRefusals`, `ProcessStartErrors`, `RegistryErrors`, `PowerService`), and `ToolErrorsTests` scans the server's IL for any construction that is neither caller-facing nor on its site-keyed `MaskedOnPurpose` list. See `DATAFLOW.md` → "Which exception the caller sees".
-- **Control indicator (S-11)**: the same filter runs a *driving* tool — one of the 13 names in `Hosting/DrivingTools.Names` (`click`, `type`, `shortcut`, `focus`, `switch_to_window`, …) — between `IControlIndicator.BeginAction()` and `EndAction()`, and appends a pending takeover to the next result of **any** tool as one extra, last text block (`WindowsMcpHost.TakeoverNote`). It never refuses, delays or cancels a call, and a fault in the indicator is swallowed rather than failing the tool. A cancelled call, or a fault the SDK masks, leaves the takeover pending for the next result. See `DATAFLOW.md` → "Control Indicator Flow".
+- **Control indicator (S-11)**: the same filter runs a *driving* tool — one of the 14 names in `Hosting/DrivingTools.Names` (`click`, `type`, `shortcut`, `focus`, `switch_to_window`, `sequence`, …) — between `IControlIndicator.BeginAction()` and `EndAction()`, and appends a pending takeover to the next result of **any** tool as one extra, last text block (`WindowsMcpHost.TakeoverNote`). It never refuses, delays or cancels a call, and a fault in the indicator is swallowed rather than failing the tool. A cancelled call, or a fault the SDK masks, leaves the takeover pending for the next result. The one place a takeover stops input is inside E-6's `sequence`: before each step it reads `IControlIndicator.TakeoverPending` / `TakeoverCount` (neither consumes the record) and runs no further step after a takeover. See `DATAFLOW.md` → "Control Indicator Flow".
 
 **Critical startup requirements** (handled in `Program.cs` before host build):
 ```csharp
@@ -161,6 +161,7 @@ public sealed class InputTools
 | `IntegrityTools` | 1 | `IIntegrityService` |
 | `UsnTools` | 1 | `IUsnService` |
 | `WatchTools` | 1 | `IWatchService` |
+| `SequenceTools` | 1 | `IInputService`, `IClipboardService`, `IUIAutomationService`, `IControlIndicator` (E-6: builds its own `InputTools`, `UIAutomationTools` and `Observation` from the first three and runs each step through the real tool method; reads the indicator's takeover state between steps) |
 
 ---
 
@@ -307,7 +308,7 @@ Windows-mcp.slnx
 │   │   │                                   HotkeyParser and DrivingTools — S-11's --control-hotkey
 │   │   │                                   parser and the driving-tool names;
 │   │   │                                   ServerInstructions — E-1's initialize text)
-│   │   ├── Tools/                         (19 tool classes)
+│   │   ├── Tools/                         (20 tool classes)
 │   │   │   ├── InputTools.cs
 │   │   │   ├── UIAutomationTools.cs
 │   │   │   ├── FileTools.cs
@@ -327,6 +328,9 @@ Windows-mcp.slnx
 │   │   │   ├── IntegrityTools.cs
 │   │   │   ├── UsnTools.cs
 │   │   │   ├── WatchTools.cs
+│   │   │   ├── SequenceTools.cs       (E-6: sequence, up to 20 allowlisted UI steps in one call)
+│   │   │   ├── SequenceSteps.cs       (E-6: the pure steps_json parser and validator;
+│   │   │   │                           a helper, not a tool class)
 │   │   │   ├── Observation.cs         (E-5: observe/settle_ms behind the seven action tools;
 │   │   │   │                           a helper, not a tool class)
 │   │   │   └── ISamplingClient.cs     (C-5: the sampling seam scrape's summarize uses)

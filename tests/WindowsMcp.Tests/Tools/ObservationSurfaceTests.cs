@@ -93,8 +93,9 @@ public sealed class ObservationSurfaceTests
     }
 
     [Fact]
-    public void Only_the_seven_action_tools_take_observe_and_settle_ms()
+    public void Only_the_seven_action_tools_and_sequence_take_observe_and_settle_ms()
     {
+        // E-6: sequence takes the pair too - one observation for the whole batch, at the end.
         var observing = ToolMethods()
             .Where(m => m.GetParameters().Any(p => p.Name == "observe"))
             .Select(m => m.Name)
@@ -104,8 +105,8 @@ public sealed class ObservationSurfaceTests
             .Select(m => m.Name)
             .ToArray();
 
-        var seven = new[] { "Click", "Type", "Key", "Shortcut", "Scroll", "Drag", "InteractElement" };
-        observing.Should().BeEquivalentTo(seven, "hover, multi_select and multi_edit do not observe (E-5 scope)");
+        var seven = new[] { "Click", "Type", "Key", "Shortcut", "Scroll", "Drag", "InteractElement", "Sequence" };
+        observing.Should().BeEquivalentTo(seven, "hover, multi_select and multi_edit do not observe (E-5 scope); sequence does (E-6)");
         settling.Should().BeEquivalentTo(seven, "settle_ms only means something next to observe");
     }
 

@@ -48,8 +48,16 @@ We port the **visible half only**, a deliberate deviation from upstream:
   - It fades 5 s after the last one ends; a new driving call during the fade keeps it up.
 - **Driving tools.** These are the tools that inject input or move focus: `click`, `drag`,
   `hover`, `type`, `key`, `shortcut`, `scroll`, `multi_select`, `multi_edit`,
-  `interact_element`, `file_dialog`, `focus`, `switch_to_window`. Everything else, including
-  `window`, `launch` and `powershell`, never shows it.
+  `interact_element`, `file_dialog`, `focus`, `switch_to_window`, and (since E-6) `sequence` —
+  14 names. Everything else, including `window`, `launch` and `powershell`, never shows it.
+- **The one exception to "information, not control" (E-6).** `sequence` runs up to 20 steps in
+  one call, and it is the server, not the model, that sends each next step, so only the server
+  can honour a takeover made in between. Before each step (the first included) it reads
+  `IControlIndicator.TakeoverPending` and `TakeoverCount` — neither consumes the record — and
+  stops the batch with `stoppedBy:"takeover"` when a takeover is pending or the count moved since
+  the batch started. The step in progress is never interrupted, no other tool is ever refused or
+  delayed, and the filter still appends the takeover note as usual. See
+  [E-6](E-6-sequence.md) → "Takeover (S-11) aborts the remaining steps".
 - **One switch.** `--control-indicator on|off` / `WINDOWSMCP_CONTROL_INDICATOR`, default **on**
   under both transports, for the same reason as A-14's flash: the indicator matters most when
   the controller is remote. When it is off, nothing is created and the hotkey is never
@@ -75,14 +83,14 @@ We port the **visible half only**, a deliberate deviation from upstream:
 
 | Piece | Kind | Role |
 |---|---|---|
-| `IControlIndicator` (Abstractions) | interface | `BeginAction()`, `EndAction()`, `IsVisible`, `IsCaptureExcluded`, `SuspendForCapture()`, `ConsumeTakeover()` |
+| `IControlIndicator` (Abstractions) | interface | `BeginAction()`, `EndAction()`, `IsVisible`, `IsCaptureExcluded`, `SuspendForCapture()`, `ConsumeTakeover()`; E-6 added two read-only members that never consume the record: `TakeoverPending` (a recorded takeover not yet handed out) and `TakeoverCount` (takeovers recorded since the process started; only grows) — `false` / `0` when off or disposed |
 | `Models/ControlIndicatorDtos.cs` | records | `HotkeyChord(uint Modifiers, ushort Key, string Display)` (`MOD_ALT=1`, `MOD_CONTROL=2`, `MOD_SHIFT=4`, `MOD_WIN=8`; `Display` such as `Ctrl+Alt+Shift+Backspace`); `ControlIndicatorOptions(bool Enabled, HotkeyChord Hotkey, TimeSpan Linger)` with `Default`; `TakeoverRecord(DateTimeOffset At, string Hotkey)` |
-| `Services/ControlIndicatorState.cs` | pure, `TimeProvider` | refcount, fade deadline, dismissal, the pending takeover; thread-safe |
+| `Services/ControlIndicatorState.cs` | pure, `TimeProvider` | refcount, fade deadline, dismissal, the pending takeover, the takeover count (E-6; `Consume` does not touch it); thread-safe |
 | `Services/ControlIndicatorArt.cs` | pure SkiaSharp | `CursorRing(dpiScale)`, `Banner(text, dpiScale)`, `BannerText(hotkey?)`, `RingRect`, `BannerRect` |
 | `Services/LayeredWindow.cs` | Win32 helper | the window creation and DIB + `UpdateLayeredWindow` paint extracted from `FlashOverlay`; behaviour unchanged, except that the window procedure is now static (see below) |
 | `Services/ControlIndicator.cs` | Win32 | the STA thread, two windows, the pointer-follow tick (which also runs the fade check), `RegisterHotKey` / `WM_HOTKEY`, display affinity |
 | `Hosting/HotkeyParser.cs` | pure | `--control-hotkey` text → `HotkeyChord`, built on `ShortcutParser.ResolveKey` |
-| `Hosting/DrivingTools.cs` | static set | the 13 driving tool names |
+| `Hosting/DrivingTools.cs` | static set | the driving tool names (13; 14 since E-6 added `sequence`) |
 | `Hosting/WindowsMcpHost.AddWindowsMcp` | filter | begins and ends around driving calls; appends the takeover note to the next result |
 
 The pure state has no timers. Once the overlay thread exists, its tick runs every 16 ms while

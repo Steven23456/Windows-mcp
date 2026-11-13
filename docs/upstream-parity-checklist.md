@@ -3,25 +3,26 @@
 **Baseline:** 2026-09-04
 **Upstream:** [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) `main` = **v0.8.5**
 (released 2026-08-01; Python ≥ 3.14, FastMCP 3, 20 tools).
-**Ours:** `main` @ `8cb40b6` + the phase-2/3/4/5 branches, 69 tools, plugin `0.7.3`, `CHANGELOG.md
+**Ours:** `main` @ `8cb40b6` + the phase-2/3/4/5 branches, 70 tools, plugin `0.7.3`, `CHANGELOG.md
 [Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1,
 phase 3's A-2/A-3/A-4, phase 4's A-6 and phase 5's A-14, A-12 (phase 1), A-10 and A-5 (phase 1),
 then all of section B and all of section C (C-7, C-4, C-2, C-3, C-1, C-6, C-5), D-10/D-11, S-11,
-E-1, E-2, E-3, E-4 (with D-20) and E-5.
+E-1, E-2, E-3, E-4 (with D-20), E-5 and E-6.
 SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
-This is the working list of everything upstream can do that this server cannot (plus forty-eight
+This is the working list of everything upstream can do that this server cannot (plus fifty-three
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 and D-10/D-11
 logged 2026-11-10 — **all eleven are now fixed** — then D-12…D-18, logged 2026-11-11 by the
 D-10/D-11 review, D-19…D-22, logged 2026-11-12 during E-1, D-23…D-27, logged 2026-11-12
 during E-2, D-28…D-32, logged 2026-11-12 by the E-3 review, D-33…D-38, logged 2026-11-12
-during E-4, and D-39…D-48, logged 2026-11-12 during E-5 and its review, all still open except D-31, which E-3's
+during E-4, D-39…D-48, logged 2026-11-12 during E-5 and its review, and D-49…D-53, logged
+2026-11-13 by the E-6 review, all still open except D-31, which E-3's
 review round fixed, and D-20, which E-4 fixed; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
 phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and phase 5 shipped A-14,
 A-12 phase 1, A-10 and A-5 phase 1 — so every section-A row is ticked, with only A-5's Firefox
 phase left open and A-12's phase 2 deliberately not planned; section B is ticked too, and
-C-5/C-6 close section C — section S, D-12…D-48 (less D-20 and D-31) and section E are the work that is left; section E
+C-5/C-6 close section C — section S, D-12…D-53 (less D-20 and D-31) and section E are the work that is left; section E
 is not upstream parity but an agent-efficiency backlog from a review of this server's own tools).
 Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
@@ -158,12 +159,17 @@ function names are the stable anchor.
 | D-46 | Owned-window discovery sees only windows visible when it enumerates: one shown later stays nested, clipped, in its owner's rows | P3 | S | E-5 | ☐ |
 | D-47 | The popup pass reads every desktop window's handle and process id through UI Automation; finding the observed process's popups natively would not touch unrelated applications | P3 | S | E-5 | ☐ |
 | D-48 | A dialog or message box that is the foreground window is observed as the target, so `observe:"foreground"` does not return its question | P2 | S | E-5 | ☐ |
+| D-49 | `wait_for` and `assert_element` take no cancellation token: a `wait_for` of up to 120 s cannot be cancelled, standalone or as a `sequence` step | P3 | S | D-40, E-6 | ☐ |
+| D-50 | `type`'s `pace_ms` has no upper bound: a huge value is an uncancellable wait that holds the indicator up | P3 | S | — | ☐ |
+| D-51 | Two concurrent `type` calls race each other's `pace_ms` on the shared keyboard sink | P3 | S | D-28 | ☐ |
+| D-52 | A takeover during a `sequence` step does not interrupt that step; the batch stops before the next one | P3 | S | E-6, D-29, D-45 | ☐ |
+| D-53 | A takeover recorded and delivered to another call before a `sequence` arrives does not stop that sequence | P3 | S | E-6 | ☐ |
 | E-1 | Server instructions in the MCP handshake | P1 | S | — | ☑ |
 | E-2 | `interact_element`: expand, collapse, set_value, scroll_into_view | P1 | S | D-10 | ☑ |
 | E-3 | `click` modifiers; `key` repeat and hold | P2 | S | — | ☑ |
 | E-4 | `find_element` filters: automation id, control type, class, within, paging | P2 | M | — | ☑ |
 | E-5 | `observe`: action tools return the state they produced | P1 | M | D-11 · [E-5](design/E-5-observe.md) | ☑ |
-| E-6 | `sequence`: an ordered batch of UI steps in one call | P2 | M | E-5, S-11 | ☐ |
+| E-6 | `sequence`: an ordered batch of UI steps in one call | P2 | M | E-5, S-11 · [E-6](design/E-6-sequence.md) | ☑ |
 | E-7 | Capture by window / element; OCR word positions | P2 | M | — | ☐ |
 | E-8 | Session state: elevation, lock, secure desktop | P2 | S–M | — | ☐ |
 | E-9 | `file_edit` and content search for remote hosts | P2 | M | — | ☐ |
@@ -173,7 +179,8 @@ function names are the stable anchor.
 **Suggested order.** **Defects D-1 … D-11 are done** (D-12 … D-18, logged 2026-11-11 by the
 D-10/D-11 review, D-19 … D-22, logged 2026-11-12 during E-1, D-23 … D-27, logged 2026-11-12
 during E-2, D-28 … D-32, logged 2026-11-12 by the E-3 review, D-33 … D-38, logged 2026-11-12
-during E-4, and D-39 … D-48, logged 2026-11-12 during E-5 and its review, are open — except D-31, fixed in E-3's
+during E-4, D-39 … D-48, logged 2026-11-12 during E-5 and its review, and D-49 … D-53, logged
+2026-11-13 by the E-6 review, are open — except D-31, fixed in E-3's
 review round, and D-20, fixed by E-4), and
 **so are sections
 A, B and C** (A-5's Firefox phase and
@@ -190,8 +197,8 @@ opt-in sampling and the annotation table, per-item test seeds) is in
 **Section E (added 2026-11-10) is not upstream parity.** It comes from a review of this server's
 own tool surface for how many round trips and tokens an AI client spends driving it, and the same
 review logged D-10 and D-11 (both done 2026-11-11, so E-2 and E-5 are unblocked). E-1, E-2,
-E-3, E-4 and E-5 are done (2026-11-12). Order for the rest:
-E-6, E-7, E-8, E-9, E-10. E-11 is last and conditional: measure the snapshot
+E-3, E-4 and E-5 are done (2026-11-12), and E-6 (2026-11-13). Order for the rest:
+E-7, E-8, E-9, E-10. E-11 is last and conditional: measure the snapshot
 cost after E-5 (now possible) before committing to it. `todo.md` still records every UI-automation tool as never
 verified live — that sweep outranks any E item that builds on those tools.
 
@@ -1481,6 +1488,127 @@ question in `PopupText`; an unowned foreground window's labels still do not appe
 
 **Done when.** Observing the foreground after opening a message box returns its question.
 
+### D-49 — `wait_for` and `assert_element` cannot be cancelled  `P3 · S`
+- [ ] Not started
+
+**Found by the E-6 review (2026-11-13), read from the source; same family as D-40.**
+
+**Ours today.** `UIAutomationTools.WaitFor` and `AssertElement` take no `CancellationToken`, so
+they call `IUIAutomationService.WaitForAsync(request)` and `AssertElementAsync(element_id, state,
+expected)` with the default token, although both service methods accept one. A `wait_for` polls
+for up to `timeout_ms` (at most 120 000 ms) and a cancelled request keeps polling to the end,
+standalone or as a `sequence` step: `sequence` checks its own token only *between* steps, so a
+cancelled batch still waits out the step in progress. `assert_element` is a single read, so the
+exposure there is one hung provider read, not a polling loop.
+
+**Sketch.** Add `CancellationToken ct = default` to both tool methods (the SDK supplies it, and it
+is not part of the schema) and pass it through. `sequence` then hands its token to these steps
+the way it already does for `click`, `key` and `wait`.
+
+**Touches.** `Tools/UIAutomationTools.cs`; nothing in `Services/` (the token is already there).
+
+**Tests.** A recording `IUIAutomationService`: the token the tool receives is the one `WaitForAsync`
+/ `AssertElementAsync` gets; a cancelled `sequence` with a long `wait_for` step ends promptly.
+
+**Done when.** Cancelling a `wait_for` call, alone or inside a `sequence`, ends it within one poll
+interval.
+
+### D-50 — `type`'s `pace_ms` has no upper bound  `P3 · S`
+- [ ] Not started
+
+**Found by the E-6 review (2026-11-13), read from the source.**
+
+**Ours today.** `InputTools.TypeCore` refuses only `pace_ms < 0`. Key-by-key typing waits
+`pace_ms` between plan steps (`Task.Delay` in `InputService.TypeAsync`) and between characters
+inside a text chunk (`Thread.Sleep` in `SimulatorKeyboardSink.Text`), and `type` runs on
+`CancellationToken.None`. So `pace_ms: 2000000000` on a few characters is a wait of days that
+nothing can cancel, with the control indicator up the whole time (`type` is a driving tool), and
+as a `sequence` step it holds the batch too. Text that goes through the paste path is not paced.
+
+**Sketch.** Cap `pace_ms` (1 000 ms is generous for an app that drops keystrokes) and refuse more,
+naming the parameter, as `key`'s `hold_ms` (0–10 000) already is.
+
+**Touches.** `Tools/InputTools.cs` (`TypeCore`, the `pace_ms` description), possibly
+`TypePlanner` if the check moves there.
+
+**Tests.** `pace_ms` above the cap is refused before any keystroke; the cap itself is accepted.
+
+**Done when.** No `type` call can wait longer than its text length times the cap.
+
+### D-51 — Concurrent `type` calls race each other's pace  `P3 · S`
+- [ ] Not started
+
+**Found by the E-6 review (2026-11-13), read from the source; part of D-28's family.**
+
+**Ours today.** `InputService` is a singleton with one keyboard sink. `TypeAsync` sets
+`SimulatorKeyboardSink.PaceMs = options.PaceMs` on that shared sink before typing, and the sink
+reads `PaceMs` per character. Two `type` calls in flight at once (HTTP clients can overlap, and
+nothing serialises input — D-28) overwrite each other's pace, so one call's text is typed at the
+other's speed. Their keystrokes interleave anyway under D-28; this is the part that survives
+D-28 being fixed by anything short of a full input lock.
+
+**Sketch.** Pass the pace with each `Text` call (an `IKeyboardSink.Text(text, paceMs)` overload)
+instead of mutating sink state, or fold it into D-28's serialisation.
+
+**Touches.** `Services/InputService.cs` (`TypeAsync`, `IKeyboardSink`, `SimulatorKeyboardSink`).
+
+**Tests.** Two concurrent `TypeAsync` calls with different paces against a recording sink: each
+call's characters are paced by its own value.
+
+**Done when.** A `type` call's pace is its own, whatever else is typing.
+
+### D-52 — A takeover does not interrupt the `sequence` step in progress  `P3 · S`
+- [ ] Not started
+
+**Found by the E-6 review (2026-11-13), read from the source; same family as D-29 and D-45.**
+
+**Ours today.** `SequenceTools.RunAsync` reads `IControlIndicator.TakeoverPending` /
+`TakeoverCount` only before each step. A takeover pressed while a step runs — a long `type`, a
+`wait` of up to 60 s, a `wait_for` of up to 120 s, a `drag` — lets that step run to its end, input
+included; only the steps after it are skipped. The description and the E-6 note say so ("a step
+already in progress finishes first").
+
+**Sketch.** D-29's mechanism: a takeover cancels a linked token that the step receives (which
+needs the step tools to take one — D-40, D-49), and the batch reports that step as stopped by the
+takeover.
+
+**Touches.** `Tools/SequenceTools.cs`, `Hosting/WindowsMcpHost.cs`, `Services/ControlIndicator.cs`,
+and the token-less step tools.
+
+**Tests.** A takeover during a `wait` step ends that step promptly with `stoppedBy:"takeover"`
+and that step's index reported.
+
+**Done when.** Pressing the takeover hotkey during a `sequence` step stops input within one
+keystroke or poll.
+
+### D-53 — A takeover delivered before a `sequence` arrives does not stop it  `P3 · S`
+- [ ] Not started
+
+**Found by the E-6 review (2026-11-13), read from the source; recorded as "Not covered" in
+[E-6](design/E-6-sequence.md).**
+
+**Ours today.** The takeover is one consumable record (`ControlIndicatorState._pending`). A
+`sequence` reads `TakeoverCount` when its batch starts and stops on a pending record or a count
+that moves after that. A takeover that was recorded **and** handed to another call's result
+before this `sequence` was received leaves nothing pending and does not move the count after the
+start, so the batch runs all its steps. The design treats this as the model's part (it was told);
+but over HTTP with several clients (S-11's F7) the client that was told may not be the one that
+sends the `sequence`, and with **parallel tool calls** from one client (a fast tool and a
+`sequence` sent together just after a takeover) the fast tool's result carries the note after the
+model has already committed to the sequence. A count that reads lower than the first reading (a
+disposed indicator) is deliberately not a takeover.
+
+**Sketch.** Treat a takeover recorded within the last few seconds (or since the indicator was last
+dismissed and not re-shown by a new driving call) as still in force for a batch, or deliver the
+note per client session once S-11's F7 is addressed.
+
+**Touches.** `Services/ControlIndicatorState.cs`, `Tools/SequenceTools.cs`.
+
+**Tests.** A takeover consumed by another call just before the `sequence` call: the decided
+behaviour (stop, or run) is pinned either way.
+
+**Done when.** The behaviour is decided and pinned, or accepted with the reason recorded here.
+
 ---
 
 ## A — Desktop state and screenshots
@@ -2154,7 +2282,7 @@ every listed tool has explicit annotations.
 `__main__.py` `_apply_tool_filter()`; unknown names error at startup. Lets an operator run a
 screenshot-only or no-PowerShell server.
 
-**Ours.** All 69 tools always.
+**Ours.** All 70 tools always.
 
 **Sketch.** `ServerOptions` gains `Tools`/`ExcludeTools` (flags + `WINDOWSMCP_TOOLS`/
 `WINDOWSMCP_EXCLUDE_TOOLS`, valid for both transports); in `WindowsMcpHost.AddWindowsMcp` filter
@@ -2281,7 +2409,7 @@ cleanup, VM/Sandbox recommendation for destructive tools.
 
 **Ours.** `skills/windows/SKILL.md` is a usage playbook, not a tester.
 
-**Sketch.** `skills/windows-tool-tester/SKILL.md` adapted to our 69 tools and `confirm:true`
+**Sketch.** `skills/windows-tool-tester/SKILL.md` adapted to our 70 tools and `confirm:true`
 gates; wire into the plugin manifest.
 
 ### S-11 — AI-control indicator and takeover hotkey  `P2 · M`
@@ -2323,7 +2451,7 @@ round trips or tokens, or cannot do something a person at the machine can. No it
 upstream counterpart, so there is no **Upstream.** paragraph. Every "Ours today" statement was
 checked against the source on that date and none was exercised live. The preference throughout is
 a parameter on an existing tool over a new tool — E-6 and E-9 are the only two that raise the tool
-count (69 → 71), which moves the counts in `README.md`, `docs/architecture/*`,
+count (69 → 71; E-6 made it 70), which moves the counts in `README.md`, `docs/architecture/*`,
 `skills/windows/SKILL.md`, `ToolInventoryTests` and C-7's annotation table.
 
 ### E-1 — Server instructions in the MCP handshake  `P1 · S`
@@ -2655,7 +2783,7 @@ child PowerShell process, is listed item by item by an observation-shaped snapsh
 D-39 … D-48.
 
 ### E-6 — `sequence`: an ordered batch of UI steps in one call  `P2 · M`
-- [ ] Not started
+- [x] Done 2026-11-13 — [design note](design/E-6-sequence.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (not verified live)
 
 **Ours today.** `multi_select` (Ctrl-clicks) and `multi_edit` (click-then-type) are the only
 batches. A menu path, a wizard page or a keyboard-driven dialog is one call per step.
@@ -2679,6 +2807,40 @@ with the partial results; an unsatisfied `wait_for` stops the batch; a takeover 
 and 3 leaves step 3 unrun; a step cap.
 
 **Done when.** File → Save As → type a name → Enter is one call that reports the resulting window.
+
+**As landed:** `sequence(steps_json, observe = "none", settle_ms = 250)` in
+`Tools/SequenceTools.cs` (title `Sequence`, all four hints false; tool count 69 → 70), with the
+pure parser and validator `Tools/SequenceSteps.cs`. The allowlist is exactly the sketch's ten
+tools, matched ordinally; a step is `{"tool", "args"}` and nothing else, `args` optional, and
+`steps_json` may also be a JSON string holding the array (B-7's convention). The cap is 20 steps.
+**The whole array is validated before step 0**: the allowlist, an argument the tool's method
+does not have, `observe` / `settle_ms` on a step (they belong to `sequence`), a missing required
+argument, and the JSON kind against the parameter's CLR type with no coercion (`"5"` is not 5,
+`null` only for a nullable parameter) — every refusal an `ArgumentException` naming
+`steps_json[i]`, with nothing run. Each step is bound to the **standalone tool's own method** by
+reflection and invoked on one `InputTools` / `UIAutomationTools` instance, so a step has that
+tool's defaults, refusals and result exactly. The batch stops at the first step that throws
+(`stoppedBy:"error"`, the message masked as the call-tool filter masks it), a `wait_for` that is
+not `Satisfied:true`, or an `assert_element` that is not `PASS`, returning `{count, completed,
+results:[{index, tool, ok, result | error}], failedIndex, error, stoppedBy}` — B-7's shape plus
+`count`, `completed` and `stoppedBy`. The caller's token is checked before every step. **The
+takeover mechanism** (decided in the design note): `sequence` joins `DrivingTools.Names` (14
+names), and `IControlIndicator` gains two read-only members that consume nothing,
+`TakeoverPending` and `TakeoverCount` (only grows; `false` / `0` when off or disposed). Before
+each step, the first included, the batch stops with `stoppedBy:"takeover"` and `failedIndex:null`
+when a takeover is pending or the count moved since the batch began — the count covers a record
+another call's filter consumed between two steps — and the filter still appends the usual note.
+The final observation is E-5's `Observation.AroundAsync` with no element id: `observe:window` is
+refused, `foreground` appends one snapshot after the batch however it ended. The description
+states that no snapshot is taken between steps and that a `wait_for` with `text_exists` or
+`focused_element` retires earlier `el_N` ids. Tests: `SequenceStepsTests`, `SequenceToolsTests`,
+`SequenceSurfaceTests` and `ControlIndicatorTakeoverPendingTests`, plus additions to
+`ControlIndicatorStateTests`, `ControlIndicatorTests`, `ControlIndicatorFilterTests`,
+`DrivingToolsTests`, `ToolInventoryTests`, `ObservationSurfaceTests` and `StreamTransportTests`.
+**The "done when" bar was not run live:** File → Save As → a name → Enter in one call on a real
+app has not been exercised, and the `UIAutomation` category was not run; the batch semantics are
+covered by unit tests over mocked services. Neighbour gaps found by the review and not fixed are
+D-49 … D-53.
 
 ### E-7 — Capture by window / element; OCR word positions  `P2 · M`
 - [ ] Not started
@@ -2760,7 +2922,7 @@ invalid regex is refused by name.
 ### E-10 — Named toolsets on top of S-1  `P3 · S`
 - [ ] Not started
 
-**Ours today.** All 69 tool descriptions are sent to every client (`screenshot`'s alone is about
+**Ours today.** All 70 tool descriptions are sent to every client (`screenshot`'s alone is about
 2 500 characters). S-1 will let an operator list tools to keep or drop by name.
 
 **Sketch.** After S-1: `--toolset ui|admin|forensics|files` (repeatable; `WINDOWSMCP_TOOLSET`)
@@ -2804,7 +2966,7 @@ small, close this item unbuilt.
 
 ## Appendix A — Tool name map (upstream → ours)
 
-| Upstream (20) | Ours (69) | Gap items |
+| Upstream (20) | Ours (70) | Gap items |
 |---|---|---|
 | `Snapshot` | `snapshot`, `get_state`, `find_element`, `get_element`, `get_text`, `window` (list/active) | A-1..A-6, A-11..A-13 |
 | `Screenshot` | `screenshot`, `ocr` | A-7..A-11 |
@@ -2825,7 +2987,7 @@ small, close this item unbuilt.
 | `Process` | `process`, `process_inspect` | C-3 |
 | `Notification` | `notification` | C-4 |
 | `Registry` | `registry_get`, `registry_set`, `registry_delete` | C-2 |
-| _(none)_ | services, tasks, event log, disk, storage, network, firewall, security, startup report, integrity, USN, watch, env, power, audio, WMI, drivers, reliability, cert store, Defender, signatures | ours only |
+| _(none)_ | services, tasks, event log, disk, storage, network, firewall, security, startup report, integrity, USN, watch, env, power, audio, WMI, drivers, reliability, cert store, Defender, signatures, `sequence` | ours only |
 
 ## Appendix B — Upstream source map (`src/windows_mcp/`)
 

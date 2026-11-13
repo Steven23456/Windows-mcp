@@ -2,6 +2,58 @@
 
 ### Added
 
+- **`sequence` — up to 20 UI steps in one call** (E-6; 69 → 70 tools). `sequence(steps_json,
+  observe = "none", settle_ms = 250)` runs a menu path, a wizard page or a keyboard-driven dialog
+  as one round trip instead of one per step:
+  - `steps_json` is a JSON array of `{"tool": name, "args": {...}}` steps, or a JSON string holding
+    that array (the B-7 convention); `args` may be omitted. `tool` is one of `click`, `type`,
+    `key`, `shortcut`, `scroll`, `drag`, `interact_element`, `wait`, `wait_for`,
+    `assert_element` — exact and lower-case; no shell, file, registry, process, window or
+    screenshot tool, and not `sequence` itself. `args` are that tool's own parameters under their
+    wire names, and each step runs the standalone tool's own method, so it has the same defaults,
+    refusals and result.
+  - **Everything checkable is checked before step 0**, and any of it refuses the call with nothing
+    done, as an `ArgumentException` naming `steps_json[i]`: not an array, empty, more than 20
+    steps, a step that is not an object or carries anything but `tool` and `args` (or either
+    twice), a tool off the allowlist (the refusal lists it), `args` not an object, an argument
+    the tool does not have (the message lists the ones it has), `observe` or `settle_ms` on a step
+    (they belong to `sequence`), a missing required argument, a JSON value of the wrong kind — no
+    coercion: `"5"` is not 5, 2.5 is not an `int`, `null` only for a nullable parameter — and a
+    lone-surrogate escape. What only the tool can decide (an expired `el_N`, `seconds` out of
+    range) is that step's failure.
+  - Steps run in order and the batch **stops at the first** that throws (`stoppedBy:"error"`; the
+    message masked exactly as the call-tool filter would mask it), `wait_for` that does not return
+    `Satisfied:true` (`"wait_for"`) or `assert_element` that does not return `PASS`
+    (`"assert_element"`). It returns `{count, completed, results:[{index, tool, ok, result |
+    error}], failedIndex, error, stoppedBy}` as a normal result, not `isError`: the steps before
+    the failure were performed. A step's JSON result is embedded as JSON, a plain one (`PASS`) as
+    the string. The caller's cancellation is checked before every step (seven of the ten step
+    tools take no token) and ends the call; an `OperationCanceledException` the caller did not
+    ask for is a step failure.
+  - **A takeover stops the batch** — the one place S-11's indicator stops input. `sequence` is a
+    driving tool (`Hosting/DrivingTools.cs`, now 14 names), so the indicator and the hotkey are up
+    for the whole batch. Before each step, the first included, the batch stops with
+    `stoppedBy:"takeover"`, `failedIndex:null` and `The user took over the mouse and keyboard;
+    steps i..n were not run.` when a takeover is pending or the takeover count moved since the
+    batch began (the pending record is one slot another call's filter may consume in between).
+    The record is never consumed here, so the filter still appends the usual takeover note. A step
+    already running is not interrupted (parity D-52).
+  - No snapshot is taken between steps, so an `el_N` id only works for an element that survives
+    the earlier steps, and a `wait_for` with `text_exists` or `focused_element` takes a snapshot
+    that retires every earlier id; the description says so. `observe:foreground` appends one
+    observation (E-5) after the batch, however it ended; `observe:window` is refused (no single
+    target element); a refused batch is never observed.
+  New `IControlIndicator.TakeoverPending` (`bool`) and `TakeoverCount` (`long`, only grows),
+  read-only and consuming nothing, `false` / `0` when the indicator is off or disposed
+  (`ControlIndicator`, `ControlIndicatorState`). New `Tools/SequenceTools.cs` (annotations: title
+  `Sequence`, all four hints false) and the pure `Tools/SequenceSteps.cs`. No new service. Tests:
+  `SequenceStepsTests`, `SequenceToolsTests`, `SequenceSurfaceTests` and
+  `ControlIndicatorTakeoverPendingTests`, plus additions to `ControlIndicatorStateTests`,
+  `ControlIndicatorTests`, `ControlIndicatorFilterTests`, `DrivingToolsTests`,
+  `ToolInventoryTests`, `ObservationSurfaceTests` and `StreamTransportTests` (70 tools). Not
+  verified live: File → Save As → a name → Enter in one call on a real
+  app was not run, nor was the `UIAutomation` category. Gaps found and not fixed are parity
+  D-49 … D-53.
 - **Action tools can return the state they produced: `observe` and `settle_ms`** (E-5). `click`,
   `type`, `key`, `shortcut`, `scroll`, `drag` and `interact_element` take `observe` (`none`, the
   default, | `foreground` | `window`, any case) and `settle_ms` (0-5000, default 250), so one UI

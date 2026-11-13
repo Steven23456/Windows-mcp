@@ -412,6 +412,147 @@ public class ControlIndicatorStateTests
         state.Consume().Should().Be(again);
     }
 
+    // ---- E-6 - TakeoverPending: read without consuming -------------------------------------------
+
+    [Fact]
+    public void TakeoverPending_is_false_on_a_new_state()
+    {
+        var (state, _) = Make();
+
+        state.TakeoverPending.Should().BeFalse();
+    }
+
+    [Fact]
+    public void TakeoverPending_is_true_after_a_takeover_and_reading_it_consumes_nothing()
+    {
+        var (state, _) = Make();
+        state.Begin();
+        var record = state.Takeover(Hotkey);
+
+        state.TakeoverPending.Should().BeTrue("a takeover is recorded that the AI has not been told about");
+        state.TakeoverPending.Should().BeTrue("reading the flag is not consuming the record");
+        state.Consume().Should().Be(record, "the call-tool filter still gets the record for its note");
+    }
+
+    [Fact]
+    public void TakeoverPending_is_false_once_the_record_is_consumed()
+    {
+        var (state, _) = Make();
+        state.Begin();
+        state.Takeover(Hotkey);
+
+        state.Consume();
+
+        state.TakeoverPending.Should().BeFalse("the note has been delivered");
+    }
+
+    [Fact]
+    public void TakeoverPending_is_false_when_the_combination_recorded_nothing()
+    {
+        var (state, _) = Make();
+
+        state.Takeover(Hotkey).Should().BeNull("precondition: nothing was on screen");
+
+        state.TakeoverPending.Should().BeFalse();
+    }
+
+    [Fact]
+    public void TakeoverPending_survives_the_end_of_the_call_and_the_begin_of_the_next()
+    {
+        // E-6's "before step 0" case: the user takes over while the indicator fades after one call;
+        // the next call (a sequence) begins - and must still see the takeover before it acts.
+        var (state, clock) = Make();
+        state.Begin();
+        state.End();
+        clock.Advance(TimeSpan.FromSeconds(1));
+        state.Takeover(Hotkey).Should().NotBeNull("precondition: taken over during the fade");
+
+        state.Begin();
+
+        state.TakeoverPending.Should().BeTrue("a new driving call shows the indicator again but does not forget the takeover");
+        state.Consume().Should().NotBeNull();
+    }
+
+    [Fact]
+    public void TakeoverPending_does_not_expire_with_time()
+    {
+        var (state, clock) = Make();
+        state.Begin();
+        state.Takeover(Hotkey);
+        state.End();
+
+        clock.Advance(TimeSpan.FromHours(1));
+
+        state.TakeoverPending.Should().BeTrue("the record waits for the next result, however late it comes");
+    }
+
+    // ---- E-6 - TakeoverCount: the epoch a consumer cannot empty ------------------------------------
+
+    [Fact]
+    public void TakeoverCount_is_0_on_a_new_state()
+    {
+        var (state, _) = Make();
+
+        state.TakeoverCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void TakeoverCount_grows_by_one_per_recorded_takeover()
+    {
+        var (state, _) = Make();
+
+        state.Begin();
+        state.Takeover(Hotkey).Should().NotBeNull("precondition: recorded");
+        state.TakeoverCount.Should().Be(1);
+
+        state.Begin();   // the next driving call clears the dismissal, so the combination records again
+        state.Takeover(Hotkey).Should().NotBeNull("precondition: recorded again");
+        state.TakeoverCount.Should().Be(2, "the latest record replaces the pending one, but both takeovers happened");
+    }
+
+    [Fact]
+    public void TakeoverCount_is_unchanged_when_the_combination_records_nothing()
+    {
+        var (state, _) = Make();
+        state.Begin();
+        state.Takeover(Hotkey);
+
+        state.Takeover(Hotkey).Should().BeNull("precondition: dismissed, nothing on screen to take over from");
+        var (fresh, _) = Make();
+        fresh.Takeover(Hotkey).Should().BeNull("precondition: never shown");
+
+        state.TakeoverCount.Should().Be(1, "a combination that recorded nothing is not a takeover");
+        fresh.TakeoverCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void TakeoverCount_is_unchanged_by_reading_and_by_consuming()
+    {
+        var (state, _) = Make();
+        state.Begin();
+        state.Takeover(Hotkey);
+
+        state.TakeoverCount.Should().Be(1);
+        state.TakeoverCount.Should().Be(1, "reading changes nothing");
+        state.Consume().Should().NotBeNull();
+        state.TakeoverPending.Should().BeFalse("precondition: the slot is empty");
+
+        state.TakeoverCount.Should().Be(1, "another call's filter emptying the slot cannot hide that a takeover happened");
+    }
+
+    [Fact]
+    public void TakeoverCount_survives_the_end_of_the_call_and_time()
+    {
+        var (state, clock) = Make();
+        state.Begin();
+        state.Takeover(Hotkey);
+        state.End();
+        clock.Advance(TimeSpan.FromHours(1));
+        state.Begin();
+
+        state.TakeoverCount.Should().Be(1);
+    }
+
     // ---- R2/R3 - concurrency ---------------------------------------------------------------------
 
     [Fact]

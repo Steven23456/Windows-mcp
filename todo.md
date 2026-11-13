@@ -5,7 +5,7 @@ against the upstream Python server, plus the agent-efficiency backlog in its sec
 prioritized items with implementation sketches), is
 `docs/upstream-parity-checklist.md` — new capability work starts there, not here.
 
-## 🧪 Live e2e coverage sweep — ACTIVE (20/69 tools ever exercised against a live server)
+## 🧪 Live e2e coverage sweep — ACTIVE (20/70 tools ever exercised against a live server)
 
 **Why this exists:** all prior e2e testing was ad-hoc and unrecorded. A transcript audit
 (2026-07-12) found **no checklist ever existed** — 20 of the tools have been invoked against a
@@ -92,17 +92,19 @@ stdio without touching the registered server — spawn the exe, `initialize` →
 `system_info` · `start_process` · `file_search` · `wmi_query` · `file_streams` · `defender_status` ·
 `scheduled_task` · `file_manage` · `event_log` · `verify_signature` · `cert_store` · `driver_list`
 
-### 🔴 Never invoked live (49)
+### 🔴 Never invoked live (50)
 - **Safe / read-only — sweep these first (15):** `file_hash` · `reliability` · `env` · `network` ·
   `firewall` · `disk_inspect` · `security_audit` · `registry_get` · `http_request` · `scrape` ·
   `multi_monitor` · `fs_changes` (needs elevation) · `watch` · `job` · `wait`
 - **Write / destructive — throwaway targets only (10):** `file_write` · `registry_set` ·
   `registry_delete` · `archive` · `service` · `power_action` · `notification` · `audio` ·
   `clipboard` · `integrity` (writes a baseline under `%LOCALAPPDATA%\windows-mcp\integrity`)
-- **UI-automation / input — needs interactive foreground desktop (24):** `click` · `type` · `key` ·
+- **UI-automation / input — needs interactive foreground desktop (25):** `click` · `type` · `key` ·
   `shortcut` · `hover` · `drag` · `scroll` · `focus` · `launch` · `window` · `switch_to_window` ·
   `snapshot` · `get_state` · `get_element` · `find_element` · `interact_element` · `assert_element` ·
-  `wait_for` · `get_text` · `get_table` · `ocr` · `file_dialog` · `multi_select` · `multi_edit`
+  `wait_for` · `get_text` · `get_table` · `ocr` · `file_dialog` · `multi_select` · `multi_edit` ·
+  `sequence` (E-6; plan rows SEQUENCE-01…04 — its done-when bar, Save As in one call, is
+  SEQUENCE-01)
 
 ## 🟢 Ready / candidates (none blocking)
 
