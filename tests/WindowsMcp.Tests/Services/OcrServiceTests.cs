@@ -293,6 +293,9 @@ public class OcrServiceRecognizeIntegrationTests
         result.Lines.Should().NotBeEmpty();
         var words = result.Lines.SelectMany(l => l.Words).ToArray();
         words.Select(w => Clean(w.Text)).Should().Contain(new[] { "QUOKKA", "ZEBRA" });
+        // Full-box containment holds for STRAIGHT text only (a tilted word's upright box may reach
+        // past the region); the frame is straight, and this says so if the engine ever disagrees.
+        (result.TextAngle ?? 0).Should().Be(0, "precondition: the rendered frame is straight text");
         words.Should().OnlyContain(w => Inside(w.Bounds, region), "every word is somewhere in the captured rect");
 
         // Where the glyphs really are, moved by the origin, with a few pixels of engine slack.
@@ -514,8 +517,13 @@ public class OcrServiceLiveTests
 
     /// <summary>
     /// E-7: the json path through a REAL screen capture. Shape only — what is on the screen is not
-    /// ours to choose — but every word must lie inside the captured rect and every line's bounds
-    /// must be the union of its words. Reads the screen; injects nothing.
+    /// ours to choose — but every word has a non-empty rect, every line's bounds are the union of
+    /// its words, and every word is in the captured rect. "In the rect" depends on the angle (design
+    /// note, "Decisions from the review"): for straight text (TextAngle null or 0) the whole box is
+    /// inside; for tilted text a word's box is the upright box around the rotated word and may
+    /// legitimately reach past the region (a 180x20 box at 620,10 in an 800x400 image at 15° ends
+    /// at x 836), so only its CENTRE — the point click receives — must be inside. Reads the screen;
+    /// injects nothing.
     /// </summary>
     [Fact]
     public async Task RecognizeAsync_runs_the_real_capture_decode_and_recognize_path()
@@ -528,15 +536,27 @@ public class OcrServiceLiveTests
 
         result.Region.Should().Be(region);
         result.Text.Should().NotBeNull();
+        bool straight = result.TextAngle is not { } angle || angle == 0;   // the engine reports -0 for straight text; -0 == 0
         foreach (var line in result.Lines)
         {
             line.Words.Should().NotBeEmpty("a line with no words is dropped");
             foreach (var word in line.Words)
             {
-                word.Bounds.X.Should().BeGreaterThanOrEqualTo(region.X);
-                word.Bounds.Y.Should().BeGreaterThanOrEqualTo(region.Y);
-                (word.Bounds.X + word.Bounds.Width).Should().BeLessThanOrEqualTo(region.X + region.Width);
-                (word.Bounds.Y + word.Bounds.Height).Should().BeLessThanOrEqualTo(region.Y + region.Height);
+                word.Bounds.Width.Should().BePositive();
+                word.Bounds.Height.Should().BePositive();
+                if (straight)
+                {
+                    word.Bounds.X.Should().BeGreaterThanOrEqualTo(region.X);
+                    word.Bounds.Y.Should().BeGreaterThanOrEqualTo(region.Y);
+                    (word.Bounds.X + word.Bounds.Width).Should().BeLessThanOrEqualTo(region.X + region.Width);
+                    (word.Bounds.Y + word.Bounds.Height).Should().BeLessThanOrEqualTo(region.Y + region.Height);
+                }
+                else
+                {
+                    (word.Bounds.X + word.Bounds.Width / 2).Should().BeInRange(region.X, region.X + region.Width - 1,
+                        $"at TextAngle {result.TextAngle} only the centre of '{word.Text}' is bound to the region");
+                    (word.Bounds.Y + word.Bounds.Height / 2).Should().BeInRange(region.Y, region.Y + region.Height - 1);
+                }
             }
             int left = line.Words.Min(w => w.Bounds.X), top = line.Words.Min(w => w.Bounds.Y);
             int right = line.Words.Max(w => w.Bounds.X + w.Bounds.Width), bottom = line.Words.Max(w => w.Bounds.Y + w.Bounds.Height);
