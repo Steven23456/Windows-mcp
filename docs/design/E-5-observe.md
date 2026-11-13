@@ -113,10 +113,14 @@ unchanged (parity D-39 logs that gap).
 UI Automation nests an **owned** top-level window — a dialog, an owned popup — under its owner, so
 the owner's walk sees it clipped to the owner's rectangle, under the owner's title, and not at all
 where it reaches outside. With `IncludePopups` and a scope other than `desktop` (and not for a
-window walked as a DOM page), each walked window is searched for them (`OwnedWindowsUnder`):
-descendants with a native handle that is its own Win32 root (`RootWindowOf`), whatever control
-type the provider gives it (a captioned dialog is a `Window`, a bare popup a `Pane`; an MDI child
-or an in-window XAML "window" is not one). They are found **before** the owner is walked, and
+window walked as a DOM page), each walked window that has a native handle gets its owned windows
+from **Win32's owner relation**, not from a search of the UI tree (`OwnedWindowsUnder`): the
+`OwnedWindowsOf` seam, by default `Win32OwnedWindows` — `EnumWindows`, keeping every visible
+top-level window whose `GetWindow(GW_OWNER)` chain (up to 32 links) reaches the handle, nearest
+first, then in z-order, so a dialog opened by a dialog is included and a hidden owned window is
+not (`NativeMethods.txt` gains `GetWindow`). Each handle is resolved with `ElementFromHandle`; one
+that does not resolve or is gone (`ClosedNotHung`) is logged and skipped, and a failure of the
+enumeration itself (other than a timeout) is logged and yields none. They are found **before** the owner is walked, and
 their handles go to `UiTraverser.Walk` as `skipHandles`: the owner's walk does not enter an element
 whose native handle (read from the cache request, so no extra provider call) is in the set. Each is
 then walked as an independent root — clipped to its own rectangle, labelled with its inventory
@@ -136,7 +140,11 @@ seam for the fallback's root.
 History (review fixes on PR #43): the first fix walked the owner whole and then removed the owned
 subtrees from its rows (`WithoutSubtreesOf`, since deleted). That charged an owned window's
 elements to the budget twice, so with an exact budget a dialog's controls were dropped; the
-second fix replaced it with `skipHandles`. The `snapshot` tool does none of this: in desktop scope
+second fix replaced it with `skipHandles`. The third replaced discovery itself: the first two
+searched the owner's UI tree (`FindAllDescendants` with a handle condition, else a 5 000-element
+manual descent, each match checked with `GetAncestor(GA_ROOT)`) — a second pass over the whole
+window on the one UI Automation thread whatever the element limit — and now the owner relation is
+asked natively; `RootWindowOf` is left to `GetElementWindowAsync`. The `snapshot` tool does none of this: in desktop scope
 it still lists an owned dialog's rows twice (D-43).
 
 ## Failure rules
@@ -149,6 +157,15 @@ it still lists an owned dialog's rows twice (D-43).
   becomes one line after the result: `Observation failed: <why> The action above was performed, so
   do not repeat it; call snapshot to see the result.` `<why>` is the caller-facing message
   (newlines folded) or `an unexpected fault (<TypeName>).` for anything `ToolErrors` would mask.
+- **A hung provider is a failure, not a smaller snapshot.** With `IncludePopups` (every
+  observation), a `TimeoutException` while a target window is processed after its handle
+  resolved — owned-window discovery, the pid/handle bookkeeping, or a children read in the walk
+  (`UiTraverser.Walk(…, timeoutsPropagate: true)`) — propagates out of `SnapshotAsync`, so the
+  observation returns the failure note instead of a snapshot under an "Observed …" header that is
+  missing the observed window's rows. (Resolving or probing a by-handle window already propagated
+  a timeout; see above.) Without `IncludePopups` — the `snapshot` tool, `wait_for`, `screenshot`
+  annotate, `scrape` dom — a window that times out is still logged and skipped, and the walk
+  still swallows everything a dying element does (D-5).
 - **Cancellation.** Only `click` and `key` take the request's token (E-3 added it); cancelling
   them during the settle wait or the snapshot drops the result although the action was performed,
   and their descriptions say so (`Observation.CancelNote`). The other five pass
@@ -173,8 +190,8 @@ it still lists an owned dialog's rows twice (D-43).
 | The seven schemas and descriptions carry the parameters and notes; `key`/`shortcut` advertise no `window` | `ObservationSurfaceTests` | Unit |
 | `GetElementWindowAsync`: own handle, ancestor handle, desktop root never the answer, unknown/expired/gone refused, a timeout propagates | `UIAutomationServiceElementWindowTests` | Unit |
 | `WindowHwnd`: the scope/title rules, an unlisted window walked, a closed one a `KeyNotFoundException`; `IncludePopups` order, filters and budget | `UIAutomationSnapshotWindowHandleTests`, `UIAutomationSnapshotPopupsTests` | Unit |
-| Owned windows skipped by their owner's walk and walked once under their own label, the foreground fallback included; charged to the budget once, owner first under a short budget; a by-handle timeout propagates and an observation turns it into the failure note, not the foreground fallback | `UIAutomationSnapshotOwnedWindowsTests`, `UIAutomationSnapshotOwnedWindowBudgetTests`, `ObserveWindowTimeoutTests` | Unit |
-| On real windows with the real `WindowService`: an element in an owned dialog answers the dialog; an owned dialog observed whole under its own title (two owner/owned pairs); untitled, tool and popup windows observed by handle | `UIAutomationServiceElementWindowIntegrationTests`, `UIAutomationServiceObserveWindowsIntegrationTests` (`Fixtures/OwnedWindowFamily.cs`) | Integration |
+| Owned windows skipped by their owner's walk and walked once under their own label, the foreground fallback included; charged to the budget once, owner first under a short budget; owned windows from a fake owner relation (`OwnedWindowsOf`); a by-handle timeout, and with `IncludePopups` a timeout in discovery, bookkeeping or the walk, propagates and an observation turns it into the failure note, not the foreground fallback | `UIAutomationSnapshotOwnedWindowsTests`, `UIAutomationSnapshotOwnedWindowBudgetTests`, `ObserveWindowTimeoutTests`, `UIAutomationSnapshotObservationTimeoutTests` | Unit |
+| On real windows with the real `WindowService`: an element in an owned dialog answers the dialog; an owned dialog observed whole under its own title (two owner/owned pairs), a window owned by an owned window, a hidden owned window left out — through the real owner relation; untitled, tool and popup windows observed by handle | `UIAutomationServiceElementWindowIntegrationTests`, `UIAutomationServiceObserveWindowsIntegrationTests` (`Fixtures/OwnedWindowFamily.cs`) | Integration |
 | The done-when: a real WinForms `ContextMenuStrip` (opened from code in a child PowerShell process, no input injected) is listed item by item by a by-handle snapshot with popups, and not without | `ObserveRealContextMenuIntegrationTests` | Integration |
 
 ## Deviations and follow-ups

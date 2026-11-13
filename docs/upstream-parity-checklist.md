@@ -1336,7 +1336,7 @@ record the decision either way.
 
 **Found during E-5 (2026-11-12) while resolving owned windows; pre-existing since A-2. Not pinned
 by a test. Observations no longer have it — E-5's review rounds lift owned windows out of their
-owner (`OwnedWindowsUnder`, then the owner's walk skips their handles via `UiTraverser.Walk`'s
+owner (`OwnedWindowsUnder`, from Win32's owner relation; the owner's walk skips their handles via `UiTraverser.Walk`'s
 `skipHandles`) — but only with `IncludePopups`, outside desktop scope; the `snapshot` tool still
 has it.**
 
@@ -1345,7 +1345,8 @@ inventory lists the dialog as a top-level window of its own. `snapshot(scope:"de
 both roots, so every control in the dialog is listed twice, once under the owner and once under
 the dialog — with two different `el_N` ids — and spends the element budget twice.
 
-**Sketch.** Reuse the observation's `OwnedWindowsUnder` and `skipHandles` for every scope: when
+**Sketch.** Reuse the observation's `OwnedWindowsUnder` (Win32's owner relation) and
+`skipHandles` for every scope: when
 an owned window is walked in its own right (in desktop scope it is an inventory window), pass its
 handle to the owner's walk so the owner never enters it, and each control is listed — and charged
 to the budget — once, under its own window.
@@ -2509,8 +2510,12 @@ set by every observation, never by the `snapshot` tool (D-39) — also walks the
 other on-screen top-level windows that the inventory does not list (menus, dropdowns, tooltips),
 after the window itself, under the same budget: that is what makes the done-when possible, since
 an open menu is its own untitled top-level window. With it, each walked window (non-desktop scope,
-not a DOM page) is also searched for the **owned** top-level windows UI Automation nests under it —
-descendants whose native handle is its own Win32 root, any control type (`OwnedWindowsUnder`); the
+not a DOM page, with a native handle) also has its **owned** top-level windows lifted out — UI
+Automation nests them under the owner. They come from Win32's owner relation, not a search of the
+UI tree (`OwnedWindowsUnder` over the `OwnedWindowsOf` seam, default `EnumWindows` +
+`GetWindow(GW_OWNER)`: every visible top-level window whose owner chain, up to 32 links, reaches
+it — a dialog opened by a dialog included — nearest first, then z-order), each resolved with
+`ElementFromHandle` and skipped and logged if it does not resolve or is gone; the
 owner's walk does not enter them (`UiTraverser.Walk`'s `skipHandles`, read from the cached handle,
 so no extra provider call) and each is walked as its own root, clipped to its own rectangle,
 labelled with its inventory title, else its UIA name, else `popup`, right after its owner and
@@ -2522,15 +2527,21 @@ validated, and the window looked up, before the tool's own argument checks and b
 an action that throws observes nothing; a snapshot that fails afterwards (other than a
 cancellation) becomes one line after the result — `Observation failed: <why> The action above was
 performed, so do not repeat it; call snapshot to see the result.` — never an error. Only `click`
-and `key` pass the request's token (D-40). The `snapshot` description, `ElementCache`'s expired-id
+and `key` pass the request's token (D-40). With `IncludePopups` a `TimeoutException` while a target
+window is processed after its handle resolved — owned-window discovery, the pid/handle bookkeeping,
+or the walk's children read (`UiTraverser.Walk`'s `timeoutsPropagate`) — propagates, so a hung
+provider gives the failure note, never a snapshot missing the observed window's rows; the plain
+`snapshot` keeps D-5's skip. The `snapshot` description, `ElementCache`'s expired-id
 message and the server instructions (1 978 characters) now list "any action with observe" among
 the calls that replace snapshot ids. Tests: `ObservationToolsTests`, `ObservationSurfaceTests`,
 `UIAutomationServiceElementWindowTests`, `UIAutomationSnapshotWindowHandleTests` and
 `UIAutomationSnapshotPopupsTests`, `UIAutomationSnapshotOwnedWindowsTests`,
-`UIAutomationSnapshotOwnedWindowBudgetTests` and `ObserveWindowTimeoutTests` (Unit), and on real windows with the real `WindowService`
+`UIAutomationSnapshotOwnedWindowBudgetTests`, `ObserveWindowTimeoutTests` and
+`UIAutomationSnapshotObservationTimeoutTests` (Unit), and on real windows with the real `WindowService`
 (Integration): `UIAutomationServiceElementWindowIntegrationTests`,
 `UIAutomationServiceObserveWindowsIntegrationTests` (`Fixtures/OwnedWindowFamily.cs`: two
-owner/owned-dialog pairs, untitled, tool and popup windows) and `ObserveRealContextMenuIntegrationTests`. **The "done
+owner/owned-dialog pairs, a window owned by an owned window, a hidden owned window, untitled, tool
+and popup windows; the real owner relation) and `ObserveRealContextMenuIntegrationTests`. **The "done
 when" bar is met in a test, not live:** a real WinForms `ContextMenuStrip`, opened from code in a
 child PowerShell process, is listed item by item by an observation-shaped snapshot of its form
 (by handle, with popups); the click-through-the-tool half is covered by the mocked unit tests. The

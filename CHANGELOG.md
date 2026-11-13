@@ -20,8 +20,11 @@
     the window inventory does not list — after the window itself, so clicking a menu returns the
     menu's items in the same call. And because UI Automation nests an **owned** top-level window
     (a dialog, an owned popup) under its owner — clipped to the owner's rectangle and under the
-    owner's title — an observation lifts each one out: a descendant whose native handle is its own
-    Win32 root window is skipped by the owner's walk (never entered) and walked as its own root,
+    owner's title — an observation lifts each one out. The owned windows come from Win32's owner
+    relation, not a search of the UI tree: every visible top-level window whose owner chain
+    (`GetWindow(GW_OWNER)`, up to 32 links) reaches the observed window, so a dialog opened by a
+    dialog counts too, nearest first, then in z-order. Each is skipped by the owner's walk (never
+    entered) and walked as its own root,
     clipped to its own rectangle and labelled with its inventory title, else its UIA name, else
     `popup`, right after its owner. Its elements are visited and charged to the element budget
     once, so with a short budget the owner's rows come first, then the owned window's. This holds
@@ -45,29 +48,35 @@
     The action above was performed, so do not repeat it; call snapshot to see the result.` Only
     `click` and `key` carry the request's cancellation token — cancelling them during the settle
     wait or the snapshot drops the result although the action was performed; the other five
-    tools' wait and snapshot cannot be cancelled (parity D-40).
+    tools' wait and snapshot cannot be cancelled (parity D-40). A UI Automation **timeout** (a
+    hung provider) while the observed window — or a window it owns — is being found or walked
+    ends in that same failure note rather than a snapshot missing the observed window's rows; the
+    plain `snapshot` tool still logs and skips a window that times out.
   New `IUIAutomationService.GetElementWindowAsync(elementId, ct)` → the window handle;
   `SnapshotRequest` gains `WindowHwnd` (with `Scope == Window`, one window by handle instead of a
   title — refused with a title or another scope; a handle that no longer names a window is a
   `KeyNotFoundException`, a timeout resolving or probing it propagates as a `TimeoutException`)
   and `IncludePopups` (the process's popups and the owned windows nested under each walked
   window; `OwnedWindowsUnder`, `ClosedNotHung`, the per-window `WalkWindow`, and
-  `UiTraverser.Walk`'s optional `skipHandles`) and the `ForegroundRoot` test seam. One shared helper, `Tools/Observation.cs`
+  `UiTraverser.Walk`'s optional `skipHandles` and `timeoutsPropagate`) and the `ForegroundRoot`
+  and `OwnedWindowsOf` (default `Win32OwnedWindows`: `EnumWindows` + `GetWindow(GW_OWNER)`) test
+  seams. One shared helper, `Tools/Observation.cs`
   (`AroundAsync`, with a `Delay` seam), behind thin wrappers over private `XxxCore` methods in
   `Tools/InputTools.cs` and `Tools/UIAutomationTools.cs`; `UIAutomationService` gains
   `UnlistedWindow` and the `RootWindowOf` / `ElementFromHandle` test seams, and
-  `NativeMethods.txt` gains `GetAncestor`. The seven descriptions gain the observe paragraph; the
+  `NativeMethods.txt` gains `GetAncestor` and `GetWindow`. The seven descriptions gain the observe paragraph; the
   `snapshot` description, the expired-id message (`ElementCache`) and the server instructions
   (`Hosting/ServerInstructions.cs`, now 1 978 characters) name "any action with observe" among
   the calls that replace snapshot ids, and the instructions say observe:foreground returns the new
   snapshot with the action. No tool added (still 69), no new service. Tests:
   `ObservationToolsTests`, `ObservationSurfaceTests`, `UIAutomationServiceElementWindowTests`,
   `UIAutomationSnapshotWindowHandleTests`, `UIAutomationSnapshotPopupsTests`,
-  `UIAutomationSnapshotOwnedWindowsTests`, `UIAutomationSnapshotOwnedWindowBudgetTests` and
-  `ObserveWindowTimeoutTests` (Unit), and
+  `UIAutomationSnapshotOwnedWindowsTests`, `UIAutomationSnapshotOwnedWindowBudgetTests`,
+  `ObserveWindowTimeoutTests` and `UIAutomationSnapshotObservationTimeoutTests` (Unit), and
   `UIAutomationServiceElementWindowIntegrationTests`,
-  `UIAutomationServiceObserveWindowsIntegrationTests` (real owner/owned-dialog pairs, untitled,
-  tool and popup windows in `Fixtures/OwnedWindowFamily.cs`, the real `WindowService`) and
+  `UIAutomationServiceObserveWindowsIntegrationTests` (real owner/owned-dialog pairs, a window
+  owned by an owned window, a hidden owned window, untitled, tool and popup windows in
+  `Fixtures/OwnedWindowFamily.cs`, the real `WindowService` and the real owner relation) and
   `ObserveRealContextMenuIntegrationTests` (a real WinForms `ContextMenuStrip` in a child
   PowerShell process, opened from code) as Integration. Not verified live: the `UIAutomation`
   category and a third-party app were not run. Gaps found and not fixed are parity D-39 … D-45.

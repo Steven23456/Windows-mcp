@@ -36,10 +36,18 @@ internal sealed class FakeUiWindows : IDisposable
     /// <summary>Every NativeWindowHandle read of any fake this instance made (a cross-process call on a real element).</summary>
     public int HandleReads { get; private set; }
 
+    /// <summary>PR #43 T2: per fake (by name), the FindAll calls with a Descendants scope - a search of the subtree.</summary>
+    public Dictionary<string, int> DescendantSearches { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>PR #43 T2: per fake (by name), how often its children were read (a walk reads them once).</summary>
+    public Dictionary<string, int> ChildReads { get; } = new(StringComparer.Ordinal);
+
+    private static void Bump(Dictionary<string, int> counts, string key) => counts[key] = counts.GetValueOrDefault(key) + 1;
+
     public AutomationElement Window(string name, long handle, int pid = 4242,
         (int X, int Y, int W, int H)? bounds = null, bool offscreen = false, int controlType = ButtonType,
         bool handleSupported = true, bool pidSupported = true, bool broken = false,
-        AutomationElement[]? children = null, Exception? pidFailure = null)
+        AutomationElement[]? children = null, Exception? pidFailure = null, Exception? childrenFailure = null)
     {
         var lib = Automation.PropertyLibrary.Element;
         var b = bounds ?? (100, 100, 300, 200);
@@ -61,8 +69,19 @@ internal sealed class FakeUiWindows : IDisposable
             .Setup<object>("InternalGetPropertyValue", ItExpr.IsAny<int>(), ItExpr.IsAny<bool>(), ItExpr.IsAny<bool>())
             .Returns((int id, bool _, bool _) => Read(id));
         // E-5 P2: a fake with children walks to its subtree (the traverser reads CachedChildren).
-        if (children is not null)
-            framework.Setup(f => f.GetCachedChildren()).Returns(children);
+        if (children is not null || childrenFailure is not null)
+            framework.Setup(f => f.GetCachedChildren()).Returns(() =>
+            {
+                Bump(ChildReads, name);
+                return childrenFailure is not null ? throw childrenFailure : children!;
+            });
+        // PR #43 T2: a search is counted, then refused (as a strict mock refused it before).
+        framework.Setup(f => f.FindAll(It.IsAny<FlaUI.Core.Definitions.TreeScope>(), It.IsAny<FlaUI.Core.Conditions.ConditionBase>()))
+            .Returns((FlaUI.Core.Definitions.TreeScope scope, FlaUI.Core.Conditions.ConditionBase _) =>
+            {
+                if (scope.HasFlag(FlaUI.Core.Definitions.TreeScope.Descendants)) Bump(DescendantSearches, name);
+                throw new InvalidOperationException("fake: FindAll is not served");
+            });
         return new AutomationElement(framework.Object);
     }
 
@@ -365,6 +384,7 @@ public sealed class UIAutomationSnapshotPopupsTests : IDisposable
         var svc = new UIAutomationService(input.Object, windows.Object, null, _log);
         svc.ElementFromHandle = h => h == Host ? _fakes.Window("Host button", Host) : null;
         svc.DesktopWindows = () => desktopChildren;
+        svc.OwnedWindowsOf = _ => [];   // PR #43 T2: no owned windows in these rows
         return svc;
     }
 

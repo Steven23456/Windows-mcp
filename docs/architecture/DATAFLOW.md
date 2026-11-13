@@ -158,14 +158,19 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
        a window whose walk throws is logged and skipped;
        IncludePopups (E-5 observations only, not scope=desktop):
          per walked window (WalkWindow; not a DOM page; the foreground
-         fallback too), OwnedWindowsUnder first finds the owned top-level
-         windows UIA nests under it (own handle == its GA_ROOT); the owner's
+         fallback too; needs a native handle), OwnedWindowsUnder first gets
+         its owned top-level windows from Win32 (OwnedWindowsOf = EnumWindows
+         + GetWindow(GW_OWNER) chain ≤ 32 links, visible only, nearest first)
+         and resolves each with ElementFromHandle (skip + log if gone); the owner's
          Walk(..., skipHandles) does not enter them, and each is walked as its
          own root right after the owner (inventory title, else UIA name, else
          "popup"), never twice — its elements charged to the budget once,
          the owner's rows first;
          then every on-screen, unlisted, not-yet-walked top-level window of a
-         walked process — an open menu, a dropdown, a tooltip — same budget
+         walked process — an open menu, a dropdown, a tooltip — same budget;
+         a TimeoutException in a target window after its handle resolved
+         (discovery, bookkeeping, Walk(..., timeoutsPropagate)) propagates
+         here, where without IncludePopups it is a logged skip
 
 3. Per walked node → el_N id (ids the previous snapshot issued are evicted
    first) → UiTree.Project:

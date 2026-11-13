@@ -30,8 +30,14 @@ internal sealed class UiTraverser
     /// are neither listed here nor charged to the budget here. Null (every caller but an
     /// observation) reads no handle and changes nothing.
     /// </param>
+    /// <param name="timeoutsPropagate">
+    /// E-5: for an observation, a provider that times out while its children are read ends the
+    /// walk with that <see cref="TimeoutException"/> instead of quietly leaving the subtree out —
+    /// the caller is then told the observation failed, not shown a window with rows missing.
+    /// False (every other caller) keeps the D-5 rule: nothing a dying element does fails a walk.
+    /// </param>
     internal IReadOnlyList<UiWalkEntry> Walk(AutomationElement root, string windowTitle, ElementBudget budget,
-        IReadOnlySet<long>? skipHandles = null)
+        IReadOnlySet<long>? skipHandles = null, bool timeoutsPropagate = false)
     {
         var entries = new List<UiWalkEntry>();
 
@@ -75,13 +81,13 @@ internal sealed class UiTraverser
             catch { cachedRoot = root; }
 
             var windowRect = ReadBounds(cachedRoot) ?? new Bounds(0, 0, 0, 0);
-            Visit(cachedRoot, windowTitle, windowRect, depth: 0, parentIndex: -1, budget, entries, skipHandles);
+            Visit(cachedRoot, windowTitle, windowRect, depth: 0, parentIndex: -1, budget, entries, skipHandles, timeoutsPropagate);
         }
         return entries;
     }
 
     private void Visit(AutomationElement el, string window, Bounds windowRect, int depth, int parentIndex,
-        ElementBudget budget, List<UiWalkEntry> entries, IReadOnlySet<long>? skipHandles)
+        ElementBudget budget, List<UiWalkEntry> entries, IReadOnlySet<long>? skipHandles, bool timeoutsPropagate)
     {
         if (budget.Truncated) return;
         // The handle is in the cache request, so this costs no call to the provider.
@@ -102,20 +108,22 @@ internal sealed class UiTraverser
         }
 
         AutomationElement[] children;
-        try { children = Children(el); }
+        try { children = Children(el, timeoutsPropagate); }
+        catch (TimeoutException) when (timeoutsPropagate) { throw; }
         catch { return; }
 
         foreach (var child in children)
         {
             if (budget.Truncated) return;
-            Visit(child, window, windowRect, depth + 1, myIndex, budget, entries, skipHandles);
+            Visit(child, window, windowRect, depth + 1, myIndex, budget, entries, skipHandles, timeoutsPropagate);
         }
     }
 
     /// <summary>Cached children when the request delivered them, a live query otherwise.</summary>
-    private static AutomationElement[] Children(AutomationElement el)
+    private static AutomationElement[] Children(AutomationElement el, bool timeoutsPropagate)
     {
         try { return el.CachedChildren; }
+        catch (TimeoutException) when (timeoutsPropagate) { throw; }
         catch { return el.FindAllChildren(); }
     }
 

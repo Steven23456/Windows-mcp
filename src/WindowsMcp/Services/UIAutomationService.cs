@@ -340,11 +340,14 @@ public sealed class UIAutomationService : IUIAutomationService
             // walk skips each one, and it is walked as the window it is: once, and charged to the
             // element budget once.
             bool liftOwned = request.IncludePopups && request.Scope != SnapshotScope.Desktop;
+            // E-5: an observation's caller is told about a hung provider. A snapshot that quietly
+            // skipped the observed window would come back under a header saying it was observed.
+            bool observing = request.IncludePopups;
             void WalkWindow(AutomationElement root, string title, long hwnd, DomState dom)
             {
                 var owned = liftOwned && dom == DomState.None ? OwnedWindowsUnder(root, hwnd) : [];
                 HashSet<long>? ownedHandles = owned.Count > 0 ? owned.Select(o => o.Hwnd).ToHashSet() : null;
-                perWindow.Add((title, traverser.Walk(root, title, budget, ownedHandles), dom));
+                perWindow.Add((title, traverser.Walk(root, title, budget, ownedHandles, timeoutsPropagate: observing), dom));
 
                 foreach (var (ownedRoot, ownedHwnd) in owned)
                 {
@@ -356,9 +359,9 @@ public sealed class UIAutomationService : IUIAutomationService
                         var name = string.IsNullOrEmpty(listedTitle) ? TryGetName(ownedRoot) : listedTitle;
                         var label = name.Length > 0 ? name : "popup";
                         // One nested deeper is walked in its own turn, not inside this one.
-                        perWindow.Add((label, traverser.Walk(ownedRoot, label, budget, ownedHandles), DomState.None));
+                        perWindow.Add((label, traverser.Walk(ownedRoot, label, budget, ownedHandles, timeoutsPropagate: observing), DomState.None));
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    catch (Exception ex) when (ex is not OperationCanceledException && !(observing && ex is TimeoutException))
                     {
                         LogSkipped("an owned window", ex);
                     }
@@ -371,7 +374,7 @@ public sealed class UIAutomationService : IUIAutomationService
                 // to whatever UIA says is in front, as get_state does. No inventory row means no
                 // IsBrowser either, so DOM mode does not apply here.
                 var root = ForegroundRoot?.Invoke() ?? GetForegroundRoot();
-                try { Walked(root, 0, 0); } catch (Exception ex) when (ex is not OperationCanceledException) { }
+                try { Walked(root, 0, 0); } catch (Exception ex) when (ex is not OperationCanceledException && !(observing && ex is TimeoutException)) { }
                 // Through the same walk as a listed window: an untitled or tool window in front
                 // has owned dialogs too.
                 WalkWindow(root, TryGetName(root), NativeHandleOf(root), DomState.None);
@@ -416,7 +419,7 @@ public sealed class UIAutomationService : IUIAutomationService
                     }
                     WalkWindow(root, title, w.Hwnd, dom);
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (ex is not OperationCanceledException && !(observing && ex is TimeoutException))
                 {
                     LogSkipped($"window '{w.Title}'", ex);
                 }
@@ -538,67 +541,76 @@ public sealed class UIAutomationService : IUIAutomationService
         }
     }
 
-    /// <summary>How many elements the fallback search for owned windows will look at.</summary>
-    private const int OwnedWindowSearchLimit = 5000;
-
     /// <summary>
-    /// E-5: the owned top-level windows UI Automation nests under <paramref name="root"/>: a
-    /// descendant with a native handle that is its own Win32 root window, whatever control type
-    /// the provider gives it (a captioned dialog is a Window, a bare popup a Pane). An MDI child
-    /// or an in-window XAML "Window" is not one (its root is the host, or it has no handle).
+    /// E-5: the owned top-level windows of the window with handle <paramref name="rootHwnd"/>
+    /// (UI Automation nests them under <paramref name="root"/>), each resolved to its element.
+    /// They come from Win32's owner relation, not from a search of the UI tree: that search was a
+    /// second pass over the whole window on the one UI Automation thread, whatever the element
+    /// limit. One that no longer resolves is skipped. A timeout propagates.
     /// </summary>
     private List<(AutomationElement Root, long Hwnd)> OwnedWindowsUnder(AutomationElement root, long rootHwnd)
     {
         var found = new List<(AutomationElement, long)>();
-        AutomationElement[] windows;
-        try
-        {
-            // Only elements backed by a window handle can be windows: let the provider filter.
-            var hasHandle = new PropertyCondition(_automation.PropertyLibrary.Element.NativeWindowHandle, 0).Not();
-            windows = root.FindAllDescendants(hasHandle);
-        }
+        if (rootHwnd == 0) return found;
+
+        IReadOnlyList<nint> handles;
+        try { handles = OwnedWindowsOf((nint)rootHwnd); }
         catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException)
         {
-            // The provider could not run the search: look through the children it does serve.
-            windows = DescendantsOf(root);
+            LogSkipped($"the windows owned by '{TryGetName(root)}'", ex);
+            return found;
         }
 
-        var seen = new HashSet<long>();
-        foreach (var window in windows)
+        var seen = new HashSet<long> { rootHwnd };
+        foreach (var handle in handles)
         {
-            long hwnd = NativeHandleOf(window);
-            if (hwnd == 0 || hwnd == rootHwnd || !seen.Add(hwnd)) continue;
-            long itsRoot;
-            try { itsRoot = RootWindowOf((nint)hwnd).ToInt64(); }
-            catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException) { continue; }
-            if (itsRoot == hwnd) found.Add((window, hwnd));
+            long hwnd = handle.ToInt64();
+            if (hwnd == 0 || !seen.Add(hwnd)) continue;
+            try
+            {
+                var owned = ElementFromHandle(handle);
+                if (owned is null || ClosedNotHung(owned))
+                {
+                    LogSkipped("an owned window", new InvalidOperationException($"window handle {hwnd} no longer resolves"));
+                    continue;
+                }
+                found.Add((owned, hwnd));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException)
+            {
+                LogSkipped("an owned window", ex);
+            }
         }
         return found;
     }
 
-    private static AutomationElement[] DescendantsOf(AutomationElement root)
+    /// <summary>How long an owner chain <see cref="Win32OwnedWindows"/> follows before giving up on it.</summary>
+    private const int MaxOwnerChain = 32;
+
+    /// <summary>
+    /// The visible top-level windows whose owner chain reaches <paramref name="owner"/>, nearest
+    /// first (a dialog before the dialog it opened), otherwise in z-order.
+    /// </summary>
+    private static unsafe IReadOnlyList<nint> Win32OwnedWindows(nint owner)
     {
-        var result = new List<AutomationElement>();
-        var pending = new Stack<AutomationElement>();
-        pending.Push(root);
-        for (int looked = 0; pending.Count > 0 && looked < OwnedWindowSearchLimit; looked++)
+        var found = new List<(nint Hwnd, int Distance, int Order)>();
+        PInvoke.EnumWindows((hwnd, _) =>
         {
-            var current = pending.Pop();
-            AutomationElement[] children;
-            try { children = current.CachedChildren; }
-            catch
+            if (!PInvoke.IsWindowVisible(hwnd)) return true;
+            var current = hwnd;
+            for (int distance = 1; distance <= MaxOwnerChain; distance++)
             {
-                try { children = current.FindAllChildren(); }
-                catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException) { continue; }
+                current = PInvoke.GetWindow(current, Windows.Win32.UI.WindowsAndMessaging.GET_WINDOW_CMD.GW_OWNER);
+                if (current.IsNull) break;
+                if ((nint)current.Value == owner)
+                {
+                    found.Add(((nint)hwnd.Value, distance, found.Count));
+                    break;
+                }
             }
-            // Reversed, so the stack hands them back in document order.
-            for (int i = children.Length - 1; i >= 0; i--)
-            {
-                pending.Push(children[i]);
-            }
-            result.AddRange(children);
-        }
-        return result.ToArray();
+            return true;
+        }, 0);
+        return found.OrderBy(f => f.Distance).ThenBy(f => f.Order).Select(f => f.Hwnd).ToArray();
     }
 
     /// <summary>E-5: a stand-in inventory row for a window the inventory leaves out (untitled, a tool window, a popup).</summary>
@@ -1327,6 +1339,16 @@ public sealed class UIAutomationService : IUIAutomationService
     /// headless test can hand it a fake. Null (always, outside tests) means the live foreground root.
     /// </summary>
     internal Func<AutomationElement>? ForegroundRoot { get; set; }
+
+    /// <summary>
+    /// PR #43 T2: the visible top-level windows whose Win32 owner chain (GetWindow GW_OWNER, transitively)
+    /// reaches the given handle, nearest first. A seam so a headless test can supply the owner relation.
+    /// </summary>
+    /// <summary>
+    /// E-5: the visible top-level windows a window owns, directly or through another owned
+    /// window, nearest first. Win32's owner relation; a seam so a test can supply fake handles.
+    /// </summary>
+    internal Func<nint, IReadOnlyList<nint>> OwnedWindowsOf { get; set; } = Win32OwnedWindows;
 
     /// <summary>E-5: Win32 GetAncestor(GA_ROOT) — a handle's root window, which stops at an owned window. A seam for fake handles.</summary>
     internal Func<nint, nint> RootWindowOf { get; set; } = Win32RootWindow;

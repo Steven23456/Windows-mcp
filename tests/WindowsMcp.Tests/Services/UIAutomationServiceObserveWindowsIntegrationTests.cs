@@ -200,6 +200,38 @@ public sealed class UIAutomationServiceObserveWindowsIntegrationTests : IDisposa
         Named(snap, _family.OwnedButton).Should().ContainSingle().Which.Window.Should().Be(_family.OwnedTitle);
     }
 
+    // ---- PR #43 T2: the real owner relation ------------------------------------------------------
+
+    [Fact]
+    public void The_default_owner_relation_returns_the_visible_owned_windows_transitively_nearest_first_and_nothing_else()
+    {
+        var owned = _svc.OwnedWindowsOf(_family.Owner2).ToList();
+
+        owned.Should().Contain([_family.Owned2, _family.Grand2], "Owned2 is owned by Owner2, Grand2 by Owned2");
+        owned.IndexOf(_family.Owned2).Should().BeLessThan(owned.IndexOf(_family.Grand2), "nearest first");
+        owned.Should().NotContain(_family.HiddenOwned2, "a hidden owned window is not returned");
+        owned.Should().NotContain([_family.Owner2, _family.Host, _family.Owned, _family.Untitled, _family.Tool, _family.Popup],
+            "nothing that Owner2 does not own");
+    }
+
+    [Fact]
+    public void The_default_owner_relation_for_the_host_returns_its_owned_dialog_and_not_the_unowned_popup()
+    {
+        var owned = _svc.OwnedWindowsOf(_family.Host);
+
+        owned.Should().Contain(_family.Owned);
+        owned.Should().NotContain([_family.Popup, _family.Owned2, _family.Grand2]);
+    }
+
+    [Fact]
+    public async Task With_popups_a_window_owned_by_an_owned_window_is_observed_once_under_its_own_title()
+    {
+        var snap = await _svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Window, WindowHwnd: (long)_family.Owner2, IncludePopups: true));
+
+        Named(snap, _family.Grand2Button).Should().ContainSingle().Which.Window.Should().Be(_family.Grand2Title);
+        Named(snap, _family.Owned2OutsideButton).Should().ContainSingle().Which.Window.Should().Be(_family.Owned2Title);
+    }
+
     // ---- end to end through the tool -------------------------------------------------------------
 
     [Fact]

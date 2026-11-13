@@ -102,6 +102,10 @@ internal sealed class OwnedWindowFamily : IDisposable
     public string Owner2Button => Token + " owner2 button";
     public string Owned2InsideButton => Token + " owned2 inside button";
     public string Owned2OutsideButton => Token + " owned2 outside button";
+    // PR #43 T2: a window owned by Owned2 (Owner2 owns it transitively), and a HIDDEN window owned by Owner2.
+    public string Grand2Title => Token + " grand2";
+    public string Grand2Button => Token + " grand2 button";
+    public string HiddenOwned2Title => Token + " hidden owned2";
 
     public IntPtr Host { get; private set; }
     public IntPtr Owned { get; private set; }
@@ -110,6 +114,8 @@ internal sealed class OwnedWindowFamily : IDisposable
     public IntPtr Popup { get; private set; }
     public IntPtr Owner2 { get; private set; }
     public IntPtr Owned2 { get; private set; }
+    public IntPtr Grand2 { get; private set; }
+    public IntPtr HiddenOwned2 { get; private set; }
 
     public IntPtr HostButtonHandle { get; private set; }
     public IntPtr OwnedButtonHandle { get; private set; }
@@ -124,7 +130,7 @@ internal sealed class OwnedWindowFamily : IDisposable
 
     public static bool Exists(IntPtr hwnd) => hwnd != IntPtr.Zero && IsWindow(hwnd);
 
-    private IntPtr[] All => [Popup, Owned, Host, Untitled, Tool, Owned2, Owner2];
+    private IntPtr[] All => [Popup, Owned, Host, Untitled, Tool, Grand2, HiddenOwned2, Owned2, Owner2];
 
     private IntPtr Button(IntPtr parent, string text, int y, int id, int width = 300) =>
         CreateWindowExW(0, "BUTTON", text, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 10, y, width, 30, parent, new IntPtr(id), IntPtr.Zero, IntPtr.Zero);
@@ -153,6 +159,10 @@ internal sealed class OwnedWindowFamily : IDisposable
         Owned2 = CreateWindowExW(0, "STATIC", Owned2Title, WS_OVERLAPPEDWINDOW, x0 + 40, 250, 280, 220, Owner2, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
         Button(Owned2, Owned2InsideButton, 5, 208, 250);
         Button(Owned2, Owned2OutsideButton, 120, 209, 250);
+        Grand2 = CreateWindowExW(0, "STATIC", Grand2Title, WS_OVERLAPPEDWINDOW, x0, 480, 260, 120, Owned2, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+        Button(Grand2, Grand2Button, 5, 210, 230);
+        // Never shown: an owner relation that lists invisible windows would hand the walk a window nobody can see.
+        HiddenOwned2 = CreateWindowExW(0, "STATIC", HiddenOwned2Title, WS_OVERLAPPEDWINDOW, x0, 140, 200, 100, Owner2, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
 
         foreach (var w in new[] { Host, Untitled, Tool, Owner2 })
         {
@@ -162,6 +172,7 @@ internal sealed class OwnedWindowFamily : IDisposable
         ShowWindow(Owned, SW_SHOWNOACTIVATE);
         ShowWindow(Popup, SW_SHOWNOACTIVATE);
         ShowWindow(Owned2, SW_SHOWNOACTIVATE);
+        ShowWindow(Grand2, SW_SHOWNOACTIVATE);
         _ready.Set();
 
         while (GetMessageW(out var msg, IntPtr.Zero, 0, 0) > 0)
