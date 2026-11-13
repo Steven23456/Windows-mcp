@@ -254,6 +254,85 @@ public sealed class UIAutomationSnapshotPopupTextTests : IDisposable
         snap.PopupText.Should().Equal(["Find: Options", "Find: Use defaults"], "a named non-root container is text; the root's own name is not, here");
     }
 
+    // ---- PR #43 review: the LABEL of a popup-text line is folded and clipped too ---------------------
+    // Label: line breaks -> single spaces, then at most 80 characters followed by "...". Name: its
+    // 200-character rule. So no entry has a line break and none is longer than 80+3+2+200+3.
+
+    private const int MaxEntryLength = 80 + 3 + 2 + 200 + 3;
+
+    private static void EveryEntryIsOneBoundedLine(SnapshotResult snap)
+    {
+        snap.PopupText.Should().NotBeNull();
+        snap.PopupText!.Should().OnlyContain(e => !e.Contains('\n') && !e.Contains('\r'), "no entry spans lines");
+        snap.PopupText.Should().OnlyContain(e => e.Length <= MaxEntryLength, $"no entry is longer than {MaxEntryLength} characters");
+    }
+
+    [Theory]
+    [InlineData("Line one\nLine two")]
+    [InlineData("Line one\r\nLine two")]
+    public async Task Label_a_named_tooltip_with_a_multi_line_name_gives_one_line_label_and_name_alike(string name)
+    {
+        using var svc = NewService(desktop: [Popup(name, 0xAB40, ToolTipType)]);
+
+        var snap = await svc.SnapshotAsync(Observation);
+
+        snap.PopupText.Should().Equal(["Line one Line two: Line one Line two"]);
+        EveryEntryIsOneBoundedLine(snap);
+    }
+
+    [Fact]
+    public async Task Label_a_3000_character_tooltip_is_clipped_at_80_in_the_label_and_200_in_the_name()
+    {
+        var huge = new string('x', 3000);
+        using var svc = NewService(desktop: [Popup(huge, 0xAB40, ToolTipType)]);
+
+        var snap = await svc.SnapshotAsync(Observation);
+
+        snap.PopupText.Should().Equal([new string('x', 80) + "...: " + new string('x', 200) + "..."]);
+        EveryEntryIsOneBoundedLine(snap);
+    }
+
+    [Theory]
+    [InlineData(80, false)]
+    [InlineData(81, true)]
+    [InlineData(120, true)]
+    public async Task Label_a_label_of_80_characters_is_kept_and_a_longer_one_is_clipped(int length, bool clipped)
+    {
+        // A long-labelled popup with a short Text child: the root's own name gives no line (Z7).
+        var label = new string('L', length);
+        using var svc = NewService(desktop: [Tooltip(label, 0xAB40, "Tip")]);
+
+        var snap = await svc.SnapshotAsync(Observation);
+
+        snap.PopupText.Should().Equal([(clipped ? new string('L', 80) + "..." : label) + ": Tip"]);
+    }
+
+    [Fact]
+    public async Task Label_an_owned_windows_long_label_is_clipped_in_its_popup_text_too()
+    {
+        var title = new string('T', 120);
+        var owned = OwnedDialog(title, Node("Owned label", TextType, (460, 160, 100, 20)));
+        using var svc = NewService(HostWithLabel(), owned: owned);
+
+        var snap = await svc.SnapshotAsync(Observation);
+
+        snap.PopupText.Should().Equal([new string('T', 80) + "...: Owned label"]);
+    }
+
+    [Fact]
+    public async Task Label_guard_the_rows_window_label_is_unchanged_only_the_popup_text_line_is_clipped()
+    {
+        var label = new string('L', 120);
+        var popup = Popup(label, 0xAB40, PaneType, Node("Tip", TextType), Node("OK", ButtonType, (155, 180, 50, 20)));
+        using var svc = NewService(desktop: [popup]);
+
+        var snap = await svc.SnapshotAsync(Observation);
+
+        snap.Interactive.Should().ContainSingle(e => e.Name == "OK").Which.Window.Should().Be(label,
+            "the snapshot's rows keep the label as it is; only PopupText folds and clips it");
+        snap.PopupText.Should().Equal([new string('L', 80) + "...: Tip"]);
+    }
+
     // ---- Z8: a popup with no text contributes nothing --------------------------------------------
 
     [Fact]
@@ -360,6 +439,17 @@ public sealed class ObservePopupTextTests : IDisposable
 
         text.Should().StartWith("acted\n\nObserved");
         text.Should().EndWith("\n\nPopup text (not controls, no ids):\npopup: Saves the document");
+    }
+
+    [Fact]
+    public async Task Observe_foreground_with_a_multi_line_tooltip_puts_its_entry_on_exactly_one_line()
+    {
+        _svc.DesktopWindows = () => [_fakes.Window("Line one\nLine two", 0xAB40, controlType: 50022, bounds: (150, 150, 200, 40))];
+
+        var text = await new Observation(_svc).AroundAsync("foreground", 0, null, CancellationToken.None, () => Task.FromResult("acted"));
+
+        text.Should().EndWith("\n\nPopup text (not controls, no ids):\nLine one Line two: Line one Line two",
+            "the section's entry is one line, label and name alike");
     }
 
     [Fact]

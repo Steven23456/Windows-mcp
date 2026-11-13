@@ -548,7 +548,10 @@ public sealed class UIAutomationService : IUIAutomationService
                     // The popup's own name only when nothing inside it spoke: a tooltip is its name,
                     // but a dialog's title is already its label.
                     if (popupNames.Count == 0 && popupRootName is not null) popupNames.Add(popupRootName);
-                    foreach (var name in popupNames) popupText.Add($"{title}: {OneLineClipped(name, MaxPopupTextLength)}");
+                    // The label is folded and clipped too: for a tooltip it IS the text, so a long
+                    // or multi-line one would otherwise get past both limits through its label.
+                    foreach (var name in popupNames)
+                        popupText.Add($"{OneLineClipped(title, MaxPopupLabelLength)}: {OneLineClipped(name, MaxPopupTextLength)}");
                     if (request.IncludeTree && entries.Count > 0)
                         trees.Add(ToTree(entries, ids));
                     if (dom == DomState.Page && entries.Count > 0)
@@ -599,6 +602,7 @@ public sealed class UIAutomationService : IUIAutomationService
 
     /// <summary>E-5: how much of one popup text an observation quotes, and how many lines of it in all.</summary>
     private const int MaxPopupTextLength = 200;
+    private const int MaxPopupLabelLength = 80;
     private const int MaxPopupTextLines = 50;
 
     /// <summary>One line of at most <paramref name="max"/> characters: line breaks become spaces, the rest is "...".</summary>
