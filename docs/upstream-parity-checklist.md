@@ -7,22 +7,22 @@
 [Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1,
 phase 3's A-2/A-3/A-4, phase 4's A-6 and phase 5's A-14, A-12 (phase 1), A-10 and A-5 (phase 1),
 then all of section B and all of section C (C-7, C-4, C-2, C-3, C-1, C-6, C-5), D-10/D-11, S-11,
-E-1, E-2, E-3, E-4 (with D-20), E-5 and E-6.
+E-1, E-2, E-3, E-4 (with D-20), E-5, E-6 and E-7.
 SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
-This is the working list of everything upstream can do that this server cannot (plus fifty-three
+This is the working list of everything upstream can do that this server cannot (plus sixty-five
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 and D-10/D-11
 logged 2026-11-10 — **all eleven are now fixed** — then D-12…D-18, logged 2026-11-11 by the
 D-10/D-11 review, D-19…D-22, logged 2026-11-12 during E-1, D-23…D-27, logged 2026-11-12
 during E-2, D-28…D-32, logged 2026-11-12 by the E-3 review, D-33…D-38, logged 2026-11-12
-during E-4, D-39…D-48, logged 2026-11-12 during E-5 and its review, and D-49…D-53, logged
-2026-11-13 by the E-6 review, all still open except D-31, which E-3's
+during E-4, D-39…D-48, logged 2026-11-12 during E-5 and its review, D-49…D-53, logged
+2026-11-13 by the E-6 review, and D-54…D-65, logged 2026-11-13 during E-7 and its review, all still open except D-31, which E-3's
 review round fixed, and D-20, which E-4 fixed; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
 phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and phase 5 shipped A-14,
 A-12 phase 1, A-10 and A-5 phase 1 — so every section-A row is ticked, with only A-5's Firefox
 phase left open and A-12's phase 2 deliberately not planned; section B is ticked too, and
-C-5/C-6 close section C — section S, D-12…D-53 (less D-20 and D-31) and section E are the work that is left; section E
+C-5/C-6 close section C — section S, D-12…D-65 (less D-20 and D-31) and section E are the work that is left; section E
 is not upstream parity but an agent-efficiency backlog from a review of this server's own tools).
 Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
@@ -164,13 +164,25 @@ function names are the stable anchor.
 | D-51 | Two concurrent `type` calls race each other's `pace_ms` on the shared keyboard sink | P3 | S | D-28 | ☐ |
 | D-52 | A takeover during a `sequence` step does not interrupt that step; the batch stops before the next one | P3 | S | E-6, D-29, D-45 | ☐ |
 | D-53 | A takeover recorded and delivered to another call before a `sequence` arrives does not stop that sequence | P3 | S | E-6 | ☐ |
+| D-54 | A window or element capture is the screen rectangle, so a covered window is captured with what covers it; there is no per-window surface capture | P3 | M | E-7 | ☐ |
+| D-55 | A window capture uses `GetWindowRect`, whose rect includes the invisible resize border, not the DWM extended-frame bounds | P3 | S | E-7 | ☐ |
+| D-56 | A target partly in a gap between unequal monitors is captured with the gap in it, unreported | P3 | S | E-7, A-8 | ☐ |
+| D-57 | `ocr(format:"json")` has no word cap or paging | P3 | S | E-7 | ☐ |
+| D-58 | `screenshot` and `ocr` take no cancellation token | P3 | S | D-40, D-49 | ☐ |
+| D-59 | The flash hide before a capture lives in the tools, not in `ScreenshotService.CaptureAsync`: a new capture consumer must remember it, and an `ocr` concurrent with a `screenshot` can capture its glow | P3 | S | A-14, E-7 | ☐ |
+| D-60 | `RegionMath.Validate` accepts a typed `region` wholly or partly in a gap between unequal monitors | P3 | S | A-8, D-56 | ☐ |
+| D-61 | OCR of a rect larger than `OcrEngine.MaxImageDimension` fails with a raw or masked error, not a clear refusal | P3 | S | E-7 | ☐ |
+| D-62 | JSON results use the default encoder: non-ASCII and `< > & ' +` are `\u`-escaped, inflating CJK `ocr(format:"json")` output | P3 | S | — | ☐ |
+| D-63 | A minimised window ahead of a visible one with the same title is refused by a capture instead of the visible one being used | P3 | S | B-10, E-7 | ☐ |
+| D-64 | `screenshot`'s `format`/`output`/`backend` as JSON null throw a masked `NullReferenceException` | P3 | S | — | ☐ |
+| D-65 | `Hide()` and the indicator's suspend return before the compositor has presented a frame without the overlay, so an immediate capture may still contain it (plausible) | P3 | S | A-14, S-11, D-59 | ☐ |
 | E-1 | Server instructions in the MCP handshake | P1 | S | — | ☑ |
 | E-2 | `interact_element`: expand, collapse, set_value, scroll_into_view | P1 | S | D-10 | ☑ |
 | E-3 | `click` modifiers; `key` repeat and hold | P2 | S | — | ☑ |
 | E-4 | `find_element` filters: automation id, control type, class, within, paging | P2 | M | — | ☑ |
 | E-5 | `observe`: action tools return the state they produced | P1 | M | D-11 · [E-5](design/E-5-observe.md) | ☑ |
 | E-6 | `sequence`: an ordered batch of UI steps in one call | P2 | M | E-5, S-11 · [E-6](design/E-6-sequence.md) | ☑ |
-| E-7 | Capture by window / element; OCR word positions | P2 | M | — | ☐ |
+| E-7 | Capture by window / element; OCR word positions | P2 | M | — · [E-7](design/E-7-capture-targets-ocr-words.md) | ☑ |
 | E-8 | Session state: elevation, lock, secure desktop | P2 | S–M | — | ☐ |
 | E-9 | `file_edit` and content search for remote hosts | P2 | M | — | ☐ |
 | E-10 | Named toolsets on top of S-1 | P3 | S | S-1 | ☐ |
@@ -180,7 +192,7 @@ function names are the stable anchor.
 D-10/D-11 review, D-19 … D-22, logged 2026-11-12 during E-1, D-23 … D-27, logged 2026-11-12
 during E-2, D-28 … D-32, logged 2026-11-12 by the E-3 review, D-33 … D-38, logged 2026-11-12
 during E-4, D-39 … D-48, logged 2026-11-12 during E-5 and its review, and D-49 … D-53, logged
-2026-11-13 by the E-6 review, are open — except D-31, fixed in E-3's
+2026-11-13 by the E-6 review, and D-54 … D-65, logged 2026-11-13 during E-7 and its review, are open — except D-31, fixed in E-3's
 review round, and D-20, fixed by E-4), and
 **so are sections
 A, B and C** (A-5's Firefox phase and
@@ -197,8 +209,8 @@ opt-in sampling and the annotation table, per-item test seeds) is in
 **Section E (added 2026-11-10) is not upstream parity.** It comes from a review of this server's
 own tool surface for how many round trips and tokens an AI client spends driving it, and the same
 review logged D-10 and D-11 (both done 2026-11-11, so E-2 and E-5 are unblocked). E-1, E-2,
-E-3, E-4 and E-5 are done (2026-11-12), and E-6 (2026-11-13). Order for the rest:
-E-7, E-8, E-9, E-10. E-11 is last and conditional: measure the snapshot
+E-3, E-4 and E-5 are done (2026-11-12), and E-6 and E-7 (2026-11-13). Order for the rest:
+E-8, E-9, E-10. E-11 is last and conditional: measure the snapshot
 cost after E-5 (now possible) before committing to it. `todo.md` still records every UI-automation tool as never
 verified live — that sweep outranks any E item that builds on those tools.
 
@@ -1609,6 +1621,296 @@ behaviour (stop, or run) is pinned either way.
 
 **Done when.** The behaviour is decided and pinned, or accepted with the reason recorded here.
 
+### D-54 — A window or element capture includes whatever covers it  `P3 · M`
+- [ ] Not started
+
+**Found during E-7 (2026-11-13), read from the source; recorded as not in scope in
+[E-7](design/E-7-capture-targets-ocr-words.md).**
+
+**Ours today.** `screenshot(window:…)` / `ocr(window:…)` (and `hwnd`, `element_id`) resolve the
+target to a rect in `ScreenTools.ResolveRegionAsync` and hand that rect to the ordinary
+`IScreenshotService.CaptureAsync`, which copies the screen (GDI) or the monitors' compositor
+frames (WGC). So the picture is the screen rectangle the target occupies: a window lying over it —
+a notification, another app, an always-on-top tool — is in the picture, and `ocr` reads its text
+as the target's. The descriptions say so and point at `switch_to_window`; nothing is raised for
+the caller.
+
+**Sketch.** A per-window capture: a `GraphicsCaptureItem` for the `HWND`
+(`IGraphicsCaptureItemInterop.CreateForWindow`; `WgcCaptureBackend.cs` already declares the
+interface for monitors) behind an explicit option, so an occluded (not minimised) window is
+captured as itself. Coordinates must still map to the window's on-screen rect for `click`.
+
+**Touches.** `Services/WgcCaptureBackend.cs`, `Services/ScreenshotService.cs`,
+`Abstractions/Models/ScreenDtos.cs` (`CaptureOptions`), `Tools/ScreenTools.cs`.
+
+**Tests.** A window covered by another: the per-window capture shows the target's own pixels; the
+default stays the screen rectangle.
+
+**Done when.** A covered window can be captured and OCR-read without being raised.
+
+### D-55 — A window capture includes the invisible resize border  `P3 · S`
+- [ ] Not started
+
+**Found during E-7 (2026-11-13), read from the source; recorded as not in scope in
+[E-7](design/E-7-capture-targets-ocr-words.md).**
+
+**Ours today.** `WindowInfo.Bounds` comes from `GetWindowRect` (`WindowService.cs`), which on
+Windows 10/11 includes the invisible resize border. A window capture therefore carries a few pixels
+of whatever is beside the window at its left, right and bottom edges, and a maximised window's rect
+overhangs its monitor — E-7 clips that to the virtual screen and reports `targetClipped:true`, so
+a maximised window on an outer edge of the desktop is reported as clipped.
+
+**Sketch.** Read `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)` for the capture rect (the
+visible frame), falling back to `GetWindowRect` when DWM declines. Whether `window(action:"list")`
+reports the same rect is a separate decision.
+
+**Touches.** `Services/WindowService.cs` (or a capture-only lookup), `NativeMethods.txt`,
+`Tools/ScreenTools.cs`.
+
+**Tests.** A pure mapping test with both rects; on a live maximised window the capture rect equals
+its monitor and `targetClipped` is absent.
+
+**Done when.** A window capture shows the window and nothing beside it.
+
+### D-56 — A target partly in a monitor gap is captured with the gap in it  `P3 · S`
+- [ ] Not started
+
+**Found during E-7 (2026-11-13), read from the source; same family as A-8's region validation
+(D-60). E-7's review fixed the wholly-in-a-gap half.**
+
+**Ours today.** `RegionMath.VirtualScreen` is the bounding box (`Union`) of the monitors, and E-7's
+`RegionMath.Clip` clips a window's or element's rect to that box. `ScreenTools.ClipTarget` then
+refuses, as off-screen, a clipped rect that meets no monitor. A rect that meets at least one monitor
+but also overlaps an area of the box no monitor shows (monitors of unequal size or offset) is
+captured as is, with no `targetClipped` or other note for the gap: GDI copies whatever the screen
+DC gives for those pixels, and WGC captures only the monitors the rect touches and leaves the rest
+of the bitmap unwritten.
+
+**Sketch.** Report the gap (a metadata note, or `targetClipped` with a reason), or trim the rect to
+the largest monitor overlap; decide together with D-60.
+
+**Touches.** `Services/RegionMath.cs`, `Tools/ScreenTools.cs`.
+
+**Tests.** Two monitors of unequal height and a window straddling the gap: the chosen rule (note or
+trim) is pinned.
+
+**Done when.** No target capture returns pixels that are on no monitor without saying so.
+
+### D-57 — `ocr(format:"json")` has no word cap or paging  `P3 · S`
+- [ ] Not started
+
+**Found during E-7 (2026-11-13), read from the source; recorded as not in scope in
+[E-7](design/E-7-capture-targets-ocr-words.md).**
+
+**Ours today.** `ScreenTools.Ocr` with `format:"json"` serialises every line and every word the
+engine returns, each with its rectangle and centre. On a full display of dense text (a log, a
+spreadsheet, an IDE) that is thousands of word objects in one result, with no cap, truncation flag
+or offset — unlike `find_element` (E-4) and `snapshot` (`max_elements`).
+
+**Sketch.** A `max_words` (or `max_lines`) with a default, `truncated`/`total` in the result and an
+`offset` for paging; or a `text` filter that returns only the matching words, which is what a click
+needs.
+
+**Touches.** `Tools/ScreenTools.cs` (the `ocr` method and description).
+
+**Tests.** A recognition with more words than the cap: the result is capped, `truncated:true`, and
+the next page starts where the first ended.
+
+**Done when.** No `ocr(format:"json")` result exceeds a stated size.
+
+### D-58 — `screenshot` and `ocr` cannot be cancelled  `P3 · S`
+- [ ] Not started
+
+**Found during E-7 (2026-11-13), read from the source; same family as D-40 and D-49.**
+
+**Ours today.** `ScreenTools.Screenshot` and `ScreenTools.Ocr` take no `CancellationToken`, so the
+monitor enumeration, E-7's window list and element lookup (`ResolveRegionAsync` has a `ct`
+parameter the tools never pass), `annotate`'s desktop snapshot, the capture and the OCR engine pass
+all run on the default token, although `IScreenshotService.CaptureAsync`, `IOcrService` and
+`IUIAutomationService` accept one. A cancelled `screenshot(annotate:true)` still walks the desktop
+and evicts the previous snapshot's ids (D-41).
+
+**Sketch.** Add `CancellationToken ct = default` to both tool methods (the SDK supplies it; it is
+not part of the schema) and pass it to the resolver, the snapshot, the capture and the OCR call.
+
+**Touches.** `Tools/ScreenTools.cs`.
+
+**Tests.** A recording service rig: the token the tool receives is the one each service call gets;
+an already-cancelled call captures nothing.
+
+**Done when.** Cancelling a `screenshot` or `ocr` call stops it before the next service call.
+
+### D-59 — The flash hide before a capture lives in the tools  `P3 · S`
+- [ ] Not started
+
+**Found by the E-7 review (2026-11-13), read from the source.**
+
+**Ours today.** `IFlashOverlay.Hide()` is called by `ScreenTools.Screenshot` and, since E-7's
+review, `ScreenTools.Ocr` immediately before they capture; `ScreenshotService.CaptureAsync` itself
+never touches the overlay (it is not injected there). `ocr` went without it until the review, so an
+earlier capture's top-most glow could be read as text. Any future caller of `CaptureAsync` or
+`IOcrService` (a capture step in `sequence`, an observation with a picture, a wait-for-text-by-OCR)
+must remember to hide the glow, or it captures it. **Found by the second review pass:** because
+each tool calls `Hide()` itself, with nothing ordering it against another call's `Show`, an `ocr`
+running concurrently with a `screenshot` (HTTP clients overlap; nothing serialises the screen
+tools) can still capture that screenshot's glow — the screenshot's `Show(r, 3.5 s)` can land
+between the ocr's `Hide()` and its capture.
+
+**Sketch.** A capture-scoped suppression inside `ScreenshotService`, like the indicator's
+`SuspendForCapture`: `ScreenshotService` takes `IFlashOverlay` and holds it hidden — refusing or
+deferring any `Show` — for the whole frame acquisition, whoever the caller; drop the tool-level
+`Hide()` calls.
+
+**Touches.** `Services/ScreenshotService.cs`, `Hosting/WindowsMcpHost.cs` (registration order is
+unaffected: both are singletons), `Tools/ScreenTools.cs`.
+
+**Tests.** A recording overlay: every `CaptureAsync` hides it before the frame is acquired, whoever
+the caller; a `Show` issued during another call's acquisition is not visible until that
+acquisition ends.
+
+**Done when.** No capture can include the glow, whichever code path asks for it.
+
+### D-60 — A typed `region` in a monitor gap is accepted  `P3 · S`
+- [ ] Not started
+
+**Found by the E-7 review (2026-11-13), read from the source; same family as D-56.**
+
+**Ours today.** `RegionMath.Validate` checks a typed `region` against `VirtualScreen`, the bounding
+box of the monitors (A-8). With monitors of unequal size or offset, a region wholly or partly in an
+area no monitor shows passes. Wholly in a gap: WGC's `TryCapture` touches no monitor and fails, so
+an explicit `backend:"wgc"` errors and `auto` falls back to GDI silently, whose copy of those
+pixels is not a picture of anything (black is expected; not verified live). Partly: the gap part is
+whatever GDI returns, or left unwritten by WGC. E-7's targets refuse the wholly-in-a-gap case;
+`region` does not.
+
+**Sketch.** Have `Validate` refuse a region that meets no monitor, with the monitor rects in the
+message, and decide with D-56 what a partial overlap reports.
+
+**Touches.** `Services/RegionMath.cs`, `Tools/ScreenTools.cs` (the `region` description).
+
+**Tests.** Two unequal monitors: a region wholly in the gap is refused naming the monitors; one on a
+monitor is unchanged.
+
+**Done when.** A typed region on no monitor is refused before any capture.
+
+### D-61 — OCR of an oversized rect fails without a clear refusal  `P3 · S`
+- [ ] Not started
+
+**Found by the E-7 review (2026-11-13), read from the source; the limit's value and the exact
+exception are not verified live (e2e OCR-05 records them).**
+
+**Ours today.** `OcrService` captures the rect at full resolution (`MaxWidth`/`MaxHeight` 0) and
+hands the bitmap to `OcrEngine.RecognizeAsync` with no check against `OcrEngine.MaxImageDimension`.
+A wide rect — `display:"all"` over several monitors, or a window target spanning them — exceeds it.
+What comes back is whatever WinRT throws: an `ArgumentException` from an `E_INVALIDARG` HRESULT
+reaches the caller as the raw WinRT message, while a `COMException` from the decoder or the engine
+is not caller-facing (`ToolErrors.IsCallerFacing`) and is masked as `An error occurred invoking
+'ocr'.`. Neither says what to do.
+
+**Sketch.** Refuse before the capture when the rect's larger side exceeds
+`OcrEngine.MaxImageDimension`, naming the limit and suggesting `display`, `window` or `region`; or
+tile the rect and merge the results (positions are already per-capture-origin). Translate any
+remaining decoder/engine `COMException` into an `InvalidOperationException` with its HRESULT.
+
+**Touches.** `Services/OcrService.cs`, possibly `Tools/ScreenTools.cs`.
+
+**Tests.** A rect wider than the limit is refused naming it, with nothing captured; a mocked engine
+failure surfaces as a caller-facing message.
+
+**Done when.** `ocr(display:"all")` on a wide desktop either reads or says why it cannot.
+
+### D-62 — JSON results escape non-ASCII and HTML-sensitive characters  `P3 · S`
+- [ ] Not started
+
+**Found by the E-7 review (2026-11-13), read from the source.**
+
+**Ours today.** No `JsonSerializerOptions` in `src/` sets an `Encoder`, so every tool that
+serialises with `System.Text.Json` uses the default `JavaScriptEncoder`, which escapes every
+non-ASCII character and `<`, `>`, `&`, `'` and `+` as `\uXXXX`. The JSON stays valid, but each CJK
+or accented character costs six characters instead of one; for `ocr(format:"json")`, whose `text`
+appears once per word, per line and for the whole result, recognised CJK text inflates the result
+several-fold, and window titles, paths and element names are harder to read in every JSON result.
+
+**Sketch.** One shared options instance with `JavaScriptEncoder.UnsafeRelaxedJsonEscaping` (the
+output goes to an MCP client, not into HTML) used by every tool's `JsonSerializer.Serialize`.
+
+**Touches.** Every `Tools/*.cs` that serialises, plus a shared options holder.
+
+**Tests.** A result carrying `日本語 <a&b>` round-trips and contains those characters literally.
+
+**Done when.** No tool result `\u`-escapes a printable character.
+
+### D-63 — A capture refuses a minimised window when a visible one has the same title  `P3 · S`
+- [ ] Not started
+
+**Found by the E-7 review (2026-11-13), read from the source; recorded as "left as it is" in
+[E-7](design/E-7-capture-targets-ocr-words.md).**
+
+**Ours today.** `screenshot`/`ocr` with `window` match through `WindowMatcher.Match` over
+`ListAsync(includeMinimized: true)`, the `window` tool's rule: within a strategy the frontmost
+(lowest `ZOrder`) match wins. When a minimised window with the same title (two Notepad windows on
+`Untitled - Notepad`, say) is ahead of a visible one in that order, the capture is refused as
+minimised although a visible match exists. For the `window` tool that is right (restoring the named
+window is the point); a read-only capture has no reason to prefer a window it cannot picture.
+
+**Sketch.** For a capture only, prefer the frontmost non-minimised match within the winning
+strategy, and refuse as minimised only when every match is; or pass `hwnd` advice in the refusal.
+
+**Touches.** `Tools/ScreenTools.cs` (or a `WindowMatcher` overload).
+
+**Tests.** An inventory with a minimised and a visible window of the same title, the minimised one
+first: the capture uses the visible one.
+
+**Done when.** A capture by title is refused as minimised only when no visible window matches.
+
+### D-64 — `screenshot`'s enum arguments as JSON null throw a masked error  `P3 · S`
+- [ ] Not started
+
+**Found by the test-agent during E-7 (2026-11-13); confirmed in the source (no null guard).**
+
+**Ours today.** `screenshot`'s `format`, `output` and `backend` are non-nullable `string`s with
+defaults, but a client may send JSON `null` for them, which binds as `null`. `ParseOutput`,
+`ResolveFormat` and the backend check call `.ToLowerInvariant()` on the value, so a `null` throws a
+`NullReferenceException`, which is not caller-facing and reaches the client as `An error occurred
+invoking 'screenshot'.`. `ocr`'s `format` already handles `null` (`format?.ToLowerInvariant()`,
+refused as an unknown format).
+
+**Sketch.** Treat `null` as the default (or refuse it naming the parameter) for each of the three,
+as `ocr` does.
+
+**Touches.** `Tools/ScreenTools.cs`.
+
+**Tests.** Each of the three as `null`: the default is used (or a named `ArgumentException`), never a
+masked error.
+
+**Done when.** No `screenshot` argument value reaches the client as the masked error.
+
+### D-65 — A capture right after hiding an overlay may still contain it  `P3 · S`
+- [ ] Not started
+
+**Found by the E-7 second review pass (2026-11-13), read from the source. PLAUSIBLE: needs a real
+desktop to confirm.**
+
+**Ours today.** `FlashOverlay.Hide()` runs `ShowWindow(SW_HIDE)` on its window thread and returns,
+and the control indicator's `SuspendForCapture()` likewise takes its windows down and returns. Nothing
+waits for the compositor to present a frame without them — there is no `DwmFlush` anywhere in
+`src/`. A capture issued immediately afterwards may therefore still contain the glow or the
+indicator, WGC especially, whose first frame is the last one the compositor composed; GDI's screen
+copy may be affected too. (On Windows 10 2004+ the indicator carries `WDA_EXCLUDEFROMCAPTURE`, so its
+suspend is a no-op there; the flash glow has no such exclusion.)
+
+**Sketch.** After hiding, call `DwmFlush()` (or wait for one composition) before acquiring the
+frame, inside the capture-scoped suppression D-59 proposes; or give the glow window
+`WDA_EXCLUDEFROMCAPTURE` where the OS supports it.
+
+**Touches.** `Services/FlashOverlay.cs`, `Services/ControlIndicator.cs`,
+`Services/ScreenshotService.cs`, `NativeMethods.txt`.
+
+**Tests.** Live only (`UIAutomation`): `screenshot` then an immediate `screenshot`/`ocr` of the
+same rect with `backend:"wgc"`, repeated: the second picture never shows the glow.
+
+**Done when.** Confirmed and fixed, or shown not to happen with the evidence recorded here.
+
 ---
 
 ## A — Desktop state and screenshots
@@ -2843,7 +3145,7 @@ covered by unit tests over mocked services. Neighbour gaps found by the review a
 D-49 … D-53.
 
 ### E-7 — Capture by window / element; OCR word positions  `P2 · M`
-- [ ] Not started
+- [x] Done 2026-11-13 — [design note](design/E-7-capture-targets-ocr-words.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (not verified live)
 
 **Ours today.** `screenshot` and `ocr` take `region` or `display`. Capturing one window means
 `window(action:"list")`, reading its bounds and passing them back as a region. `IOcrService`
@@ -2865,6 +3167,53 @@ a region with a non-zero origin and for a secondary monitor with negative coordi
 
 **Done when.** `ocr(window:"Notepad", format:"json")` returns a word whose centre, clicked, lands
 on that word.
+
+**As landed:** `screenshot` and `ocr` gain `window` (a title, B-10's `WindowMatcher`: exact →
+substring → fuzzy ≥ 70), `hwnd` (wins over `window`) and `element_id` (an `el_N` snapshot id or a
+`find_element`/`get_state` id), resolved in the one `ScreenTools.ResolveRegionAsync` both tools
+share. One kind of target per call — a rect (`region`/`display`), a window (`window`/`hwnd`) or an
+element — is checked first: two kinds are an `ArgumentException` naming them, before anything is
+looked up; a blank `window`/`element_id` counts as not given. A window comes from
+`IWindowService.ListAsync(includeMinimized: true)`, so a miss is the window tool's own
+`KeyNotFoundException` listing the open titles, and a minimised one is refused (restore it first).
+An element comes from `IUIAutomationService.GetElementAsync`; null or non-positive bounds are
+refused, naming `scroll_into_view`. The sketch's "off-screen target is refused" became: the
+target's own rect is **clipped** to the virtual screen by the new pure `RegionMath.Clip` (a
+maximised window overhangs its monitor by its frame, so one normally reports `targetClipped:true`),
+and a clipped rect that meets no monitor — nothing left, or only a gap between unequal monitors —
+is refused as off-screen (titles in refusals clipped by `UiRefusals.Clip`). `screenshot` metadata and `ocr`'s JSON gain `target` (`{kind:"window",
+title, hwnd, matchStrategy, score}` or `{kind:"element", elementId, name, controlType}`) and
+`targetClipped:true` when clipping removed part of it. `screenshot` resolves the target before
+`annotate`'s snapshot walk; an `el_N` id from an earlier snapshot is then replaced by the new ids
+in the returned list, while a `find_element`/`get_state` id stays valid (the description says
+so). Nothing is focused, raised, restored or scrolled.
+`IOcrService` gains `RecognizeAsync(region)` → `OcrResult(Text, Lines, Region, TextAngle?)` with
+`OcrLine(Text, Bounds, Words)` / `OcrWord(Text, Bounds)`: the same capture and engine pass as
+`ExtractTextAsync` (now a wrapper over the shared private path), each word mapped to
+virtual-desktop pixels by the new pure `Services/OcrGeometry.cs` (edges scaled and rounded from the
+capture origin, a line's bounds the union of its words', a word-less line dropped). Measured with
+the real engine, Windows.Media.Ocr reports a tilted word's rectangle in its deskewed frame (on a
+1000×600 frame about 25–30 px off at ±5°, 76–85 px at ±15°), so for a non-zero `TextAngle`
+`OcrGeometry` rotates the corners back about the image centre; `textAngle` is in the JSON only
+when finite and non-zero (a non-finite angle is no angle; a non-zero angle without an image size
+is an `ArgumentException`), and the description says each rectangle is then the upright box
+around its tilted word or line, larger than the text and possibly past `region`, with
+`centerX`/`centerY` still the words' centres. `ocr` hides an earlier
+capture's glow (`IFlashOverlay.Hide()`) before it captures, in both formats. `ocr` gains
+`format`: `text` (default, output unchanged) | `json` (`{coordinateSpace, region, target?,
+targetClipped?, textAngle?, text, lines:[{text, x, y, width, height, words:[{text, x, y, width,
+height, centerX, centerY}]}]}`), validated before any lookup or capture; nothing recognised is
+`text:""`, `lines:[]`. No new tool (still 70); both stay read-only. Tests: `ScreenToolsTargetTests`,
+`ScreenToolsOcrJsonTests`, `ScreenToolsTargetSurfaceTests`, `ScreenToolsTargetIntegrationTests`,
+`OcrGeometryTests`, `OcrServiceRecognizeIntegrationTests` (with rendered rotated-text rows),
+`ScreenToolsOcrJsonIntegrationTests` and `ScreenToolsTargetOwnedWindowIntegrationTests`, plus
+additions to `RegionMathTests`,
+`OcrServiceTests`, `ScreenToolsTests`, `ToolInventoryTests` and `HttpTransportTests`. **The "done
+when" bar was not run live:** `OcrWordPositionDesktopTests` (double-click the centre of a word from
+`ocr(window:…, format:"json")` in a Notepad window and check that word is selected) and the new
+`OcrServiceLiveTests` row are written but were not run, and the `UIAutomation` category was not
+run; the mapping is covered by unit tests and by `Integration` tests that recognise a synthetic
+frame through a negative origin. Neighbour gaps logged: D-54 … D-65.
 
 ### E-8 — Session state: elevation, lock, secure desktop  `P2 · S–M`
 - [ ] Not started

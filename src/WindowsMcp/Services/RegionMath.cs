@@ -125,6 +125,23 @@ internal static class RegionMath
     }
 
     /// <summary>
+    /// E-7: the part of <paramref name="bounds"/> (a window's or an element's own rect) that lies
+    /// inside <paramref name="virtualScreen"/>, or null when nothing does — a rect with no area, or
+    /// one wholly outside. Unlike <see cref="Validate"/>, which rejects a rect the caller typed, a
+    /// rect a window reports is clipped: a maximised window overhangs its monitor by its frame.
+    /// </summary>
+    internal static ScreenRegion? Clip(Bounds bounds, ScreenRegion virtualScreen)
+    {
+        // long: an edge near int.MaxValue must not wrap.
+        long left = Math.Max(bounds.X, (long)virtualScreen.X);
+        long top = Math.Max(bounds.Y, (long)virtualScreen.Y);
+        long right = Math.Min((long)bounds.X + bounds.Width, (long)virtualScreen.X + virtualScreen.Width);
+        long bottom = Math.Min((long)bounds.Y + bounds.Height, (long)virtualScreen.Y + virtualScreen.Height);
+        if (bounds.Width <= 0 || bounds.Height <= 0 || right <= left || bottom <= top) return null;
+        return new ScreenRegion((int)left, (int)top, (int)(right - left), (int)(bottom - top));
+    }
+
+    /// <summary>
     /// The primary monitor — the default capture target (roadmap C3); the first monitor when none
     /// is flagged primary.
     /// </summary>

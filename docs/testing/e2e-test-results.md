@@ -38,7 +38,7 @@ Counts are recomputed from §3 by the sync script; only the Notes column is writ
 | ASSERT_ELEMENT | 8 | 8 | 8 | 0 | 0 | 0 |  |
 | AUDIO | 6 | 6 | 3 | 3 | 0 | 0 |  |
 | CERT_STORE | 3 | 3 | 2 | 1 | 0 | 0 |  |
-| CLICK | 7 | 7 | 7 | 0 | 0 | 0 |  |
+| CLICK | 10 | 7 | 7 | 0 | 0 | 0 |  |
 | CLIPBOARD | 8 | 7 | 7 | 0 | 0 | 1 |  |
 | DEFENDER_STATUS | 1 | 1 | 0 | 1 | 0 | 0 |  |
 | DISK_INSPECT | 6 | 5 | 4 | 1 | 0 | 1 |  |
@@ -54,7 +54,7 @@ Counts are recomputed from §3 by the sync script; only the Notes column is writ
 | FILE_SEARCH | 6 | 6 | 5 | 1 | 0 | 0 |  |
 | FILE_STREAMS | 2 | 2 | 1 | 1 | 0 | 0 |  |
 | FILE_WRITE | 8 | 8 | 8 | 0 | 0 | 0 |  |
-| FIND_ELEMENT | 8 | 8 | 8 | 0 | 0 | 0 |  |
+| FIND_ELEMENT | 12 | 8 | 8 | 0 | 0 | 0 |  |
 | FIREWALL | 8 | 7 | 6 | 1 | 1 | 0 |  |
 | FOCUS | 5 | 5 | 5 | 0 | 0 | 0 |  |
 | FS_CHANGES | 3 | 2 | 2 | 0 | 1 | 0 |  |
@@ -66,16 +66,16 @@ Counts are recomputed from §3 by the sync script; only the Notes column is writ
 | HOVER | 7 | 7 | 5 | 2 | 0 | 0 |  |
 | HTTP_REQUEST | 8 | 8 | 4 | 4 | 0 | 0 |  |
 | INTEGRITY | 9 | 9 | 7 | 2 | 0 | 0 |  |
-| INTERACT_ELEMENT | 8 | 8 | 5 | 3 | 0 | 0 |  |
+| INTERACT_ELEMENT | 12 | 8 | 5 | 3 | 0 | 0 |  |
 | JOB | 10 | 10 | 10 | 0 | 0 | 0 |  |
-| KEY | 7 | 7 | 7 | 0 | 0 | 0 |  |
+| KEY | 10 | 7 | 7 | 0 | 0 | 0 |  |
 | LAUNCH | 9 | 9 | 7 | 2 | 0 | 0 |  |
 | MULTI_EDIT | 7 | 7 | 7 | 0 | 0 | 0 |  |
 | MULTI_MONITOR | 7 | 6 | 6 | 0 | 0 | 1 |  |
 | MULTI_SELECT | 7 | 4 | 4 | 0 | 3 | 0 |  |
 | NETWORK | 5 | 5 | 4 | 1 | 0 | 0 |  |
 | NOTIFICATION | 6 | 5 | 5 | 0 | 1 | 0 |  |
-| OCR | 7 | 6 | 6 | 0 | 0 | 1 |  |
+| OCR | 10 | 6 | 6 | 0 | 0 | 1 |  |
 | POWER_ACTION | 6 | 5 | 5 | 0 | 0 | 1 |  |
 | POWERSHELL | 10 | 10 | 9 | 1 | 0 | 0 |  |
 | PROCESS | 12 | 12 | 12 | 0 | 0 | 0 |  |
@@ -86,7 +86,7 @@ Counts are recomputed from §3 by the sync script; only the Notes column is writ
 | RELIABILITY | 3 | 3 | 2 | 1 | 0 | 0 |  |
 | SCHEDULED_TASK | 11 | 6 | 5 | 1 | 5 | 0 |  |
 | SCRAPE | 12 | 11 | 11 | 0 | 0 | 1 |  |
-| SCREENSHOT | 19 | 18 | 17 | 1 | 0 | 1 |  |
+| SCREENSHOT | 24 | 18 | 17 | 1 | 0 | 1 |  |
 | SCROLL | 7 | 7 | 7 | 0 | 0 | 0 |  |
 | SECURITY_AUDIT | 2 | 2 | 2 | 0 | 0 | 0 |  |
 | SERVICE | 9 | 8 | 8 | 0 | 1 | 0 |  |
@@ -100,10 +100,12 @@ Counts are recomputed from §3 by the sync script; only the Notes column is writ
 | TYPE | 8 | 7 | 7 | 0 | 1 | 0 |  |
 | VERIFY_SIGNATURE | 4 | 4 | 3 | 1 | 0 | 0 |  |
 | WAIT | 6 | 6 | 6 | 0 | 0 | 0 |  |
-| WAIT_FOR | 9 | 9 | 9 | 0 | 0 | 0 |  |
+| WAIT_FOR | 10 | 9 | 9 | 0 | 0 | 0 |  |
 | WATCH | 9 | 8 | 6 | 2 | 0 | 1 |  |
 | WINDOW | 10 | 10 | 10 | 0 | 0 | 0 |  |
 | WMI_QUERY | 9 | 9 | 6 | 3 | 0 | 0 |  |
+| OBSERVE | 10 | 0 | 0 | 0 | 0 | 0 |  |
+| SEQUENCE | 4 | 0 | 0 | 0 | 0 | 0 |  |
 
 ## 3. Test log
 
@@ -665,6 +667,43 @@ of the deciding field, or a path under the evidence folder.
 | HOST-48 | T0 | H | PASS | tools/call powershell Start-Sleep 12 with _meta.progressToken h1 → the SSE stream on the POST carries notifications/progress ('powershell running (10s)') before the result |  |
 | HOST-49 | T0 | H | PASS | default negotiation → HTTP/1.1, 200 (the listener serves HTTP/1.1). An explicit HTTP/2 attempt could not be forced (this curl build lacks --http2/--http2-prior-knowledge); HTTP/1.1-only is the Kestrel endpoint configuration | h2 not directly forced; curl lacks HTTP/2 |
 | HOST-50 | T0 | H | PASS | Stop-Process the server → Get-NetTCPConnection LocalPort 18765 count 0 (nothing listening); no child left |  |
+| FIND_ELEMENT-09 | T0 | L | NOT RUN | | |
+| FIND_ELEMENT-10 | T0 | L | NOT RUN | | |
+| FIND_ELEMENT-11 | T0 | L | NOT RUN | | |
+| FIND_ELEMENT-12 | T0 | L | NOT RUN | | |
+| INTERACT_ELEMENT-09 | T2 | L | NOT RUN | | |
+| INTERACT_ELEMENT-10 | T2 | L | NOT RUN | | |
+| INTERACT_ELEMENT-11 | T2 | L | NOT RUN | | |
+| INTERACT_ELEMENT-12 | T2 | L | NOT RUN | | |
+| OBSERVE-01 | T2 | L | NOT RUN | | |
+| OBSERVE-02 | T2 | L | NOT RUN | | |
+| OBSERVE-03 | T2 | L | NOT RUN | | |
+| OBSERVE-04 | T2 | L | NOT RUN | | |
+| OBSERVE-05 | T0 | L | NOT RUN | | |
+| OBSERVE-06 | T2 | L | NOT RUN | | |
+| OBSERVE-07 | T0 | L | NOT RUN | | |
+| OBSERVE-08 | T2 | L | NOT RUN | | |
+| OBSERVE-09 | T2 | L | NOT RUN | | |
+| OBSERVE-10 | T2 | L | NOT RUN | | |
+| SEQUENCE-01 | T1 | L | NOT RUN | | |
+| SEQUENCE-02 | T0 | L | NOT RUN | | |
+| SEQUENCE-03 | T2 | L | NOT RUN | | |
+| SEQUENCE-04 | T2 | L | NOT RUN | | |
+| WAIT_FOR-10 | T0 | L | NOT RUN | | |
+| CLICK-08 | T2 | L | NOT RUN | | |
+| CLICK-09 | T0 | L | NOT RUN | | |
+| CLICK-10 | T2 | L | NOT RUN | | |
+| KEY-08 | T2 | L | NOT RUN | | |
+| KEY-09 | T2 | L | NOT RUN | | |
+| KEY-10 | T0 | L | NOT RUN | | |
+| SCREENSHOT-20 | T0 | L | NOT RUN | | |
+| SCREENSHOT-21 | T0 | L | NOT RUN | | |
+| SCREENSHOT-22 | T2 | L | NOT RUN | | |
+| SCREENSHOT-23 | T0 | L | NOT RUN | | |
+| SCREENSHOT-24 | T2 | L | NOT RUN | | |
+| OCR-08 | T0 | L | NOT RUN | | |
+| OCR-09 | T0 | L | NOT RUN | | |
+| OCR-10 | T2 | L | NOT RUN | | |
 
 ## 4. Defects
 

@@ -2394,18 +2394,25 @@ public class ScreenToolsTests : IDisposable
     }
 
     [Fact]
-    public async Task Ocr_never_touches_the_flash()
+    public async Task Ocr_hides_the_flash_before_reading_and_never_shows_one()
     {
-        // OCR takes no picture the caller can see; announcing it with a glow on someone's desktop
-        // would be noise, and hiding a glow the OCR did not raise would cut another call's short.
+        // E-7 review F1 (design note "Decisions from the review"): the glow of a previous capture is
+        // a top-most frame around that rect, and an OCR whose rect contains it would read it (or
+        // have text hidden by it) — so ocr hides it before its capture, exactly as screenshot does.
+        // OCR takes no picture the caller can see, so it never announces itself with a glow.
+        // (Before E-7 this test pinned "never touches the flash", which was the bug.)
+        var order = new List<string>();
         var flash = FlashMock();
+        flash.Setup(f => f.Hide()).Callback(() => order.Add("hide"));
         var ocr = new Mock<IOcrService>();
-        ocr.Setup(o => o.ExtractTextAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CancellationToken>())).ReturnsAsync("text");
+        ocr.Setup(o => o.ExtractTextAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => { order.Add("ocr"); return "text"; });
         var tools = MakeTools(ocr: ocr.Object, flash: flash.Object);
 
         await tools.Ocr();
 
-        flash.VerifyNoOtherCalls();
+        order.Should().Equal("hide", "ocr");
+        flash.Verify(f => f.Show(It.IsAny<ScreenRegion>(), It.IsAny<TimeSpan>()), Times.Never);
     }
 
     [Fact]
@@ -2708,15 +2715,20 @@ public class ScreenToolsTests : IDisposable
     }
 
     [Fact]
-    public void Screenshot_backend_is_the_last_argument_and_defaults_to_auto()
+    public void Screenshot_backend_follows_grid_rows_and_defaults_to_auto()
     {
         // Appended, not inserted: every existing caller and test passes the earlier arguments
-        // positionally, and the schema default is what the model reads.
+        // positionally, and the schema default is what the model reads. A-10 put backend last;
+        // E-7 appended window/hwnd/element_id after it (ScreenToolsTargetSurfaceTests pins the
+        // tail), so what this protects is backend's own place right after A-6's block.
         var parameters = typeof(ScreenTools).GetMethod(nameof(ScreenTools.Screenshot))!.GetParameters();
+        var names = parameters.Select(p => p.Name).ToArray();
+        var backend = Array.IndexOf(names, "backend");
 
-        parameters[^1].Name.Should().Be("backend");
-        parameters[^1].DefaultValue.Should().Be("auto");
-        parameters[^2].Name.Should().Be("grid_rows", "A-6's block stays where it was");
+        backend.Should().BeGreaterThan(0);
+        parameters[backend].DefaultValue.Should().Be("auto");
+        names[backend - 1].Should().Be("grid_rows", "A-6's block stays where it was");
+        names[(backend + 1)..].Should().Equal(new[] { "window", "hwnd", "element_id" }, "only E-7's targets follow it");
     }
 
     [Fact]

@@ -90,3 +90,16 @@ public record ScreenshotOptions(double Scale, bool Flash = true, bool Profile = 
     /// <summary>No process-level scaling — what an unconfigured server and the tool's own default use.</summary>
     public static ScreenshotOptions Default { get; } = new(1.0);
 }
+
+/// <summary>
+/// E-7: what OCR read and where. <paramref name="Region"/> is the rect that was captured; every
+/// bounds below it is in virtual-desktop pixels, so a word's centre can be clicked.
+/// <paramref name="TextAngle"/> is the engine's detected rotation in degrees, when it reports one.
+/// </summary>
+public record OcrResult(string Text, OcrLine[] Lines, ScreenRegion Region, double? TextAngle = null);
+
+/// <summary>E-7: one recognised line; its bounds are the union of its words' bounds.</summary>
+public record OcrLine(string Text, Bounds Bounds, OcrWord[] Words);
+
+/// <summary>E-7: one recognised word and its rectangle in virtual-desktop pixels.</summary>
+public record OcrWord(string Text, Bounds Bounds);
