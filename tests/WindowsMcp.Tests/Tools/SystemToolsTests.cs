@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Reflection;
 using System.Text.Json;
 using FluentAssertions;
 using Moq;
@@ -19,7 +21,8 @@ public class SystemToolsTests
         IAudioService? audio = null,
         ISecurityService? security = null,
         IReliabilityService? reliability = null,
-        IDriverService? drivers = null)
+        IDriverService? drivers = null,
+        ISessionService? session = null)
     {
         return new SystemTools(
             wmi          ?? new Mock<IWmiService>().Object,
@@ -29,7 +32,8 @@ public class SystemToolsTests
             audio        ?? new Mock<IAudioService>().Object,
             security     ?? new Mock<ISecurityService>().Object,
             reliability  ?? new Mock<IReliabilityService>().Object,
-            drivers      ?? new Mock<IDriverService>().Object);
+            drivers      ?? new Mock<IDriverService>().Object,
+            session      ?? new Mock<ISessionService>().Object);
     }
 
     [Fact]
@@ -136,5 +140,216 @@ public class SystemToolsTests
         await act.Should().ThrowAsync<ArgumentException>().WithMessage("*app*");
         mock.Verify(s => s.ShowAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(),
             It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ---- E-8: system_info(category:"session") --------------------------------------------------
+    // docs/design/E-8-session-state.md "Surfaces": the SessionState as JSON (PascalCase, as the
+    // record), no WMI query, the other categories unchanged, and the unknown-category refusal
+    // lists session too.
+
+    /// <summary>Every property of the record, in declaration order: what the JSON must carry, no more.</summary>
+    private static readonly string[] SessionStateProperties =
+    [
+        "Elevated", "IntegrityLevel", "UserName", "SessionId", "Interactive",
+        "ConnectState", "Locked", "InputDesktop", "InputDesktopAccess", "InputDesktopError", "InputAvailable", "Note",
+    ];
+
+    /// <summary>A secure-desktop state: every kind of value, and the two nullable ones null.</summary>
+    private static readonly SessionState SecureDesktop = new(
+        Elevated: true, IntegrityLevel: "High", UserName: "CONTOSO\\alice", SessionId: 3, Interactive: true,
+        ConnectState: "Active", Locked: null, InputDesktop: null, InputDesktopAccess: "Denied", InputDesktopError: 5, InputAvailable: false,
+        Note: "A secure desktop has the input.");
+
+    private static Mock<ISessionService> SessionMock(SessionState state)
+    {
+        var mock = new Mock<ISessionService>();
+        mock.Setup(s => s.GetAsync(It.IsAny<CancellationToken>())).ReturnsAsync(state);
+        return mock;
+    }
+
+    [Fact]
+    public async Task SystemInfo_session_returns_the_session_state_as_pascal_case_json()
+    {
+        var session = SessionMock(SecureDesktop);
+        var tools = MakeTools(session: session.Object);
+
+        using var doc = JsonDocument.Parse(await tools.SystemInfo("session"));
+        var json = doc.RootElement;
+
+        json.ValueKind.Should().Be(JsonValueKind.Object, "one state, not a WMI row array");
+        json.GetProperty("Elevated").GetBoolean().Should().BeTrue();
+        json.GetProperty("IntegrityLevel").GetString().Should().Be("High");
+        json.GetProperty("UserName").GetString().Should().Be("CONTOSO\\alice");
+        json.GetProperty("SessionId").GetInt32().Should().Be(3);
+        json.GetProperty("Interactive").GetBoolean().Should().BeTrue();
+        json.GetProperty("ConnectState").GetString().Should().Be("Active");
+        json.GetProperty("Locked").ValueKind.Should().Be(JsonValueKind.Null, "null means Windows did not say");
+        json.GetProperty("InputDesktop").ValueKind.Should().Be(JsonValueKind.Null, "null is what a secure desktop looks like");
+        json.GetProperty("InputDesktopAccess").GetString().Should().Be("Denied", "E-8 R2: why it is null");
+        json.GetProperty("InputDesktopError").GetInt32().Should().Be(5, "E-8 R3: the Win32 error a live check reads");
+        json.GetProperty("InputAvailable").GetBoolean().Should().BeFalse();
+        json.GetProperty("Note").GetString().Should().Be("A secure desktop has the input.");
+    }
+
+    [Fact]
+    public async Task SystemInfo_session_json_has_exactly_the_records_properties()
+    {
+        // Resolved ambiguity (test-agent): "as the record" is read as all ten properties, nulls
+        // included - unlike SnapshotResult.SessionNote, which the note says to omit when null.
+        var available = SecureDesktop with { InputDesktop = "Default", InputDesktopAccess = "Opened", InputDesktopError = null, Locked = false, InputAvailable = true, Note = null };
+        var tools = MakeTools(session: SessionMock(available).Object);
+
+        using var doc = JsonDocument.Parse(await tools.SystemInfo("session"));
+        var names = doc.RootElement.EnumerateObject().Select(p => p.Name).ToArray();
+
+        names.Should().BeEquivalentTo(SessionStateProperties, "PascalCase, as the record, nothing added or dropped");
+        names.Should().BeEquivalentTo(typeof(SessionState).GetProperties().Select(p => p.Name),
+            "and the record and the wire agree");
+        doc.RootElement.GetProperty("Note").ValueKind.Should().Be(JsonValueKind.Null);
+        doc.RootElement.GetProperty("InputDesktopError").ValueKind.Should().Be(JsonValueKind.Null,
+            "E-8 R3: null is written, not omitted - twelve properties, always");
+        doc.RootElement.GetProperty("Locked").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SystemInfo_session_asks_the_session_service_once_with_the_calls_token_and_makes_no_wmi_query()
+    {
+        var wmi = new Mock<IWmiService>(MockBehavior.Strict);
+        var session = SessionMock(SecureDesktop);
+        var tools = MakeTools(wmi: wmi.Object, session: session.Object);
+        using var cts = new CancellationTokenSource();
+
+        await tools.SystemInfo("session", cts.Token);
+
+        session.Verify(s => s.GetAsync(cts.Token), Times.Once);
+        session.VerifyNoOtherCalls();
+        wmi.Verify(w => w.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "session is not a WMI class");
+    }
+
+    [Theory]
+    [InlineData("SESSION")]
+    [InlineData("Session")]
+    [InlineData("sEsSiOn")]
+    public async Task SystemInfo_session_matches_the_category_case_insensitively(string category)
+    {
+        var session = SessionMock(SecureDesktop);
+        var tools = MakeTools(session: session.Object);
+
+        using var doc = JsonDocument.Parse(await tools.SystemInfo(category));
+
+        doc.RootElement.GetProperty("IntegrityLevel").GetString().Should().Be("High");
+        session.Verify(s => s.GetAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("os", "Win32_OperatingSystem")]
+    [InlineData("memory", "Win32_PhysicalMemory")]
+    [InlineData("disk", "Win32_LogicalDisk")]
+    [InlineData("gpu", "Win32_VideoController")]
+    [InlineData("battery", "Win32_Battery")]
+    [InlineData("OS", "Win32_OperatingSystem")]
+    public async Task SystemInfo_other_categories_still_query_wmi_and_never_the_session(string category, string wmiClass)
+    {
+        var wmi = new Mock<IWmiService>();
+        wmi.Setup(s => s.QueryAsync(wmiClass, null, null, It.IsAny<CancellationToken>()))
+           .ReturnsAsync([new Dictionary<string, object?> { ["Caption"] = "row" }]);
+        var session = new Mock<ISessionService>(MockBehavior.Strict);
+        var tools = MakeTools(wmi: wmi.Object, session: session.Object);
+
+        var result = await tools.SystemInfo(category);
+
+        result.Should().Contain("\"Caption\":\"row\"", "the WMI rows are returned exactly as before E-8");
+        wmi.Verify(s => s.QueryAsync(wmiClass, null, null, It.IsAny<CancellationToken>()), Times.Once);
+        session.Verify(s => s.GetAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("sessions")]
+    [InlineData("")]
+    [InlineData(" session")]
+    [InlineData("cpu")]
+    public async Task SystemInfo_unknown_category_refusal_lists_session_with_the_others(string category)
+    {
+        var wmi = new Mock<IWmiService>(MockBehavior.Strict);
+        var session = new Mock<ISessionService>(MockBehavior.Strict);
+        var tools = MakeTools(wmi: wmi.Object, session: session.Object);
+
+        Func<Task> act = () => tools.SystemInfo(category);
+
+        var message = (await act.Should().ThrowAsync<ArgumentException>()).Which.Message;
+        message.Should().Contain($"'{category}'", "the refusal names what was asked for");
+        // Judged on the rest of the message: 'sessions' echoed back must not pass for the list.
+        var list = message.Replace($"'{category}'", "", StringComparison.Ordinal);
+        foreach (var known in new[] { "os", "memory", "disk", "gpu", "battery", "session" })
+            list.Should().Contain(known, "the refusal lists every category, session included");
+        session.Verify(s => s.GetAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SystemInfo_null_category_is_a_caller_facing_refusal_listing_every_category()
+    {
+        // Before E-8 a null category reached Dictionary.TryGetValue and died as a masked
+        // ArgumentNullException; now it is the same named refusal as any other unknown category.
+        var wmi = new Mock<IWmiService>(MockBehavior.Strict);
+        var session = new Mock<ISessionService>(MockBehavior.Strict);
+        var tools = MakeTools(wmi: wmi.Object, session: session.Object);
+
+        Func<Task> act = () => tools.SystemInfo(null!);
+
+        var ex = (await act.Should().ThrowAsync<ArgumentException>()).Which;
+        ex.Should().NotBeOfType<ArgumentNullException>("the refusal is the named one, not a framework null check");
+        foreach (var known in new[] { "os", "memory", "disk", "gpu", "battery", "session" })
+            ex.Message.Should().Contain(known);
+        session.Verify(s => s.GetAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public void SystemInfo_description_advertises_the_session_category_and_what_it_reports()
+    {
+        var method = typeof(SystemTools).GetMethod(nameof(SystemTools.SystemInfo))!;
+        var description = method.GetCustomAttribute<DescriptionAttribute>()!.Description;
+        var parameter = method.GetParameters().Single(p => p.Name == "category")
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should().Contain("session");
+        foreach (var fragment in new[] { "elevat", "integrity", "lock", "desktop" })
+            description.Should().ContainEquivalentOf(fragment, "the description says what session reports");
+        parameter.Should().Contain("session", "the schema's own parameter text lists it too");
+    }
+
+    [Fact]
+    public void SystemInfo_description_names_InputDesktopError()
+        // E-8 R3 decision B: the field a live check reads to confirm the secure-desktop signature.
+        => typeof(SystemTools).GetMethod(nameof(SystemTools.SystemInfo))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description.Should().Contain("InputDesktopError");
+
+    // ---- E-8 R2 decision 5: what Elevated and IntegrityLevel mean, and what is NOT detected ----
+
+    private static string SystemInfoDescription() => typeof(SystemTools).GetMethod(nameof(SystemTools.SystemInfo))!
+        .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+    [Fact]
+    public void SystemInfo_description_defines_Elevated_as_the_Administrators_role()
+        // Elevated is not "can drive elevated windows" and not "is an admin user": it is the token.
+        => SystemInfoDescription().Should().MatchRegex(@"(?i)Elevated[^.]*\bAdministrators?\b[^.]*\b(role|token)\b",
+            "Elevated is defined, in one sentence, as the token being in the Administrators role / a full administrator token");
+
+    [Fact]
+    public void SystemInfo_description_says_IntegrityLevel_decides_whether_elevated_windows_can_be_driven()
+        => SystemInfoDescription().Should().MatchRegex(@"(?i)IntegrityLevel[^.]*\belevated\b[^.]*\b(driv\w*|input)",
+            "a Medium server's input to a High window is dropped by Windows - that is what IntegrityLevel tells the model");
+
+    [Theory]
+    [InlineData(@"(?i)UAC[^.]*not[^.]*secure desktop|secure desktop[^.]*UAC", "a UAC prompt configured not to use the secure desktop")]
+    [InlineData(@"(?i)elevated[^.]*foreground|foreground[^.]*elevated", "an elevated foreground window")]
+    [InlineData(@"(?i)minimi[sz]ed[^.]*remote|remote[^.]*minimi[sz]ed", "a minimised remote-desktop client")]
+    public void SystemInfo_description_names_each_case_it_does_not_detect(string pattern, string limit)
+    {
+        var description = SystemInfoDescription();
+
+        description.Should().MatchRegex(@"(?i)not detected|cannot detect|does not detect|doesn't detect|undetected|not reported",
+            "the limits are stated as limits");
+        description.Should().MatchRegex(pattern, $"the description names this limit: {limit}");
     }
 }

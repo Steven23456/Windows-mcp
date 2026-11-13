@@ -28,6 +28,8 @@ public sealed class UIAutomationService : IUIAutomationService
 
     private readonly IInputService _input;
     private readonly IWindowService _windows;
+    /// <summary>E-8: asked once per snapshot why the desktop cannot be seen; null = no note, ever.</summary>
+    private readonly ISessionService? _session;
     private readonly UiTreeOptions _treeOptions;
     private readonly ILogger _log;
 
@@ -51,9 +53,14 @@ public sealed class UIAutomationService : IUIAutomationService
     /// </param>
     /// <param name="windows">The A-1 inventory: the snapshot's header and the roots it walks.</param>
     /// <param name="treeOptions">The element budget in force when a call does not name its own (A-4); null = 500.</param>
+    /// <param name="session">
+    /// E-8: asked once per snapshot for <see cref="SessionState.Note"/>. Optional (as
+    /// ScreenshotService takes the indicator), so existing constructions get no note.
+    /// </param>
     public UIAutomationService(IInputService input, IWindowService windows,
-        UiTreeOptions? treeOptions = null, ILogger<UIAutomationService>? log = null)
+        UiTreeOptions? treeOptions = null, ILogger<UIAutomationService>? log = null, ISessionService? session = null)
     {
+        _session = session;
         _input = input;
         _windows = windows;
         _treeOptions = treeOptions ?? UiTreeOptions.Default;
@@ -274,7 +281,52 @@ public sealed class UIAutomationService : IUIAutomationService
     /// classified into interactive elements with centre coordinates and action hints, and
     /// scrollable regions with their percentages (A-3). Ids are valid until the next snapshot.
     /// </summary>
+    /// <remarks>
+    /// E-8: when the user's desktop cannot be reached (locked, disconnected, a secure desktop has
+    /// the input) the snapshot usually cannot be TAKEN - the cursor read is refused before
+    /// anything is walked. So a snapshot that fails asks the session why: when input is
+    /// unavailable the caller gets an empty snapshot carrying the note, not a bare cursor error.
+    /// A snapshot that succeeds has the note attached and is never replaced, so a mistaken note
+    /// cannot hide a working desktop.
+    /// </remarks>
     public async Task<SnapshotResult> SnapshotAsync(SnapshotRequest request, CancellationToken ct = default)
+    {
+        SnapshotResult result;
+        try
+        {
+            result = await SnapshotCoreAsync(request, ct);
+        }
+        // A bad call is a bad call whatever the session; the caller's cancellation is not a failure.
+        catch (Exception ex) when (ex is not ArgumentException && (ex is not OperationCanceledException || !ct.IsCancellationRequested))
+        {
+            if (await SessionStateAsync(ct) is { InputAvailable: false, Note: { Length: > 0 } why })
+            {
+                _log.LogDebug(ex, "The snapshot failed while the user's desktop is unavailable; answering with the session note.");
+                // This empty snapshot IS the next snapshot: the ids of the one before it expire,
+                // as they do for any other. On the STA thread, so it is ordered with the walk and
+                // publication of every other snapshot and cannot cut into one that is minting ids.
+                try
+                {
+                    await OnStaAsync(() => { _cache.EvictSnapshot(); return true; }, CancellationToken.None);
+                }
+                catch (Exception evictFailure)
+                {
+                    // The STA thread is gone (disposal): the cache guards itself, so retire them here.
+                    _log.LogDebug(evictFailure, "Could not reach the UI Automation thread to retire snapshot ids; retiring them directly.");
+                    _cache.EvictSnapshot();
+                }
+                return new SnapshotResult(
+                    Windows: [], ActiveWindow: null, Cursor: new CursorPosition(0, 0), CursorMonitorIndex: -1,
+                    Interactive: [], Scrollable: [], Tree: null, Truncated: false,
+                    ElementLimit: 0, ElementCount: 0, CaptureMs: 0, SessionNote: why, Unavailable: true);
+            }
+            throw;
+        }
+
+        return await SessionStateAsync(ct) is { Note: { } note } ? result with { SessionNote = note } : result;
+    }
+
+    private async Task<SnapshotResult> SnapshotCoreAsync(SnapshotRequest request, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if (_disposed != 0) throw new ObjectDisposedException(nameof(UIAutomationService));
@@ -598,6 +650,24 @@ public sealed class UIAutomationService : IUIAutomationService
             Stages: stages,
             Pages: walked.Pages,
             PopupText: walked.PopupText);
+    }
+
+    /// <summary>
+    /// E-8: the session as the probe sees it, or null when there is no probe or it faulted. A
+    /// courtesy: a fault in the probe never fails a snapshot.
+    /// </summary>
+    private async Task<SessionState?> SessionStateAsync(CancellationToken ct)
+    {
+        if (_session is null) return null;
+        try
+        {
+            return await _session.GetAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _log.LogDebug(ex, "The session probe failed; the snapshot carries no session note.");
+            return null;
+        }
     }
 
     /// <summary>E-5: how much of one popup text an observation quotes, and how many lines of it in all.</summary>
@@ -2045,6 +2115,16 @@ public sealed class UIAutomationService : IUIAutomationService
                 try
                 {
                     var evidence = await gather(ct).ConfigureAwait(false);
+                    // E-8: the snapshot could not be taken because the user's desktop is
+                    // unreachable. Waiting out the timeout and answering "not found anywhere on
+                    // screen" would claim the screen was read: end now, with the reason.
+                    if (request.Condition is WaitCondition.TextExists or WaitCondition.FocusedElement
+                        && evidence.Snapshot is { Unavailable: true } unavailable)
+                    {
+                        Flush();
+                        return new WaitForResult(false, name, clock.ElapsedMilliseconds, attempts,
+                            unavailable.SessionNote ?? "The user's desktop cannot be read.");
+                    }
                     var (satisfied, detail, element) = WaitConditions.Evaluate(request.Condition, text, evidence);
                     anyCleanPoll = true;
                     lastDetail = detail;
@@ -2059,7 +2139,10 @@ public sealed class UIAutomationService : IUIAutomationService
                 catch (Exception ex) { lastFailure = ex; }   // D-5: a poll that throws is retried
 
                 var remaining = deadline - clock.Elapsed;
-                if (remaining <= TimeSpan.Zero) break;
+                // Under a millisecond left is no time left: Task.Delay rounds such a wait down to
+                // zero, and the loop would spin through hundreds of polls until the clock passed
+                // the deadline.
+                if (remaining < TimeSpan.FromMilliseconds(1)) break;
                 var delay = TimeSpan.FromMilliseconds(Math.Max(10, request.IntervalMs));
                 if (delay > remaining) delay = remaining;
                 await Task.Delay(delay, ct).ConfigureAwait(false);

@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Logging.Console;
 using Microsoft.Extensions.Options;
+using Moq;
 using SkiaSharp;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
@@ -586,6 +587,74 @@ public class WindowsMcpHostTests
         probe.Opened.Should().Be(1, "the container's indicator is the one the capture suspends");
         openWhenGrabbed.Should().BeTrue("the frame is acquired inside the suspension");
         probe.IsOpen.Should().BeFalse("and the suspension is closed when the capture returns");
+    }
+
+    // ---- E-8: the session service -------------------------------------------------------------
+    // SystemTools takes it as a required constructor argument (system_info category:"session") and
+    // UIAutomationService as an optional one (the snapshot's warning line). A missing registration is
+    // a DI failure on every system tool in the first case, and a snapshot that silently never warns
+    // in the second - so both are pinned through the container, not just the registration.
+
+    [Fact]
+    public void AddWindowsMcp_registers_the_session_service_as_a_singleton()
+    {
+        using var provider = Build(ServerOptions.Stdio);
+
+        var session = provider.GetRequiredService<ISessionService>();
+
+        session.Should().BeOfType<SessionService>();
+        session.Should().BeSameAs(provider.GetRequiredService<ISessionService>(), "one per process, like every other service here");
+    }
+
+    [Fact]
+    public void AddWindowsMcp_still_resolves_the_system_tools()
+    {
+        using var provider = Build(ServerOptions.Stdio);
+
+        ActivatorUtilities.CreateInstance<WindowsMcp.Tools.SystemTools>(provider).Should().NotBeNull(
+            "SystemTools now needs ISessionService, so every system tool depends on the registration");
+    }
+
+    /// <summary>A session service that always reports the locked workstation.</summary>
+    private sealed class LockedSession : ISessionService
+    {
+        public const string Note = "The workstation is locked: nothing on the user's desktop can be seen or driven until the user unlocks it. Stop and tell the user.";
+
+        public int Calls { get; private set; }
+
+        public Task<SessionState> GetAsync(CancellationToken ct = default)
+        {
+            Calls++;
+            return Task.FromResult(new SessionState(false, "Medium", "CONTOSO\\alice", 1, true, "Active", true, null, "Denied", 5, false, Note));
+        }
+    }
+
+    [Fact]
+    public async Task The_container_gives_the_ui_automation_service_the_registered_session_service()
+    {
+        // The optional parameter's wiring: a registration that bypassed it (a factory that news the
+        // service up with only the old arguments) would compile, resolve, and never warn. The window
+        // list is empty and the cursor fixed, so nothing on the real desktop is read or walked.
+        var session = new LockedSession();
+        var input = new Moq.Mock<IInputService>();
+        input.Setup(i => i.GetCursorPositionAsync(Moq.It.IsAny<CancellationToken>())).ReturnsAsync(new CursorPosition(1, 1));
+        var windows = new Moq.Mock<IWindowService>();
+        windows.Setup(w => w.ListAsync(Moq.It.IsAny<bool>(), Moq.It.IsAny<bool>(), Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<WindowInfo>());
+        windows.Setup(w => w.EnumerateMonitorsAsync(Moq.It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new MonitorInfo(0, "Monitor0", 0, 0, 1920, 1080, true)]);
+        using var provider = Build(ServerOptions.Stdio, s =>
+        {
+            s.AddSingleton<ISessionService>(session);
+            s.AddSingleton(input.Object);
+            s.AddSingleton(windows.Object);
+        });
+
+        var uia = provider.GetRequiredService<IUIAutomationService>();
+        var snap = await uia.SnapshotAsync(new SnapshotRequest(SnapshotScope.Desktop));
+
+        snap.SessionNote.Should().Be(LockedSession.Note, "the container's session service is the one the snapshot asks");
+        session.Calls.Should().Be(1);
     }
 
     // ---- S-11 (R5): what the takeover note says ---------------------------------------------------

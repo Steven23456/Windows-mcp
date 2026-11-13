@@ -237,6 +237,29 @@ public class WaitForServiceTests
             "a 150 ms budget cannot hold more than ~15 polls at the floor; hundreds would mean no floor at all");
     }
 
+    /// <summary>
+    /// Under a millisecond left is no time left. Task.Delay rounds a sub-millisecond wait down to
+    /// zero, so a loop that only stopped at "nothing left" spun through hundreds of zero-length
+    /// polls (the 1,302-1,822 attempts that made the floor test above flaky). With a 1 ms budget
+    /// strictly less than 1 ms remains after ANY first poll, so the answer is exactly one attempt
+    /// - deterministic for the fixed loop. The loop has no clock/delay seam, so the bite is
+    /// probabilistic: the old loop also stops at one attempt if its first poll alone took 1 ms.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(10)]
+    [InlineData(5000)]
+    public async Task Wait_loop_with_less_than_a_millisecond_left_stops_instead_of_spinning(int intervalMs)
+    {
+        var result = await UIAutomationService.WaitLoopAsync(
+            Request(timeoutMs: 1, intervalMs: intervalMs),
+            _ => Task.FromResult(new WaitEvidence(Matches: [])),
+            CancellationToken.None);
+
+        result.Satisfied.Should().BeFalse();
+        result.Attempts.Should().Be(1, "after the first poll less than a millisecond remained: no time for another");
+    }
+
     [Fact]
     public async Task Wait_loop_reports_an_elapsed_time_it_actually_measured()
     {

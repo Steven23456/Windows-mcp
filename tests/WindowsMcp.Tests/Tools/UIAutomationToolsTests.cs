@@ -556,6 +556,69 @@ public class UIAutomationToolsTests
             "the tree is the expensive block; it is absent unless include_tree asked for it");
     }
 
+    // ---- E-8: the session warning, through the tool ------------------------------------------
+
+    private const string LockedNote =
+        "The workstation is locked: nothing on the user's desktop can be seen or driven until the user unlocks it. Stop and tell the user.";
+
+    [Fact]
+    public async Task Snapshot_text_starts_with_the_session_warning_when_the_service_reports_one()
+    {
+        var tools = new UIAutomationTools(SnapshotService(PopulatedResult() with { SessionNote = LockedNote }).Object);
+
+        var output = await tools.Snapshot();
+
+        output.Split('\n')[0].Should().Be("Warning: " + LockedNote);
+    }
+
+    [Fact]
+    public async Task Snapshot_json_carries_the_session_note_when_the_service_reports_one()
+    {
+        var tools = new UIAutomationTools(SnapshotService(PopulatedResult() with { SessionNote = LockedNote }).Object);
+
+        using var doc = JsonDocument.Parse(await tools.Snapshot(format: "json"));
+
+        doc.RootElement.GetProperty("SessionNote").GetString().Should().Be(LockedNote);
+    }
+
+    [Theory]
+    [InlineData("json")]
+    [InlineData("text")]
+    public async Task Snapshot_says_nothing_about_the_session_when_there_is_no_note(string format)
+    {
+        var output = await new UIAutomationTools(SnapshotService(PopulatedResult()).Object).Snapshot(format: format);
+
+        output.Should().NotContain("SessionNote").And.NotContain("Warning:");
+    }
+
+    [Fact]
+    public void Snapshot_description_says_a_warning_first_line_means_stop_and_tell_the_user()
+    {
+        // docs/design/E-8-session-state.md / the caller's ask: the model is told, before it ever
+        // sees one, that a "Warning:" first line means the desktop cannot be seen or driven.
+        var description = typeof(UIAutomationTools).GetMethod(nameof(UIAutomationTools.Snapshot))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should().Contain("Warning:");
+        description.Should().ContainEquivalentOf("first line");
+        description.Should().ContainEquivalentOf("cannot be seen or driven");
+        description.Should().ContainEquivalentOf("stop and tell the user");
+    }
+
+    [Fact]
+    public void Snapshot_description_names_every_warning_reason_and_the_Unavailable_flag()
+    {
+        // E-8 R3 decision C.
+        var description = typeof(UIAutomationTools).GetMethod(nameof(UIAutomationTools.Snapshot))!
+            .GetCustomAttribute<DescriptionAttribute>()!.Description;
+
+        description.Should().MatchRegex("(?i)no interactive desktop", "the session-0 case is one of the Warning reasons");
+        description.Should().Contain("Unavailable", "the JSON flag is named");
+        description.Should().MatchRegex("(?i)(could not|cannot|can't) be (taken|read)",
+            "and when it is set: the snapshot could not be taken");
+        description.Should().MatchRegex("(?i)empty", "the lists are empty then");
+    }
+
     // The description is the only spec the model reads before it calls the tool: what one call
     // returns, how long an id lives, and which tools accept it.
     [Fact]

@@ -20,7 +20,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 | Feature | Description |
 |---------|-------------|
 | **Native Windows Integration** | Direct access to Windows UI Automation API via `FlaUI.UIA3` |
-| **Dependency Injection** | All 40 services are singleton-scoped, registered in `Hosting/WindowsMcpHost.AddWindowsMcp` via `Microsoft.Extensions.Hosting` |
+| **Dependency Injection** | All 41 services are singleton-scoped, registered in `Hosting/WindowsMcpHost.AddWindowsMcp` via `Microsoft.Extensions.Hosting` |
 | **Source-Generated Tool Discovery** | `[McpServerTool]` attributes are discovered at compile time by the MCP SDK source generator |
 | **Annotated Tools** | Every tool declares a title and all four MCP hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) so clients can auto-approve reads and confirm destructive calls |
 | **Interface-Driven Architecture** | Every service backed by an `IXxxService` interface in a separate Abstractions assembly |
@@ -63,11 +63,11 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Abstraction Layer  (WindowsMcp.Abstractions)      ││
-│  │        40 IXxxService interfaces + Model DTOs               ││
+│  │        41 IXxxService interfaces + Model DTOs               ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Implementation Layer  (WindowsMcp.Services)       ││
-│  │        40 XxxService singletons registered via DI           ││
+│  │        41 XxxService singletons registered via DI           ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
                                 │
@@ -146,7 +146,7 @@ the result, never an error.
 ### System Tools (`SystemTools` — 9 tools)
 | Tool | Purpose |
 |------|---------|
-| `SystemInfo` | WMI system info by category (os/memory/disk/gpu/battery) |
+| `SystemInfo` | WMI system info by category (os/memory/disk/gpu/battery), or `session` (E-8): elevation, integrity level, lock state and which desktop has the input — whether UI tools can reach the user's desktop, and why not |
 | `Audio` | Get/set volume or mute/unmute |
 | `Notification` | Show a Windows toast in-process (WinRT) under an `app_id` AUMID; the default id is registered under HKCU on first use |
 | `SecurityAudit` | Firewall/Defender/UAC/BitLocker posture snapshot |

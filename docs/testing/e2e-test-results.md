@@ -91,12 +91,12 @@ Counts are recomputed from §3 by the sync script; only the Notes column is writ
 | SECURITY_AUDIT | 2 | 2 | 2 | 0 | 0 | 0 |  |
 | SERVICE | 9 | 8 | 8 | 0 | 1 | 0 |  |
 | SHORTCUT | 8 | 7 | 7 | 0 | 1 | 0 |  |
-| SNAPSHOT | 8 | 8 | 8 | 0 | 0 | 0 |  |
+| SNAPSHOT | 10 | 8 | 8 | 0 | 0 | 0 |  |
 | START_PROCESS | 9 | 9 | 7 | 2 | 0 | 0 |  |
 | STARTUP_REPORT | 5 | 5 | 5 | 0 | 0 | 0 |  |
 | STORAGE_HEALTH | 4 | 4 | 3 | 1 | 0 | 0 |  |
 | SWITCH_TO_WINDOW | 5 | 4 | 4 | 0 | 0 | 1 |  |
-| SYSTEM_INFO | 2 | 2 | 2 | 0 | 0 | 0 |  |
+| SYSTEM_INFO | 3 | 2 | 2 | 0 | 0 | 0 |  |
 | TYPE | 8 | 7 | 7 | 0 | 1 | 0 |  |
 | VERIFY_SIGNATURE | 4 | 4 | 3 | 1 | 0 | 0 |  |
 | WAIT | 6 | 6 | 6 | 0 | 0 | 0 |  |
@@ -704,6 +704,9 @@ of the deciding field, or a path under the evidence folder.
 | OCR-08 | T0 | L | NOT RUN | | |
 | OCR-09 | T0 | L | NOT RUN | | |
 | OCR-10 | T2 | L | NOT RUN | | |
+| SNAPSHOT-09 | T2 | L | NOT RUN | | |
+| SNAPSHOT-10 | T3 | L | NOT RUN | | |
+| SYSTEM_INFO-03 | T0 | L | NOT RUN | | |
 
 ## 4. Defects
 

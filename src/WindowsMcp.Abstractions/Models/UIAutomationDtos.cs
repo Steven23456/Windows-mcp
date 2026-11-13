@@ -244,7 +244,15 @@ public record SnapshotResult(
     // E-5: for an observation only — what the popups it walked SAY: the plain text of each owned
     // window lifted out of its owner and each desktop-level popup, as "<label>: <text>" lines.
     // Text is not a control, so it has no row and no id; null for every other snapshot.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[]? PopupText = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[]? PopupText = null,
+    // E-8: SessionState.Note when input does not reach the user's desktop (locked, disconnected,
+    // a secure desktop, no interactive desktop); null in the normal case and omitted from JSON.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SessionNote = null,
+    // E-8 R3 (decision A): true only for the empty snapshot returned because the snapshot could not be
+    // taken while input is unavailable; omitted from JSON when false.
+    // E-8: true only for the empty snapshot returned when the snapshot could not be taken and the
+    // session says the user's desktop is unreachable: "could not look", not "looked and saw nothing".
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Unavailable = false);
 
 // ---- B-6 wait_for conditions --------------------------------------------------------------
 

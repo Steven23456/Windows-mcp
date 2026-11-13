@@ -38,7 +38,7 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
 │  ITaskSchedulerService · IProcessService · IWindowService · IWmiService      │
 │  IEnvService · IPowerService · INotificationService · INetworkService        │
 │  IWebService · IVirtualDesktopService · IFlashOverlay · IControlIndicator    │
-│                                                 (40 interfaces total)        │
+│  ISessionService                                (41 interfaces total)        │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │ implemented by
                                     ▼
@@ -51,7 +51,7 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
 │  TaskSchedulerService · ProcessService · WindowService · WmiService          │
 │  EnvService · PowerService · NotificationService · NetworkService            │
 │  WebService · VirtualDesktopService · FlashOverlay · ControlIndicator        │
-│               (40 singletons — registered in Hosting/WindowsMcpHost)         │
+│  SessionService (41 singletons — registered in Hosting/WindowsMcpHost)       │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -145,7 +145,7 @@ public sealed class InputTools
 | `InputTools` | 11 | `IInputService`, `IClipboardService`, `IUIAutomationService` (B-4: resolves `element_id` to a point; E-5: the `Observation` it builds from it takes the observe snapshot) |
 | `UIAutomationTools` | 9 | `IUIAutomationService` (also behind `interact_element`'s E-5 `Observation`) |
 | `FileTools` | 9 | `IFileSystemService`, `IInputService`, `IFileStreamService` |
-| `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService` |
+| `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService`, `ISessionService` |
 | `WindowTools` | 5 | `IWindowService`, `IVirtualDesktopService` |
 | `ProcessTools` | 6 | `IProcessService`, `IServiceControlService`, `ITaskSchedulerService`, `IEventLogService` |
 | `ScreenTools` | 2 | `IScreenshotService`, `IOcrService`, `IWindowService`, `IInputService`, `IUIAutomationService`, `IFlashOverlay` (+ the `ScreenshotOptions` record) |
@@ -168,7 +168,7 @@ public sealed class InputTools
 ### 3. Service Abstraction Layer (`WindowsMcp.Abstractions`)
 
 A separate assembly (`WindowsMcp.Abstractions.csproj`) containing:
-- **40 `IXxxService` interfaces** — define the contract for each domain
+- **41 `IXxxService` interfaces** — define the contract for each domain
 - **Model DTOs** in `WindowsMcp.Abstractions.Models` — records/classes shared between tools and services
 
 The abstraction layer exists so tool classes compile against interfaces, not concrete types. This enforces the dependency inversion principle and makes services independently testable.
@@ -198,7 +198,7 @@ public interface IInputService
 
 ### 4. Service Implementation Layer
 
-All 40 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as four options records — `ScreenshotOptions` (read by the screen tools), `UiTreeOptions` (injected into `UIAutomationService`), `TransportOptions` (read by `WebTools`, which cannot sample the client over the stateless HTTP transport) and `ControlIndicatorOptions` (S-11, injected into `ControlIndicator`):
+All 41 services are registered as **singletons** in `Hosting/WindowsMcpHost.AddWindowsMcp(ServerOptions)`, which both transports call; the parsed options enter the container alongside them as four options records — `ScreenshotOptions` (read by the screen tools), `UiTreeOptions` (injected into `UIAutomationService`), `TransportOptions` (read by `WebTools`, which cannot sample the client over the stateless HTTP transport) and `ControlIndicatorOptions` (S-11, injected into `ControlIndicator`):
 
 ```csharp
 // --screenshot-scale, --flash, --profile-snapshot, --screenshot-backend
@@ -215,7 +215,7 @@ services.AddSingleton(new ControlIndicatorOptions(options.ControlIndicator, opti
 services.AddSingleton<IControlIndicator, ControlIndicator>();
 services.AddSingleton<IInputService, InputService>();
 services.AddSingleton<IScreenshotService, ScreenshotService>();   // takes IControlIndicator (optional ctor arg)
-// ... (40 registrations)
+// ... (41 registrations; the last is E-8's ISessionService)
 ```
 
 Services contain all business logic and directly call Windows APIs through platform packages. They are constructed once at host startup and shared across all tool invocations.
@@ -334,7 +334,7 @@ Windows-mcp.slnx
 │   │   │   ├── Observation.cs         (E-5: observe/settle_ms behind the seven action tools;
 │   │   │   │                           a helper, not a tool class)
 │   │   │   └── ISamplingClient.cs     (C-5: the sampling seam scrape's summarize uses)
-│   │   ├── Services/                      (40 service implementations + helpers)
+│   │   ├── Services/                      (41 service implementations + helpers)
 │   │   │   ├── InputService.cs            (+ TypePlanner, DragPath, IKeyboardSink and
 │   │   │   │                               SimulatorKeyboardSink — B-1's typing plan and
 │   │   │   │                               keystroke seam, B-2's drag path, B-7's KeyDown/KeyUp)
@@ -384,8 +384,8 @@ Windows-mcp.slnx
 │       ├── WindowsMcp.Abstractions.csproj
 │       ├── IInputService.cs
 │       ├── IUIAutomationService.cs
-│       ├── ... (40 interfaces)
-│       └── Models/                        (24 DTO files)
+│       ├── ... (41 interfaces)
+│       └── Models/                        (25 DTO files)
 │           ├── InputDtos.cs
 │           └── ...
 ├── tests/WindowsMcp.Tests/                (xUnit + Moq + FluentAssertions)

@@ -300,6 +300,8 @@ Verbatim messages come from `Tools/UIAutomationTools.cs`, `Services/UIAutomation
 | SNAPSHOT-06 | T0 | L | `{"scope":"window","window":"<owned:Notepad title>","format":"json","include_tree":true}` | `Tree` present, rooted at the window; element `CenterX/CenterY` inside `Bounds`; password values never printed. | — |
 | SNAPSHOT-07 | T0 | L | `owned:Edge`: `{"scope":"window","window":"WindowsMcpE2E Probe Page","use_dom":true}`; then `use_dom:false` | `Pages (1):` block with the document's `el_N`, the title, the `file:///` URL, `[v: 0%]`; page text contains `Probe heading` and `First paragraph of body text.` and **not** `Last paragraph.` (below the fold); no address-bar/tab-strip rows. Without `use_dom`: no `Pages` block and the chrome rows present. | — |
 | SNAPSHOT-08 | T0 | L | Move `owned:Notepad` to display 0 (`window set_bounds x:-2000 y:100 width:800 height:600`); `{"scope":"window","window":"<title>"}` | Element centres have **negative** `CenterX` and still resolve via `get_element`; `Cursor:` reports the display it is on. | `set_bounds` back to `Before` |
+| SNAPSHOT-09 | T2 | L | E-8 "done when", attended. With the operator present, raise a UAC prompt the operator will **decline** (`start_process` of `powershell.exe` with `args_json:["-NoProfile","-Command","Start-Process cmd -Verb RunAs"]`); while it is up: `{"scope":"desktop"}`, `system_info {"category":"session"}`; the operator clicks No; `snapshot` again | While up: the first line is `Warning: A secure desktop has the input (a UAC prompt, or the sign-in or lock screen): the user's desktop cannot be seen or driven until the user answers it. Stop and tell the user.`, followed by an empty snapshot (`Cursor: (0, 0) on no display`, `Active window: none`, no windows or elements — the cursor read was refused) or, if the snapshot still succeeded, the stale lists — record which; with `format:"json"` the empty one carries `Unavailable:true`; session shows `InputDesktop:null`, `InputDesktopAccess:"Denied"`, `InputDesktopError:5`, `InputAvailable:false`, the same `Note`. **Record `InputDesktopError` whatever it is** — that settles D-72; if `InputDesktopAccess` is `"Unknown"` there is no warning. While up, `wait_for {"text":"x","condition":"text_exists","timeout_ms":10000}` returns at once with `Satisfied:false` and the note as `Detail` when the snapshot was the empty one (otherwise it waits as usual — record). If UAC is set not to use the secure desktop, no warning appears — record (D-68). After No: no `Warning:` line, `InputAvailable:true`. | verify no elevated `cmd` is running; the helper `powershell` has exited |
+| SNAPSHOT-10 | T3 | L | E-8 lock, through a second Windows-mcp registered for a remote host whose desktop nobody is using (operator opt-in; the operator must be able to unlock it): `power_action lock` there (with its confirm), then `snapshot {}` and `system_info {"category":"session"}` on that server | First line `Warning: The workstation is locked: nothing on the user's desktop can be seen or driven until the user unlocks it. Stop and tell the user.`, then an empty snapshot (`Cursor: (0, 0) on no display`, no windows or elements) — or the stale lists if the snapshot succeeded; record which; session `Locked:true`, `InputAvailable:false`, and record `InputDesktopAccess` (expected `Denied`) and `InputDesktopError` (expected 5). If `Locked` comes back null the secure-desktop warning appears instead — record which. A remote-desktop client disconnecting instead gives the disconnected note. | operator unlocks the remote host; `system_info session` shows `InputAvailable:true` |
 
 #### get_state (ReadOnly)
 
@@ -1052,7 +1054,8 @@ exactly the `path` it was given (`file_manage delete confirm:true`).
 | ID | Tier | Ch | Call | Expected | Cleanup |
 |---|---|---|---|---|---|
 | SYSTEM_INFO-01 | T0 | L | `os`; `memory`; `disk`; `gpu`; `battery`; `BATTERY` | Arrays: `Caption` containing `Windows`; ≥ 1 row with `Capacity`; a row with `DeviceID:"C:"`; ≥ 1 row with `Name` (record the payload size); `[]` on a desktop (not an error); case-insensitive. | — |
-| SYSTEM_INFO-02 | T0 | L | `{"category":"cpu"}`; `{"category":""}` | `Unknown category 'cpu'; expected os\|memory\|disk\|gpu\|battery`; the same quoting `''`. | — |
+| SYSTEM_INFO-02 | T0 | L | `{"category":"cpu"}`; `{"category":""}` | `Unknown category 'cpu'; expected os\|memory\|disk\|gpu\|battery\|session`; the same quoting `''`. | — |
+| SYSTEM_INFO-03 | T0 | L | E-8 on a normal unlocked desktop: `{"category":"session"}`; `{"category":"SESSION"}` | One JSON object `{Elevated, IntegrityLevel, UserName, SessionId, Interactive, ConnectState, Locked, InputDesktop, InputDesktopAccess, InputDesktopError, InputAvailable, Note}`: `Elevated:false` and `IntegrityLevel:"Medium"` for the usual unelevated server (record if not), `UserName` = this user, `SessionId` ≥ 1, `Interactive:true`, `ConnectState:"Active"`, `Locked:false` (or null — record), `InputDesktop:"Default"`, `InputDesktopAccess:"Opened"`, `InputDesktopError:null`, `InputAvailable:true`, `Note:null`; the second call is identical (case-insensitive). Then `startup_report` header `Elevated` agrees. | — |
 | DRIVER_LIST-01 | T0 | L | `{}` | Non-empty array; every `DeviceName` non-blank; at least one `IsSigned:true`; record row count, byte size and elapsed (no cap, no timeout — S3 candidate against XC-05). | — |
 | DRIVER_LIST-02 | T0 | L | `{}` twice | Identical row counts. | — |
 | RELIABILITY-01 | T0 | L | `{}`; `{"max_records":3}` | `{Minidumps:[…], RecentFailures:[…], Note?}`; `Minidumps` may be `[]` (normal); ≤ 3 failures. | — |
@@ -1445,7 +1448,7 @@ Rewritten between the markers by `node scripts/e2e/sync-results.mjs`; not mainta
 
 <!-- INDEX-START -->
 
-589 test ids, 73 features (generated; do not edit by hand).
+592 test ids, 73 features (generated; do not edit by hand).
 
 | Feature | Tests | Ids |
 |---|---|---|
@@ -1508,12 +1511,12 @@ Rewritten between the markers by `node scripts/e2e/sync-results.mjs`; not mainta
 | SEQUENCE | 4 | SEQUENCE-01, SEQUENCE-02, SEQUENCE-03, SEQUENCE-04 |
 | SERVICE | 9 | SERVICE-01, SERVICE-02, SERVICE-03, SERVICE-04, SERVICE-05, SERVICE-06, SERVICE-07, SERVICE-08, SERVICE-09 |
 | SHORTCUT | 8 | SHORTCUT-01, SHORTCUT-02, SHORTCUT-03, SHORTCUT-04, SHORTCUT-05, SHORTCUT-06, SHORTCUT-07, SHORTCUT-08 |
-| SNAPSHOT | 8 | SNAPSHOT-01, SNAPSHOT-02, SNAPSHOT-03, SNAPSHOT-04, SNAPSHOT-05, SNAPSHOT-06, SNAPSHOT-07, SNAPSHOT-08 |
+| SNAPSHOT | 10 | SNAPSHOT-01, SNAPSHOT-02, SNAPSHOT-03, SNAPSHOT-04, SNAPSHOT-05, SNAPSHOT-06, SNAPSHOT-07, SNAPSHOT-08, SNAPSHOT-09, SNAPSHOT-10 |
 | START_PROCESS | 9 | START_PROCESS-01, START_PROCESS-02, START_PROCESS-03, START_PROCESS-04, START_PROCESS-05, START_PROCESS-06, START_PROCESS-07, START_PROCESS-08, START_PROCESS-09 |
 | STARTUP_REPORT | 5 | STARTUP_REPORT-01, STARTUP_REPORT-02, STARTUP_REPORT-03, STARTUP_REPORT-04, STARTUP_REPORT-05 |
 | STORAGE_HEALTH | 4 | STORAGE_HEALTH-01, STORAGE_HEALTH-02, STORAGE_HEALTH-03, STORAGE_HEALTH-04 |
 | SWITCH_TO_WINDOW | 5 | SWITCH_TO_WINDOW-01, SWITCH_TO_WINDOW-02, SWITCH_TO_WINDOW-03, SWITCH_TO_WINDOW-04, SWITCH_TO_WINDOW-05 |
-| SYSTEM_INFO | 2 | SYSTEM_INFO-01, SYSTEM_INFO-02 |
+| SYSTEM_INFO | 3 | SYSTEM_INFO-01, SYSTEM_INFO-02, SYSTEM_INFO-03 |
 | TYPE | 8 | TYPE-01, TYPE-02, TYPE-03, TYPE-04, TYPE-05, TYPE-06, TYPE-07, TYPE-08 |
 | VERIFY_SIGNATURE | 4 | VERIFY_SIGNATURE-01, VERIFY_SIGNATURE-02, VERIFY_SIGNATURE-03, VERIFY_SIGNATURE-04 |
 | WAIT | 6 | WAIT-01, WAIT-02, WAIT-03, WAIT-04, WAIT-05, WAIT-06 |

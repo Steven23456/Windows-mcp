@@ -448,12 +448,14 @@ public class ToolErrorsTests
         // check was satisfied by plain methods and iterators and no longer proved lambdas are seen.
         // Round 2: GetTableAsync's GridPattern refusal moved into the named MissingPattern helper,
         // so the pin moved to the one construction still written inline in a capturing lambda:
-        // SnapshotAsync's "no automation element for the window handle" inside its OnStaAsync body
-        // (the lambda captures this, request and the targets, so it lives in a display class).
+        // the snapshot's "no automation element for the window handle" inside its OnStaAsync body
+        // (the lambda captures this, request and the targets, so it lives in a display class). E-8 R2
+        // moved that body into the private SnapshotCoreAsync (SnapshotAsync is now the session
+        // fallback wrapper), so the display class is named after SnapshotCoreAsync.
         found.Should().Contain(c => c.Exception == typeof(InvalidOperationException)
                 && c.Site.StartsWith("WindowsMcp.Services.UIAutomationService+<>c", StringComparison.Ordinal)
-                && c.Site.Contains("<SnapshotAsync>", StringComparison.Ordinal),
-            "SnapshotAsync's \"no automation element for the window handle\" is built inside its OnStaAsync lambda's display class");
+                && c.Site.Contains("<SnapshotCoreAsync>", StringComparison.Ordinal),
+            "SnapshotCoreAsync's \"no automation element for the window handle\" is built inside its OnStaAsync lambda's display class");
         found.Should().Contain(c => c.Exception == typeof(ArgumentException)
                 && c.Site.StartsWith("WindowsMcp.Tools.InputTools+<", StringComparison.Ordinal),
             "InputTools.Drag is async: its argument checks live in a compiler-generated state machine");
