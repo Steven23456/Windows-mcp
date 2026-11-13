@@ -2553,7 +2553,9 @@ budget the owner's rows come first) — so an owned dialog reaching outside its 
 whole, once, under its own title. The foreground fallback (an untitled or tool window in front,
 which the inventory does not flag active) goes through the same per-window walk (`WalkWindow`);
 in an observation its root ladder (`GetForegroundRoot(timeoutsPropagate: true)`) stops at a
-timeout instead of falling to the focused element or the desktop root. (4) Order: observe and `settle_ms` are
+timeout instead of falling to the focused element or the desktop root. A plain `snapshot` there
+reads neither the root's native handle nor its process id (the bookkeeping and owned-window
+lookup run only in an observation), so a provider that times out on them cannot fail it. (4) Order: observe and `settle_ms` are
 validated, and the window looked up, before the tool's own argument checks and before any input;
 an action that throws observes nothing; a snapshot that fails afterwards (other than a
 cancellation) becomes one line after the result — `Observation failed: <why> The action above was
@@ -2561,8 +2563,9 @@ performed, so do not repeat it; call snapshot to see the result.` — never an e
 and `key` pass the request's token (D-40). With `IncludePopups` a `TimeoutException` from **any**
 step of the STA walk propagates — resolving a target window (by handle, the active foreground
 window or a title match; the foreground fallback's `UiRoots.FirstAvailable` ladder, which no
-longer falls through a hung rung to the focused element or the desktop root), owned-window
-discovery, the pid/handle bookkeeping, every read in the walk (`UiTraverser.Walk`'s
+longer falls through a hung rung to the focused element or the desktop root), the name read that
+labels an unlisted, owned, fallback or popup window (`Label` → `NameUnlessHung`; a non-timeout
+failure still gives "", so `popup`), owned-window discovery, the pid/handle bookkeeping, every read in the walk (`UiTraverser.Walk`'s
 `timeoutsPropagate`: the subtree cache fetch, each node property and pattern read, the children
 read), and the popup pass (listing the desktop's top-level windows, reading a popup in the
 filter, walking it) — so a hung provider gives the failure note, never a snapshot missing rows.
@@ -2573,7 +2576,8 @@ the calls that replace snapshot ids. Tests: `ObservationToolsTests`, `Observatio
 `UIAutomationServiceElementWindowTests`, `UIAutomationSnapshotWindowHandleTests` and
 `UIAutomationSnapshotPopupsTests`, `UIAutomationSnapshotOwnedWindowsTests`,
 `UIAutomationSnapshotOwnedWindowBudgetTests`, `ObserveWindowTimeoutTests` and
-`UIAutomationSnapshotObservationTimeoutTests`, `UiTraverserTimeoutTests` and rows in `UiRootsTests` (Unit), and on real windows with the real `WindowService`
+`UIAutomationSnapshotObservationTimeoutTests`, `UiTraverserTimeoutTests`,
+`UIAutomationSnapshotObservationLabelTests` and rows in `UiRootsTests` (Unit), and on real windows with the real `WindowService`
 (Integration): `UIAutomationServiceElementWindowIntegrationTests`,
 `UIAutomationServiceObserveWindowsIntegrationTests` (`Fixtures/OwnedWindowFamily.cs`: two
 owner/owned-dialog pairs, a window owned by an owned window, a hidden owned window, untitled, tool

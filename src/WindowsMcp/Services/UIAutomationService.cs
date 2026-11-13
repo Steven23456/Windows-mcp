@@ -203,6 +203,13 @@ public sealed class UIAutomationService : IUIAutomationService
         try { return UiText.Sanitize(el.Name); } catch { return ""; }
     }
 
+    /// <summary>E-5: <see cref="TryGetName"/>, except that a timeout (or a cancellation) is not turned into an empty name.</summary>
+    private static string NameUnlessHung(AutomationElement el)
+    {
+        try { return UiText.Sanitize(el.Name); }
+        catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException) { return ""; }
+    }
+
     private static string TryGetControlType(AutomationElement el)
     {
         try { return el.ControlType.ToString(); } catch { return "Unknown"; }
@@ -343,6 +350,10 @@ public sealed class UIAutomationService : IUIAutomationService
             // E-5: an observation's caller is told about a hung provider. A snapshot that quietly
             // skipped the observed window would come back under a header saying it was observed.
             bool observing = request.IncludePopups;
+            // A window's label is its name, read before the walk. In an observation a timeout on
+            // that read is the same hung provider as any other and propagates; otherwise an
+            // unreadable name is simply empty, as it always was.
+            string Label(AutomationElement el) => observing ? NameUnlessHung(el) : TryGetName(el);
             void WalkWindow(AutomationElement root, string title, long hwnd, DomState dom)
             {
                 var owned = liftOwned && dom == DomState.None ? OwnedWindowsUnder(root, hwnd) : [];
@@ -356,7 +367,7 @@ public sealed class UIAutomationService : IUIAutomationService
                     try
                     {
                         var listedTitle = windows.FirstOrDefault(x => x.Hwnd == ownedHwnd)?.Title;
-                        var name = string.IsNullOrEmpty(listedTitle) ? TryGetName(ownedRoot) : listedTitle;
+                        var name = string.IsNullOrEmpty(listedTitle) ? Label(ownedRoot) : listedTitle;
                         var label = name.Length > 0 ? name : "popup";
                         // One nested deeper is walked in its own turn, not inside this one.
                         perWindow.Add((label, traverser.Walk(ownedRoot, label, budget, ownedHandles, timeoutsPropagate: observing), DomState.None));
@@ -374,10 +385,16 @@ public sealed class UIAutomationService : IUIAutomationService
                 // to whatever UIA says is in front, as get_state does. No inventory row means no
                 // IsBrowser either, so DOM mode does not apply here.
                 var root = ForegroundRoot?.Invoke() ?? GetForegroundRoot(timeoutsPropagate: observing);
-                try { Walked(root, 0, 0); } catch (Exception ex) when (ex is not OperationCanceledException && !(observing && ex is TimeoutException)) { }
+                // Only an observation needs the handle and process (for owned windows and popups).
+                // A plain snapshot never read them here, and must not start failing on them.
+                if (observing)
+                {
+                    try { Walked(root, 0, 0); }
+                    catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException) { }
+                }
                 // Through the same walk as a listed window: an untitled or tool window in front
                 // has owned dialogs too.
-                WalkWindow(root, TryGetName(root), NativeHandleOf(root), DomState.None);
+                WalkWindow(root, Label(root), liftOwned ? NativeHandleOf(root) : 0, DomState.None);
             }
 
             foreach (var w in targets)
@@ -408,7 +425,7 @@ public sealed class UIAutomationService : IUIAutomationService
                 try
                 {
                     // An unlisted window (untitled, a tool window, a popup) has no inventory title.
-                    var title = w.Title.Length > 0 ? w.Title : TryGetName(root);
+                    var title = w.Title.Length > 0 ? w.Title : Label(root);
                     Walked(root, w.Hwnd, w.Pid);
                     var dom = DomState.None;
                     if (request.UseDom && w.IsBrowser)
@@ -455,7 +472,7 @@ public sealed class UIAutomationService : IUIAutomationService
                         var bounds = popup.Properties.BoundingRectangle.ValueOrDefault;
                         if (bounds.Width <= 0 || bounds.Height <= 0) continue;
 
-                        var name = TryGetName(popup);
+                        var name = Label(popup);
                         var label = name.Length > 0 ? name : "popup";
                         if (hwnd != 0) walkedHandles.Add(hwnd);
                         perWindow.Add((label, traverser.Walk(popup, label, budget, timeoutsPropagate: true), DomState.None));

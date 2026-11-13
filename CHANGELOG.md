@@ -30,7 +30,8 @@
     once, so with a short budget the owner's rows come first, then the owned window's. This holds
     for the foreground fallback too (an untitled or tool window in front that the inventory does
     not flag active; its root comes from the `UiRoots.FirstAvailable` ladder, which in an
-    observation stops at a timeout instead of falling to the next rung). So an owned dialog reaching outside its owner is observed whole and once.
+    observation stops at a timeout instead of falling to the next rung; a plain `snapshot` there
+    reads no native handle or process id of that root, as before). So an owned dialog reaching outside its owner is observed whole and once.
     The plain `snapshot` tool includes neither popups nor this (parity D-39, D-43).
   - `observe:window` observes the top-level window the target element belongs to, resolved
     **before** the action from the nearest native handle via Win32 `GetAncestor(GA_ROOT)`, so an
@@ -53,8 +54,9 @@
     hung provider) from **any** step of an observation's snapshot — resolving the foreground,
     title-matched or by-handle window (the foreground-root ladder included: a hung foreground
     window no longer falls through to the focused element or the desktop root), finding its owned
-    windows, any read in the walk (the subtree cache fetch, every node property and pattern read,
-    the children read), or the popup pass (listing the desktop's windows, reading or walking a
+    windows, the name read that labels an unlisted, owned, fallback or popup window, any read in
+    the walk (the subtree cache fetch, every node property and pattern read, the children read),
+    or the popup pass (listing the desktop's windows, reading or walking a
     popup) — ends in that same failure note rather than a snapshot missing rows. Other failures
     there keep their behaviour (a popup that cannot
     be read is skipped and logged; a desktop list that cannot be read costs the popups, not the
@@ -80,7 +82,8 @@
   `UIAutomationSnapshotWindowHandleTests`, `UIAutomationSnapshotPopupsTests`,
   `UIAutomationSnapshotOwnedWindowsTests`, `UIAutomationSnapshotOwnedWindowBudgetTests`,
   `ObserveWindowTimeoutTests`, `UIAutomationSnapshotObservationTimeoutTests`,
-  `UiTraverserTimeoutTests` and rows in `UiRootsTests` (Unit), and
+  `UiTraverserTimeoutTests`, `UIAutomationSnapshotObservationLabelTests` and rows in
+  `UiRootsTests` (Unit), and
   `UIAutomationServiceElementWindowIntegrationTests`,
   `UIAutomationServiceObserveWindowsIntegrationTests` (real owner/owned-dialog pairs, a window
   owned by an owned window, a hidden owned window, untitled, tool and popup windows in

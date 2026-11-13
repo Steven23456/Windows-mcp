@@ -137,6 +137,8 @@ the foreground fallback (no inventory window flagged active — an untitled or t
 front), so that window's owned dialogs are lifted out too; `ForegroundRoot` is the internal test
 seam for the fallback's root. In an observation that root comes from
 `GetForegroundRoot(timeoutsPropagate: true)`, whose ladder stops at a timeout (see Failure rules).
+The root's handle and process id are read only in an observation, so a plain
+`snapshot(scope:"foreground")` cannot be failed by a provider that times out on them.
 
 History (review fixes on PR #43): the first fix walked the owner whole and then removed the owned
 subtrees from its rows (`WithoutSubtreesOf`, since deleted). That charged an owned window's
@@ -164,7 +166,9 @@ it still lists an owned dialog's rows twice (D-43).
   title match — `ElementFromHandle`), the foreground fallback's root ladder
   (`UiRoots.FirstAvailable(timeoutsPropagate: true, …)` via `GetForegroundRoot`: a hung
   foreground window ends the ladder instead of quietly becoming the focused element or the
-  desktop root), probing it, owned-window discovery, the pid/handle bookkeeping, any read in the
+  desktop root), probing it, the name read that labels a window with no inventory title — the
+  fallback root, an unlisted window by handle, an unlisted owned window, a popup (`Label` →
+  `NameUnlessHung`; a non-timeout failure still gives "", so `popup`), owned-window discovery, the pid/handle bookkeeping, any read in the
   walk (`UiTraverser.Walk(…, timeoutsPropagate: true)` — the subtree cache fetch, every node
   property and pattern read through `Try(...)`, `ReadBounds` and around `ReadNode`, the skip-set
   handle read, and the children read; a `[ThreadStatic]` flag carries the mode to the static read
@@ -175,8 +179,9 @@ it still lists an owned dialog's rows twice (D-43).
   behaviour: a window or popup that cannot be read is logged and skipped, and a desktop window
   list that cannot be read costs the popups, not the snapshot. Without `IncludePopups` — the
   `snapshot` tool, `wait_for`, `screenshot` annotate, `scrape` dom — nothing changes: a window
-  that times out is logged and skipped, the foreground ladder falls to its next rung, and the
-  walk swallows everything a dying element does (D-5).
+  that times out is logged and skipped, the foreground ladder falls to its next rung, an
+  unreadable label is "" (`TryGetName`), the foreground fallback reads no native handle or process
+  id of its root at all, and the walk swallows everything a dying element does (D-5).
 - **Cancellation.** Only `click` and `key` take the request's token (E-3 added it); cancelling
   them during the settle wait or the snapshot drops the result although the action was performed,
   and their descriptions say so (`Observation.CancelNote`). The other five pass
@@ -203,6 +208,7 @@ it still lists an owned dialog's rows twice (D-43).
 | `WindowHwnd`: the scope/title rules, an unlisted window walked, a closed one a `KeyNotFoundException`; `IncludePopups` order, filters and budget | `UIAutomationSnapshotWindowHandleTests`, `UIAutomationSnapshotPopupsTests` | Unit |
 | Owned windows skipped by their owner's walk and walked once under their own label, the foreground fallback included; charged to the budget once, owner first under a short budget; owned windows from a fake owner relation (`OwnedWindowsOf`); a by-handle timeout, and with `IncludePopups` a timeout in discovery, bookkeeping or the walk, propagates and an observation turns it into the failure note, not the foreground fallback | `UIAutomationSnapshotOwnedWindowsTests`, `UIAutomationSnapshotOwnedWindowBudgetTests`, `ObserveWindowTimeoutTests`, `UIAutomationSnapshotObservationTimeoutTests` | Unit |
 | Strict walk: a timeout from the cache fetch, any property or pattern read, the skip-set handle read or the children read propagates with `timeoutsPropagate`, and is swallowed without it; the root ladder stops at a timeout only in strict mode | `UiTraverserTimeoutTests`, `UiRootsTests` | Unit |
+| A window label read times out → propagates in an observation, "" without one; a plain foreground-fallback snapshot reads no root handle or process id | `UIAutomationSnapshotObservationLabelTests` | Unit |
 | On real windows with the real `WindowService`: an element in an owned dialog answers the dialog; an owned dialog observed whole under its own title (two owner/owned pairs), a window owned by an owned window, a hidden owned window left out — through the real owner relation; untitled, tool and popup windows observed by handle | `UIAutomationServiceElementWindowIntegrationTests`, `UIAutomationServiceObserveWindowsIntegrationTests` (`Fixtures/OwnedWindowFamily.cs`) | Integration |
 | The done-when: a real WinForms `ContextMenuStrip` (opened from code in a child PowerShell process, no input injected) is listed item by item by a by-handle snapshot with popups, and not without | `ObserveRealContextMenuIntegrationTests` | Integration |
 

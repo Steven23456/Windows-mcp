@@ -49,11 +49,14 @@ internal sealed class FakeUiWindows : IDisposable
         bool handleSupported = true, bool pidSupported = true, bool broken = false,
         AutomationElement[]? children = null, Exception? pidFailure = null, Exception? childrenFailure = null,
         Exception? readFailure = null, Exception? cacheFetchFailure = null,
-        IReadOnlyDictionary<string, Exception>? propertyFailures = null, Exception? valuePatternFailure = null)
+        IReadOnlyDictionary<string, Exception>? propertyFailures = null, Exception? valuePatternFailure = null,
+        IReadOnlyDictionary<string, Exception>? firstReadFailures = null)
     {
         var lib = Automation.PropertyLibrary.Element;
         var b = bounds ?? (100, 100, 300, 200);
         var framework = new Mock<FrameworkAutomationElementBase>(MockBehavior.Strict, Automation);
+        // PR #43 W2: these fail on their FIRST read only (a label read), and answer afterwards (the walk).
+        var failOnce = firstReadFailures is null ? null : new Dictionary<string, Exception>(firstReadFailures);
         object Read(int id)
         {
             // A window that dies while the popup filter reads it.
@@ -61,6 +64,13 @@ internal sealed class FakeUiWindows : IDisposable
             // PR #43 U2: every property read fails this way (the popup filter's first read is the handle).
             if (readFailure is not null) throw readFailure;
             // PR #43 V2: one property's read fails, by its PropertyLibrary name ("Name", "BoundingRectangle", ...).
+            if (failOnce is not null)
+                foreach (var (property, failure) in failOnce)
+                    if (((FlaUI.Core.Identifiers.PropertyId)lib.GetType().GetProperty(property)!.GetValue(lib)!).Id == id)
+                    {
+                        failOnce.Remove(property);
+                        throw failure;
+                    }
             if (propertyFailures is not null)
                 foreach (var (property, failure) in propertyFailures)
                     if (((FlaUI.Core.Identifiers.PropertyId)lib.GetType().GetProperty(property)!.GetValue(lib)!).Id == id) throw failure;
