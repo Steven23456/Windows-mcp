@@ -163,6 +163,43 @@ public sealed class UIAutomationServiceObserveWindowsIntegrationTests : IDisposa
         snap.Interactive.Select(e => e.Name).Should().Contain(_family.HostButton).And.NotContain(_family.PopupItemA);
     }
 
+    // ---- PR #43 P2: owned windows are their own windows ------------------------------------------
+
+    private static IEnumerable<SnapshotElement> Named(SnapshotResult snap, string name) => snap.Interactive.Where(e => e.Name == name);
+
+    [Fact]
+    public async Task With_popups_an_owned_window_reaching_outside_its_owner_is_observed_whole_under_its_own_title_once()
+    {
+        var snap = await _svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Window, WindowHwnd: (long)_family.Owner2, IncludePopups: true));
+
+        Named(snap, _family.Owned2OutsideButton).Should().ContainSingle(
+            "the owned window is walked as its own root, clipped to ITS rectangle, so the part outside its owner is there")
+            .Which.Window.Should().Be(_family.Owned2Title);
+        Named(snap, _family.Owned2InsideButton).Should().ContainSingle("no row twice: not under the owner as well")
+            .Which.Window.Should().Be(_family.Owned2Title);
+        Named(snap, _family.Owner2Button).Should().ContainSingle().Which.Window.Should().Be(_family.Owner2Title);
+    }
+
+    [Fact]
+    public async Task Without_popups_the_owned_window_stays_clipped_inside_its_owners_walk_as_today()
+    {
+        var snap = await _svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Window, WindowHwnd: (long)_family.Owner2));
+
+        Named(snap, _family.Owned2OutsideButton).Should().BeEmpty("clipped to the owner's rectangle, as the plain snapshot always was");
+        Named(snap, _family.Owned2InsideButton).Should().ContainSingle().Which.Window.Should().Be(_family.Owner2Title,
+            "UI Automation nests the owned window under its owner");
+    }
+
+    [Fact]
+    public async Task With_popups_an_owned_dialog_beside_its_owner_is_observed_under_its_own_title()
+    {
+        // The family's first owned dialog lies wholly outside its owner (see the unit row
+        // An_owned_window_entirely_outside_its_owner_is_still_found_and_walked).
+        var snap = await _svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Window, WindowHwnd: (long)_family.Host, IncludePopups: true));
+
+        Named(snap, _family.OwnedButton).Should().ContainSingle().Which.Window.Should().Be(_family.OwnedTitle);
+    }
+
     // ---- end to end through the tool -------------------------------------------------------------
 
     [Fact]

@@ -351,12 +351,14 @@ public sealed class UIAutomationService : IUIAutomationService
                 AutomationElement? root = null;
                 Exception? unresolved = null;
                 try { root = ElementFromHandle((nint)w.Hwnd); }
-                catch (Exception ex) when (ex is not OperationCanceledException) { unresolved = ex; }
+                // A timeout says the provider is hung, not that the window closed: by handle it
+                // propagates, so the caller is not told "gone" and shown another window instead.
+                catch (Exception ex) when (ex is not OperationCanceledException && !(byHandle && ex is TimeoutException)) { unresolved = ex; }
 
                 // E-5: a window asked for by handle either exists or the caller is told it does
                 // not. Skipping it quietly would hand back an empty snapshot under a header that
                 // says the window was observed.
-                if (byHandle && (root is null || IsGone(root)))
+                if (byHandle && (root is null || ClosedNotHung(root)))
                     throw new KeyNotFoundException($"No open window with handle {w.Hwnd} (0x{w.Hwnd:X}): it has closed.", unresolved);
                 if (root is null)
                 {
@@ -378,7 +380,34 @@ public sealed class UIAutomationService : IUIAutomationService
                         if (document is null) dom = DomState.NoPage;
                         else { root = document; dom = DomState.Page; }
                     }
-                    perWindow.Add((title, traverser.Walk(root, title, budget), dom));
+                    var entries = traverser.Walk(root, title, budget);
+
+                    // E-5: UI Automation nests an OWNED top-level window (a dialog, an owned popup)
+                    // under its owner, so the walk above saw it clipped to the owner's rectangle
+                    // and under the owner's title — and not at all where it lies outside. For an
+                    // observation each one is lifted out and walked as the window it is.
+                    var owned = request.IncludePopups && request.Scope != SnapshotScope.Desktop && dom == DomState.None ? OwnedWindowsUnder(root, w.Hwnd) : [];
+                    if (owned.Count > 0) entries = WithoutSubtreesOf(entries, owned);
+                    perWindow.Add((title, entries, dom));
+
+                    foreach (var (ownedRoot, ownedHwnd) in owned)
+                    {
+                        if (budget.Truncated) break;
+                        if (!walkedHandles.Add(ownedHwnd)) continue;
+                        try
+                        {
+                            var listedTitle = windows.FirstOrDefault(x => x.Hwnd == ownedHwnd)?.Title;
+                            var name = string.IsNullOrEmpty(listedTitle) ? TryGetName(ownedRoot) : listedTitle;
+                            var label = name.Length > 0 ? name : "popup";
+                            var ownedEntries = traverser.Walk(ownedRoot, label, budget);
+                            // One nested deeper is walked in its own turn, not inside this one.
+                            perWindow.Add((label, WithoutSubtreesOf(ownedEntries, owned.Where(o => o.Hwnd != ownedHwnd).ToList()), DomState.None));
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            LogSkipped("an owned window", ex);
+                        }
+                    }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -487,6 +516,114 @@ public sealed class UIAutomationService : IUIAutomationService
             CaptureMs: sw.ElapsedMilliseconds,
             Stages: stages,
             Pages: walked.Pages);
+    }
+
+    /// <summary>
+    /// E-5: whether a window resolved by handle has closed. A timeout is not an answer — the
+    /// provider is hung — so it propagates instead of reading as "still there" or "gone".
+    /// </summary>
+    private static bool ClosedNotHung(AutomationElement root)
+    {
+        try { return root.Properties.ProcessId.ValueOrDefault <= 0; }
+        catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException)
+        {
+            return ex is FlaUI.Core.Exceptions.ElementNotAvailableException or System.ComponentModel.Win32Exception or COMException;
+        }
+    }
+
+    /// <summary>How many elements the fallback search for owned windows will look at.</summary>
+    private const int OwnedWindowSearchLimit = 5000;
+
+    /// <summary>
+    /// E-5: the owned top-level windows UI Automation nests under <paramref name="root"/>: a
+    /// descendant with a native handle that is its own Win32 root window, whatever control type
+    /// the provider gives it (a captioned dialog is a Window, a bare popup a Pane). An MDI child
+    /// or an in-window XAML "Window" is not one (its root is the host, or it has no handle).
+    /// </summary>
+    private List<(AutomationElement Root, long Hwnd)> OwnedWindowsUnder(AutomationElement root, long rootHwnd)
+    {
+        var found = new List<(AutomationElement, long)>();
+        AutomationElement[] windows;
+        try
+        {
+            // Only elements backed by a window handle can be windows: let the provider filter.
+            var hasHandle = new PropertyCondition(_automation.PropertyLibrary.Element.NativeWindowHandle, 0).Not();
+            windows = root.FindAllDescendants(hasHandle);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException)
+        {
+            // The provider could not run the search: look through the children it does serve.
+            windows = DescendantsOf(root);
+        }
+
+        var seen = new HashSet<long>();
+        foreach (var window in windows)
+        {
+            long hwnd = NativeHandleOf(window);
+            if (hwnd == 0 || hwnd == rootHwnd || !seen.Add(hwnd)) continue;
+            long itsRoot;
+            try { itsRoot = RootWindowOf((nint)hwnd).ToInt64(); }
+            catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException) { continue; }
+            if (itsRoot == hwnd) found.Add((window, hwnd));
+        }
+        return found;
+    }
+
+    private static AutomationElement[] DescendantsOf(AutomationElement root)
+    {
+        var result = new List<AutomationElement>();
+        var pending = new Stack<AutomationElement>();
+        pending.Push(root);
+        for (int looked = 0; pending.Count > 0 && looked < OwnedWindowSearchLimit; looked++)
+        {
+            var current = pending.Pop();
+            AutomationElement[] children;
+            try { children = current.CachedChildren; }
+            catch
+            {
+                try { children = current.FindAllChildren(); }
+                catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException) { continue; }
+            }
+            // Reversed, so the stack hands them back in document order.
+            for (int i = children.Length - 1; i >= 0; i--)
+            {
+                pending.Push(children[i]);
+            }
+            result.AddRange(children);
+        }
+        return result.ToArray();
+    }
+
+    /// <summary>
+    /// E-5: a walk's rows without the subtrees rooted at the windows in <paramref name="owned"/>.
+    /// The rows are in pre-order, so a subtree is the run that follows its root; the rows that
+    /// remain keep their order and their parent links.
+    /// </summary>
+    private static IReadOnlyList<UiWalkEntry> WithoutSubtreesOf(IReadOnlyList<UiWalkEntry> entries,
+        IReadOnlyCollection<(AutomationElement Root, long Hwnd)> owned)
+    {
+        if (owned.Count == 0 || entries.Count == 0) return entries;
+        var handles = owned.Select(o => o.Hwnd).ToHashSet();
+        // A handle read is a cross-process call: only rows of a type an owned window has are asked.
+        var types = owned.Select(o => TryGetControlType(o.Root)).ToHashSet();
+
+        var newIndex = new int[entries.Count];   // -1 = dropped
+        var kept = new List<UiWalkEntry>(entries.Count);
+        for (int i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            bool underDropped = entry.ParentIndex >= 0 && newIndex[entry.ParentIndex] < 0;
+            bool isOwnedRoot = i > 0 && types.Contains(entry.Node.ControlType)
+                               && handles.Contains(NativeHandleOf(entry.Element));
+            if (underDropped || isOwnedRoot)
+            {
+                newIndex[i] = -1;
+                continue;
+            }
+            newIndex[i] = kept.Count;
+            kept.Add(entry.ParentIndex >= 0 ? entry with { ParentIndex = newIndex[entry.ParentIndex] } : entry);
+        }
+        return kept.Count == entries.Count ? entries : kept;
     }
 
     /// <summary>E-5: a stand-in inventory row for a window the inventory leaves out (untitled, a tool window, a popup).</summary>

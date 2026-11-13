@@ -18,8 +18,13 @@
     does, and it walks the server's default element budget. It also walks the **popups of the
     observed window's process** — an open menu, a dropdown, a tooltip: untitled top-level windows
     the window inventory does not list — after the window itself, so clicking a menu returns the
-    menu's items in the same call. The plain `snapshot` tool still does not include popups
-    (parity D-39).
+    menu's items in the same call. And because UI Automation nests an **owned** top-level window
+    (a dialog, an owned popup) under its owner — clipped to the owner's rectangle and under the
+    owner's title — an observation lifts each one out: a descendant whose native handle is its own
+    Win32 root window is removed from the owner's rows and walked as its own root, clipped to its
+    own rectangle and labelled with its inventory title, else its UIA name, else `popup`, right
+    after its owner. So an owned dialog reaching outside its owner is observed whole and once. The
+    plain `snapshot` tool includes neither popups nor this (parity D-39, D-43).
   - `observe:window` observes the top-level window the target element belongs to, resolved
     **before** the action from the nearest native handle via Win32 `GetAncestor(GA_ROOT)`, so an
     element in an owned dialog answers the dialog, not its owner (UI Automation nests owned windows
@@ -28,7 +33,9 @@
     unknown, expired or destroyed id, or an element whose window cannot be determined, refuses
     the call with nothing sent. A window observed by handle need not be in the inventory
     (untitled and tool windows work); if the action closed it (a dialog's OK button), the
-    foreground window is observed instead and the header says so.
+    foreground window is observed instead and the header says so. A **timeout** while resolving or
+    probing that window (a hung provider) is not read as "closed": the result gets the failure
+    note below, and the foreground window is not shown in its place.
   - `observe` and `settle_ms` are validated, and the window looked up, before the tool's own
     argument checks and before any input; an action that throws observes nothing. A snapshot that
     fails afterwards never fails the action: the result is followed by `Observation failed: <why>
@@ -39,7 +46,9 @@
   New `IUIAutomationService.GetElementWindowAsync(elementId, ct)` → the window handle;
   `SnapshotRequest` gains `WindowHwnd` (with `Scope == Window`, one window by handle instead of a
   title — refused with a title or another scope; a handle that no longer names a window is a
-  `KeyNotFoundException`) and `IncludePopups`. One shared helper, `Tools/Observation.cs`
+  `KeyNotFoundException`, a timeout resolving or probing it propagates as a `TimeoutException`)
+  and `IncludePopups` (the process's popups and the owned windows nested under each walked
+  window; `OwnedWindowsUnder`, `WithoutSubtreesOf`, `ClosedNotHung`). One shared helper, `Tools/Observation.cs`
   (`AroundAsync`, with a `Delay` seam), behind thin wrappers over private `XxxCore` methods in
   `Tools/InputTools.cs` and `Tools/UIAutomationTools.cs`; `UIAutomationService` gains
   `UnlistedWindow` and the `RootWindowOf` / `ElementFromHandle` test seams, and
@@ -49,10 +58,11 @@
   the calls that replace snapshot ids, and the instructions say observe:foreground returns the new
   snapshot with the action. No tool added (still 69), no new service. Tests:
   `ObservationToolsTests`, `ObservationSurfaceTests`, `UIAutomationServiceElementWindowTests`,
-  `UIAutomationSnapshotWindowHandleTests` and `UIAutomationSnapshotPopupsTests` (Unit), and
+  `UIAutomationSnapshotWindowHandleTests`, `UIAutomationSnapshotPopupsTests`,
+  `UIAutomationSnapshotOwnedWindowsTests` and `ObserveWindowTimeoutTests` (Unit), and
   `UIAutomationServiceElementWindowIntegrationTests`,
-  `UIAutomationServiceObserveWindowsIntegrationTests` (real owner, owned-dialog, untitled, tool and
-  popup windows in `Fixtures/OwnedWindowFamily.cs`, the real `WindowService`) and
+  `UIAutomationServiceObserveWindowsIntegrationTests` (real owner/owned-dialog pairs, untitled,
+  tool and popup windows in `Fixtures/OwnedWindowFamily.cs`, the real `WindowService`) and
   `ObserveRealContextMenuIntegrationTests` (a real WinForms `ContextMenuStrip` in a child
   PowerShell process, opened from code) as Integration. Not verified live: the `UIAutomation`
   category and a third-party app were not run. Gaps found and not fixed are parity D-39 … D-45.

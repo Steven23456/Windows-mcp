@@ -966,6 +966,7 @@ public sealed class ObservationToolsTests
 
         ShouldBeActionPlusNote(text, Baseline["click"], NoteFor(kind));
         rig.Snapshots.Should().Be(1);
+        text.Should().NotContainEquivalentOf("gone", "PR #43 P1: only a KeyNotFound means the window closed; a timeout is not that");
     }
 
     [Fact]

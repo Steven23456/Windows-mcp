@@ -147,7 +147,8 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
    │   foreground = the active entry (else UIA's foreground window),
    │   window = title match, exact then substring — or, with WindowHwnd (E-5,
    │   observe:window), that one handle, listed in the inventory or not
-   │   (UnlistedWindow); a handle that is gone → KeyNotFoundException
+   │   (UnlistedWindow); a handle that is gone → KeyNotFoundException,
+   │   a timeout resolving/probing it (ClosedNotHung) → TimeoutException
    ├─► use_dom: a target window with IsBrowser is re-rooted on its page —
    │   FindPageDocument (Document + AutomationId "RootWebArea", retried
    │   because Chromium fills its tree lazily); no page → the whole window
@@ -155,9 +156,14 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
    └─► [STA thread] one ElementBudget for the whole call;
        UiTraverser.Walk(root, title, budget) per window under one CacheRequest;
        a window whose walk throws is logged and skipped;
-       IncludePopups (E-5 observations only, not scope=desktop): then every
-       on-screen, unlisted, not-yet-walked top-level window of a walked
-       process — an open menu, a dropdown, a tooltip — same budget
+       IncludePopups (E-5 observations only, not scope=desktop):
+         per walked window (not a DOM page), OwnedWindowsUnder finds the owned
+         top-level windows UIA nests under it (own handle == its GA_ROOT);
+         WithoutSubtreesOf cuts them from the owner's rows and each is walked
+         as its own root right after the owner (inventory title, else UIA
+         name, else "popup"), never twice;
+         then every on-screen, unlisted, not-yet-walked top-level window of a
+         walked process — an open menu, a dropdown, a tooltip — same budget
 
 3. Per walked node → el_N id (ids the previous snapshot issued are evicted
    first) → UiTree.Project:
@@ -311,7 +317,8 @@ work is the parameter check and the result is the body's string untouched.
      foreground: SnapshotRequest(Foreground, IncludePopups: true)
      window:     SnapshotRequest(Window, WindowHwnd: hwnd, IncludePopups: true)
                    KeyNotFoundException (the click closed it) →
-                   SnapshotRequest(Foreground, IncludePopups: true), header says so
+                   SnapshotRequest(Foreground, IncludePopups: true), header says so;
+                   TimeoutException (hung, not closed) → no fallback: failure note
    — a real snapshot: the previous snapshot's ids are evicted, new ones issued
 
 6. Result (one text block):

@@ -35,7 +35,8 @@ internal sealed class FakeUiWindows : IDisposable
 
     public AutomationElement Window(string name, long handle, int pid = 4242,
         (int X, int Y, int W, int H)? bounds = null, bool offscreen = false, int controlType = ButtonType,
-        bool handleSupported = true, bool pidSupported = true, bool broken = false)
+        bool handleSupported = true, bool pidSupported = true, bool broken = false,
+        AutomationElement[]? children = null, Exception? pidFailure = null)
     {
         var lib = Automation.PropertyLibrary.Element;
         var b = bounds ?? (100, 100, 300, 200);
@@ -48,7 +49,7 @@ internal sealed class FakeUiWindows : IDisposable
             if (id == lib.ControlType.Id) return controlType;
             if (id == lib.BoundingRectangle.Id) return new double[] { b.X, b.Y, b.W, b.H };
             if (id == lib.IsOffscreen.Id) return offscreen;
-            if (id == lib.ProcessId.Id) return pidSupported ? pid : Automation.NotSupportedValue;
+            if (id == lib.ProcessId.Id) return pidFailure is not null ? throw pidFailure : pidSupported ? pid : Automation.NotSupportedValue;
             if (id == lib.NativeWindowHandle.Id) return handleSupported ? (int)handle : Automation.NotSupportedValue;
             if (id == lib.IsEnabled.Id) return true;
             return Automation.NotSupportedValue;
@@ -56,6 +57,9 @@ internal sealed class FakeUiWindows : IDisposable
         framework.Protected()
             .Setup<object>("InternalGetPropertyValue", ItExpr.IsAny<int>(), ItExpr.IsAny<bool>(), ItExpr.IsAny<bool>())
             .Returns((int id, bool _, bool _) => Read(id));
+        // E-5 P2: a fake with children walks to its subtree (the traverser reads CachedChildren).
+        if (children is not null)
+            framework.Setup(f => f.GetCachedChildren()).Returns(children);
         return new AutomationElement(framework.Object);
     }
 
@@ -261,6 +265,54 @@ public sealed class UIAutomationSnapshotWindowHandleTests : IDisposable
 
         Mentions(log, "'Target window'").Should().BeTrue();
         Mentions(log, "'Decoy window'").Should().BeFalse();
+    }
+
+    // ---- PR #43 review P1: a timeout is not "it has closed" ----------------------------------------
+
+    [Fact]
+    public async Task By_handle_a_timeout_resolving_the_handle_propagates_as_that_timeout()
+    {
+        // A hung provider is not a closed window: reading it as one sends observe:window to the
+        // foreground and tells the caller the window is gone.
+        var hung = new TimeoutException("UIA timed out resolving the window (wmcp-e5)");
+        using var svc = NewService(Twins(), _ => throw hung);
+
+        Func<Task> act = () => svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Window, WindowHwnd: TargetHandle));
+
+        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
+    }
+
+    [Fact]
+    public async Task By_handle_a_timeout_probing_the_resolved_root_for_liveness_propagates_as_that_timeout()
+    {
+        var hung = new TimeoutException("UIA timed out reading the process id (wmcp-e5)");
+        using var svc = NewService(Twins(), h => _fakes.Window("Hung window", h, pidFailure: hung));
+
+        Func<Task> act = () => svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Window, WindowHwnd: TargetHandle));
+
+        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
+    }
+
+    [Theory]
+    [InlineData("desktop")]
+    [InlineData("foreground")]
+    [InlineData("title")]
+    public async Task A_timeout_resolving_a_window_not_asked_for_by_handle_is_still_a_logged_skip(string how)
+    {
+        // Guard: P1 changes the by-handle path only.
+        var log = new RecordingLogger<UIAutomationService>();
+        using var svc = NewService(Twins(), _ => throw new TimeoutException("UIA timed out (wmcp-e5)"), log);
+        var request = how switch
+        {
+            "desktop" => new SnapshotRequest(SnapshotScope.Desktop),
+            "foreground" => new SnapshotRequest(SnapshotScope.Foreground),
+            _ => new SnapshotRequest(SnapshotScope.Window, "Save As"),
+        };
+
+        var snap = await svc.SnapshotAsync(request);
+
+        snap.Interactive.Should().BeEmpty();
+        Mentions(log, "'Save As'").Should().BeTrue("the window that could not be resolved is logged by title, as before");
     }
 
     [Fact]
