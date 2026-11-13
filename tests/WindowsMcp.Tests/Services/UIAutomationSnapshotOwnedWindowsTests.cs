@@ -387,6 +387,37 @@ public sealed class ObserveWindowTimeoutTests : IDisposable
     }
 
     [Fact]
+    public async Task Observe_foreground_whose_foreground_window_times_out_on_resolution_returns_the_note()
+    {
+        // Round 4 U1 at the tool: no "Observed the foreground window" header over no controls.
+        _svc.ElementFromHandle = _ => throw new TimeoutException("resolving the foreground window timed out (wmcp-e5)");
+
+        var text = await new Observation(_svc).AroundAsync("foreground", 0, null, CancellationToken.None, () => Task.FromResult("acted"));
+
+        ShouldBeTheTimeoutNote(text, "resolving the foreground window timed out (wmcp-e5)");
+    }
+
+    [Theory]
+    [InlineData("foreground")]
+    [InlineData("window")]
+    public async Task Observe_whose_open_popup_times_out_while_it_is_walked_returns_the_note(string observe)
+    {
+        // Round 4 U2c at the tool: the menu the click opened hangs.
+        var id = Issue(_fakes.Window("OK", Handle));
+        _svc.ElementFromHandle = h => _fakes.Window("OK", h);
+        _svc.DesktopWindows = () =>
+        [
+            _fakes.Window("Context menu", 0xAB30, controlType: 50009, bounds: (150, 150, 120, 80),
+                childrenFailure: new TimeoutException("popup children read timed out (wmcp-e5)")),
+        ];
+
+        var text = await new Observation(_svc).AroundAsync(observe, 0, observe == "window" ? id : null, CancellationToken.None,
+            () => Task.FromResult("acted"));
+
+        ShouldBeTheTimeoutNote(text, "popup children read timed out (wmcp-e5)");
+    }
+
+    [Fact]
     public async Task Observe_window_whose_window_really_closed_still_falls_back_to_the_foreground()
     {
         // Guard: KeyNotFound (null / gone) keeps the fallback.
@@ -477,6 +508,102 @@ public sealed class UIAutomationSnapshotObservationTimeoutTests : IDisposable
 
         (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
     }
+
+    // ---- PR #43 round 4 U1: resolving a target not asked for by handle -----------------------------
+
+    public static TheoryData<string> NotByHandle => new() { "foreground", "title" };
+
+    [Theory]
+    [MemberData(nameof(NotByHandle))]
+    public async Task U1_a_timeout_resolving_a_target_not_asked_for_by_handle_propagates_in_an_observation(string how)
+    {
+        // Today the window is skipped and observe:foreground answers "Observed the foreground
+        // window" over no controls. The no-popups guard is
+        // UIAutomationSnapshotWindowHandleTests.A_timeout_resolving_a_window_not_asked_for_by_handle_is_still_a_logged_skip.
+        var hung = new TimeoutException("resolving the window timed out (wmcp-e5)");
+        using var svc = NewService(_fakes.Window("Host button", Host));
+        svc.ElementFromHandle = _ => throw hung;
+        var request = how == "foreground"
+            ? new SnapshotRequest(SnapshotScope.Foreground, IncludePopups: true)
+            : new SnapshotRequest(SnapshotScope.Window, "Host", IncludePopups: true);
+
+        Func<Task> act = () => svc.SnapshotAsync(request);
+
+        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
+    }
+
+    // ---- PR #43 round 4 U2: the desktop-level popups pass ------------------------------------------
+
+    [Theory]
+    [MemberData(nameof(ObservedScopes))]
+    public async Task U2a_a_timeout_listing_the_desktops_windows_propagates(SnapshotScope scope)
+    {
+        var hung = new TimeoutException("listing the desktop timed out (wmcp-e5)");
+        using var svc = NewService(_fakes.Window("Host button", Host));
+        svc.DesktopWindows = () => throw hung;
+
+        Func<Task> act = () => svc.SnapshotAsync(Observation(scope));
+
+        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
+    }
+
+    public static TheoryData<SnapshotScope, string> ScopesTimesFilterRead()
+    {
+        var data = new TheoryData<SnapshotScope, string>();
+        foreach (var scope in new[] { SnapshotScope.Window, SnapshotScope.Foreground })
+            foreach (var read in new[] { "handle", "process" })
+                data.Add(scope, read);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(ScopesTimesFilterRead))]
+    public async Task U2b_a_timeout_reading_a_popup_in_the_filter_propagates(SnapshotScope scope, string read)
+    {
+        var hung = new TimeoutException($"popup {read} read timed out (wmcp-e5)");
+        var popup = read == "handle"
+            ? _fakes.Window("Menu item A", 0xAB30, bounds: (150, 150, 100, 20), readFailure: hung)
+            : _fakes.Window("Menu item A", 0xAB30, bounds: (150, 150, 100, 20), pidFailure: hung);
+        using var svc = NewService(_fakes.Window("Host button", Host));
+        svc.DesktopWindows = () => [popup];
+
+        Func<Task> act = () => svc.SnapshotAsync(Observation(scope));
+
+        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
+    }
+
+    [Theory]
+    [MemberData(nameof(ObservedScopes))]
+    public async Task U2c_a_same_process_unowned_popup_whose_children_read_times_out_propagates(SnapshotScope scope)
+    {
+        // The reviewer's regression: the menu a click opened hangs while it is walked.
+        var hung = new TimeoutException("popup children read timed out (wmcp-e5)");
+        var popup = _fakes.Window("Context menu", 0xAB30, controlType: 50009, bounds: (150, 150, 120, 80), childrenFailure: hung);
+        using var svc = NewService(_fakes.Window("Host button", Host));
+        svc.DesktopWindows = () => [popup];
+
+        Func<Task> act = () => svc.SnapshotAsync(Observation(scope));
+
+        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
+    }
+
+    [Fact]
+    public async Task U2_guard_a_popup_whose_children_read_fails_another_way_is_still_walked_as_far_as_it_goes()
+    {
+        // Non-timeout failures keep today's behaviour (the D-5 traverser skips what it cannot read).
+        var popup = _fakes.Window("Menu item A", 0xAB30, bounds: (150, 150, 100, 20),
+            childrenFailure: new InvalidOperationException("children read failed (wmcp-e5)"));
+        using var svc = NewService(_fakes.Window("Host button", Host));
+        svc.DesktopWindows = () => [popup];
+
+        var snap = await svc.SnapshotAsync(Observation(SnapshotScope.Window));
+
+        snap.Interactive.Select(e => e.Name).Should().Equal(["Host button", "Menu item A"]);
+    }
+
+    // The other non-timeout guards of this pass are UIAutomationSnapshotPopupsTests
+    // .A_popup_that_dies_while_it_is_read_is_skipped_and_logged_and_the_rest_still_come and
+    // .A_desktop_list_that_cannot_be_read_costs_the_popups_not_the_snapshot.
 
     // ---- guards: the plain snapshot ----------------------------------------------------------------
 
@@ -672,6 +799,39 @@ public sealed class UIAutomationSnapshotOwnedWindowBudgetTests : IDisposable
 
         Rows(snap).Should().Equal(["Tool palette: Palette button"]);
         _ownerQueries.Should().BeEmpty("a window with no native handle owns nothing it can name");
+    }
+
+    // ---- PR #43 U3 at the service: as far as a seam can honestly reach -------------------------------
+    // The live ladder (foreground window, else focused element, else desktop) is pinned on the pure
+    // helper, UiRootsTests.With_timeouts_propagating_*; the ForegroundRoot seam replaces the ladder
+    // whole, so these rows only say what happens when the root call itself throws.
+
+    [Fact]
+    public async Task Foreground_fallback_whose_root_times_out_propagates_in_an_observation()
+    {
+        var hung = new TimeoutException("foreground root timed out (wmcp-e5)");
+        using var svc = NewService(HostWith(Button("Host button 1", (110, 110, 50, 20))), hostIsActive: false);
+        svc.ForegroundRoot = () => throw hung;
+
+        Func<Task> act = () => svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Foreground, IncludePopups: true));
+
+        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
+    }
+
+    [Fact]
+    public async Task Foreground_fallback_whose_root_call_throws_fails_the_plain_snapshot_today_too()
+    {
+        // Characterisation, not a rule: the root call sits outside every per-window catch, so a
+        // throw from it ends any foreground snapshot, observation or not. In production the
+        // lenient ladder (UiRoots.FirstAvailable without propagation) absorbs a failing rung
+        // before it gets here; only its LAST rung (the desktop) can throw this far.
+        var hung = new TimeoutException("foreground root timed out (wmcp-e5)");
+        using var svc = NewService(HostWith(Button("Host button 1", (110, 110, 50, 20))), hostIsActive: false);
+        svc.ForegroundRoot = () => throw hung;
+
+        Func<Task> act = () => svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Foreground));
+
+        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
     }
 
     [Fact]

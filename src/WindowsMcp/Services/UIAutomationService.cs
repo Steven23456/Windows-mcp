@@ -128,12 +128,12 @@ public sealed class UIAutomationService : IUIAutomationService
     /// </summary>
     private static unsafe nint HwndPointer(Windows.Win32.Foundation.HWND h) => (nint)h.Value;
 
-    private AutomationElement GetForegroundRoot()
+    private AutomationElement GetForegroundRoot(bool timeoutsPropagate = false)
     {
         // D-10 R24b: FocusedElement() THROWS when nothing is in the foreground (it does not return
         // null), so the documented desktop fallback was unreachable and get_state, a foreground
         // find and a foreground snapshot failed masked. Each rung may fail; the desktop is last.
-        return UiRoots.FirstAvailable<AutomationElement>(
+        return UiRoots.FirstAvailable<AutomationElement>(timeoutsPropagate,
             () =>
             {
                 var hwnd = PInvoke.GetForegroundWindow();
@@ -373,7 +373,7 @@ public sealed class UIAutomationService : IUIAutomationService
                 // No inventory entry is flagged active (the desktop, a cloaked window): fall back
                 // to whatever UIA says is in front, as get_state does. No inventory row means no
                 // IsBrowser either, so DOM mode does not apply here.
-                var root = ForegroundRoot?.Invoke() ?? GetForegroundRoot();
+                var root = ForegroundRoot?.Invoke() ?? GetForegroundRoot(timeoutsPropagate: observing);
                 try { Walked(root, 0, 0); } catch (Exception ex) when (ex is not OperationCanceledException && !(observing && ex is TimeoutException)) { }
                 // Through the same walk as a listed window: an untitled or tool window in front
                 // has owned dialogs too.
@@ -389,8 +389,10 @@ public sealed class UIAutomationService : IUIAutomationService
                 Exception? unresolved = null;
                 try { root = ElementFromHandle((nint)w.Hwnd); }
                 // A timeout says the provider is hung, not that the window closed: by handle it
-                // propagates, so the caller is not told "gone" and shown another window instead.
-                catch (Exception ex) when (ex is not OperationCanceledException && !(byHandle && ex is TimeoutException)) { unresolved = ex; }
+                // propagates, so the caller is not told "gone" and shown another window instead —
+                // and so does every timeout in an observation, which must not come back as an
+                // "observed" header over a window that was quietly skipped.
+                catch (Exception ex) when (ex is not OperationCanceledException && !((byHandle || observing) && ex is TimeoutException)) { unresolved = ex; }
 
                 // E-5: a window asked for by handle either exists or the caller is told it does
                 // not. Skipping it quietly would hand back an empty snapshot under a header that
@@ -432,8 +434,10 @@ public sealed class UIAutomationService : IUIAutomationService
             {
                 var listed = windows.Select(w => w.Hwnd).ToHashSet();
                 AutomationElement[] topLevel;
+                // This pass runs only for an observation, so a timeout anywhere in it propagates
+                // like every other: the menu the action opened must not go missing unannounced.
                 try { topLevel = DesktopWindows is { } seam ? seam() : _automation.GetDesktop().FindAllChildren(); }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException)
                 {
                     LogSkipped("the desktop's window list", ex);
                     topLevel = [];
@@ -454,9 +458,9 @@ public sealed class UIAutomationService : IUIAutomationService
                         var name = TryGetName(popup);
                         var label = name.Length > 0 ? name : "popup";
                         if (hwnd != 0) walkedHandles.Add(hwnd);
-                        perWindow.Add((label, traverser.Walk(popup, label, budget), DomState.None));
+                        perWindow.Add((label, traverser.Walk(popup, label, budget, timeoutsPropagate: true), DomState.None));
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException)
                     {
                         LogSkipped("a popup window", ex);
                     }

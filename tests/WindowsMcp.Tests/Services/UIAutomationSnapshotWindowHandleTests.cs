@@ -47,7 +47,8 @@ internal sealed class FakeUiWindows : IDisposable
     public AutomationElement Window(string name, long handle, int pid = 4242,
         (int X, int Y, int W, int H)? bounds = null, bool offscreen = false, int controlType = ButtonType,
         bool handleSupported = true, bool pidSupported = true, bool broken = false,
-        AutomationElement[]? children = null, Exception? pidFailure = null, Exception? childrenFailure = null)
+        AutomationElement[]? children = null, Exception? pidFailure = null, Exception? childrenFailure = null,
+        Exception? readFailure = null)
     {
         var lib = Automation.PropertyLibrary.Element;
         var b = bounds ?? (100, 100, 300, 200);
@@ -56,6 +57,8 @@ internal sealed class FakeUiWindows : IDisposable
         {
             // A window that dies while the popup filter reads it.
             if (broken) throw new FlaUI.Core.Exceptions.ElementNotAvailableException();
+            // PR #43 U2: every property read fails this way (the popup filter's first read is the handle).
+            if (readFailure is not null) throw readFailure;
             if (id == lib.Name.Id) return name;
             if (id == lib.ControlType.Id) return controlType;
             if (id == lib.BoundingRectangle.Id) return new double[] { b.X, b.Y, b.W, b.H };

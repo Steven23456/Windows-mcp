@@ -158,14 +158,19 @@ it still lists an owned dialog's rows twice (D-43).
   do not repeat it; call snapshot to see the result.` `<why>` is the caller-facing message
   (newlines folded) or `an unexpected fault (<TypeName>).` for anything `ToolErrors` would mask.
 - **A hung provider is a failure, not a smaller snapshot.** With `IncludePopups` (every
-  observation), a `TimeoutException` while a target window is processed after its handle
-  resolved — owned-window discovery, the pid/handle bookkeeping, or a children read in the walk
-  (`UiTraverser.Walk(…, timeoutsPropagate: true)`) — propagates out of `SnapshotAsync`, so the
-  observation returns the failure note instead of a snapshot under an "Observed …" header that is
-  missing the observed window's rows. (Resolving or probing a by-handle window already propagated
-  a timeout; see above.) Without `IncludePopups` — the `snapshot` tool, `wait_for`, `screenshot`
-  annotate, `scrape` dom — a window that times out is still logged and skipped, and the walk
-  still swallows everything a dying element does (D-5).
+  observation), a `TimeoutException` from **any** step of the STA walk propagates out of
+  `SnapshotAsync`: resolving a target window (by handle, the active foreground window, or a
+  title match — `ElementFromHandle`), probing it, owned-window discovery, the pid/handle
+  bookkeeping, a children read in the walk (`UiTraverser.Walk(…, timeoutsPropagate: true)`), and
+  the desktop-level popup pass — listing the desktop's top-level windows, reading a popup in the
+  filter, and the popup's own walk. The observation then returns the failure note instead of a
+  snapshot under an "Observed …" header with rows missing. The one exception, by design, is an
+  individual property read inside the traverser (`Try(...)`): a dying element's property still
+  reads as absent (D-5); only the children read rethrows. Non-timeout failures keep their
+  behaviour: a window or popup that cannot be read is logged and skipped, and a desktop window
+  list that cannot be read costs the popups, not the snapshot. Without `IncludePopups` — the
+  `snapshot` tool, `wait_for`, `screenshot` annotate, `scrape` dom — nothing changes: a window
+  that times out is logged and skipped, and the walk swallows everything a dying element does.
 - **Cancellation.** Only `click` and `key` take the request's token (E-3 added it); cancelling
   them during the settle wait or the snapshot drops the result although the action was performed,
   and their descriptions say so (`Observation.CancelNote`). The other five pass
@@ -203,4 +208,5 @@ it still lists an owned dialog's rows twice (D-43).
   (five tools without a token), D-41 (a cancelled snapshot still evicts ids), D-42 (no
   `max_elements`/`use_dom` on an observation), D-43 (an owned dialog listed twice by `snapshot` in
   desktop scope; observations no longer do it), D-44 (`FlashOverlayTests` outside the desktop collection), D-45 (the takeover hotkey does
-  not interrupt an observation).
+  not interrupt an observation), D-46 (an owned window shown after the owner relation was
+  enumerated stays nested, clipped, in its owner's rows).

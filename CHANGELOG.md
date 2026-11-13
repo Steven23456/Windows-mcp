@@ -49,9 +49,13 @@
     `click` and `key` carry the request's cancellation token — cancelling them during the settle
     wait or the snapshot drops the result although the action was performed; the other five
     tools' wait and snapshot cannot be cancelled (parity D-40). A UI Automation **timeout** (a
-    hung provider) while the observed window — or a window it owns — is being found or walked
-    ends in that same failure note rather than a snapshot missing the observed window's rows; the
-    plain `snapshot` tool still logs and skips a window that times out.
+    hung provider) from **any** step of an observation's snapshot — resolving the foreground,
+    title-matched or by-handle window, finding its owned windows, the walk's children reads, or
+    the popup pass (listing the desktop's windows, reading or walking a popup) — ends in that same
+    failure note rather than a snapshot missing rows; only individual property reads inside the
+    walk are still swallowed (D-5). Other failures there keep their behaviour (a popup that cannot
+    be read is skipped and logged; a desktop list that cannot be read costs the popups, not the
+    snapshot), and the plain `snapshot` tool still logs and skips a window that times out.
   New `IUIAutomationService.GetElementWindowAsync(elementId, ct)` → the window handle;
   `SnapshotRequest` gains `WindowHwnd` (with `Scope == Window`, one window by handle instead of a
   title — refused with a title or another scope; a handle that no longer names a window is a
@@ -79,7 +83,7 @@
   `Fixtures/OwnedWindowFamily.cs`, the real `WindowService` and the real owner relation) and
   `ObserveRealContextMenuIntegrationTests` (a real WinForms `ContextMenuStrip` in a child
   PowerShell process, opened from code) as Integration. Not verified live: the `UIAutomation`
-  category and a third-party app were not run. Gaps found and not fixed are parity D-39 … D-45.
+  category and a third-party app were not run. Gaps found and not fixed are parity D-39 … D-46.
 - **`find_element` filters by automation id, control type and class, searches inside an element,
   and pages** (E-4). Six parameters on an existing tool, so an unnamed icon button is one call by
   a stable property, and a dialog the caller already holds is searched on its own:

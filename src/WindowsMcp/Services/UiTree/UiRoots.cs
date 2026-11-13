@@ -12,6 +12,14 @@ internal static class UiRoots
     /// propagates from wherever it is raised.
     /// </summary>
     public static T FirstAvailable<T>(params Func<T?>[] candidates) where T : class
+        => FirstAvailable(timeoutsPropagate: false, candidates);
+
+    /// <summary>
+    /// The same ladder. With <paramref name="timeoutsPropagate"/>, a rung that times out ends it
+    /// with that <see cref="TimeoutException"/> instead of falling to the next rung: for an
+    /// observation, a hung foreground window must not quietly become the desktop root.
+    /// </summary>
+    public static T FirstAvailable<T>(bool timeoutsPropagate, params Func<T?>[] candidates) where T : class
     {
         if (candidates is null || candidates.Length == 0)
             throw new ArgumentException("At least one candidate is required.", nameof(candidates));
@@ -23,6 +31,7 @@ internal static class UiRoots
                 if (candidates[i]() is { } found) return found;
             }
             catch (OperationCanceledException) { throw; }
+            catch (TimeoutException) when (timeoutsPropagate) { throw; }
             catch (Exception) { /* this root cannot be had; try the next */ }
         }
 
