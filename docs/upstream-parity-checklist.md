@@ -11,17 +11,17 @@ E-1, E-2, E-3, E-4 (with D-20) and E-5.
 SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
-This is the working list of everything upstream can do that this server cannot (plus forty-seven
+This is the working list of everything upstream can do that this server cannot (plus forty-eight
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 and D-10/D-11
 logged 2026-11-10 — **all eleven are now fixed** — then D-12…D-18, logged 2026-11-11 by the
 D-10/D-11 review, D-19…D-22, logged 2026-11-12 during E-1, D-23…D-27, logged 2026-11-12
 during E-2, D-28…D-32, logged 2026-11-12 by the E-3 review, D-33…D-38, logged 2026-11-12
-during E-4, and D-39…D-47, logged 2026-11-12 during E-5, all still open except D-31, which E-3's
+during E-4, and D-39…D-48, logged 2026-11-12 during E-5 and its review, all still open except D-31, which E-3's
 review round fixed, and D-20, which E-4 fixed; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
 phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and phase 5 shipped A-14,
 A-12 phase 1, A-10 and A-5 phase 1 — so every section-A row is ticked, with only A-5's Firefox
 phase left open and A-12's phase 2 deliberately not planned; section B is ticked too, and
-C-5/C-6 close section C — section S, D-12…D-47 (less D-20 and D-31) and section E are the work that is left; section E
+C-5/C-6 close section C — section S, D-12…D-48 (less D-20 and D-31) and section E are the work that is left; section E
 is not upstream parity but an agent-efficiency backlog from a review of this server's own tools).
 Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
@@ -157,6 +157,7 @@ function names are the stable anchor.
 | D-45 | The takeover hotkey does not interrupt an observation's settle wait or snapshot | P3 | S | S-11, E-5, D-29 | ☐ |
 | D-46 | Owned-window discovery sees only windows visible when it enumerates: one shown later stays nested, clipped, in its owner's rows | P3 | S | E-5 | ☐ |
 | D-47 | The popup pass reads every desktop window's handle and process id through UI Automation; finding the observed process's popups natively would not touch unrelated applications | P3 | S | E-5 | ☐ |
+| D-48 | A dialog or message box that is the foreground window is observed as the target, so `observe:"foreground"` does not return its question | P2 | S | E-5 | ☐ |
 | E-1 | Server instructions in the MCP handshake | P1 | S | — | ☑ |
 | E-2 | `interact_element`: expand, collapse, set_value, scroll_into_view | P1 | S | D-10 | ☑ |
 | E-3 | `click` modifiers; `key` repeat and hold | P2 | S | — | ☑ |
@@ -172,7 +173,7 @@ function names are the stable anchor.
 **Suggested order.** **Defects D-1 … D-11 are done** (D-12 … D-18, logged 2026-11-11 by the
 D-10/D-11 review, D-19 … D-22, logged 2026-11-12 during E-1, D-23 … D-27, logged 2026-11-12
 during E-2, D-28 … D-32, logged 2026-11-12 by the E-3 review, D-33 … D-38, logged 2026-11-12
-during E-4, and D-39 … D-47, logged 2026-11-12 during E-5, are open — except D-31, fixed in E-3's
+during E-4, and D-39 … D-48, logged 2026-11-12 during E-5 and its review, are open — except D-31, fixed in E-3's
 review round, and D-20, fixed by E-4), and
 **so are sections
 A, B and C** (A-5's Firefox phase and
@@ -1453,6 +1454,33 @@ it is never resolved or read; the observed process's popup is walked.
 
 **Done when.** An observation reads no UI Automation property of another application's window.
 
+### D-48 — `observe:"foreground"` does not return a foreground dialog's question  `P2 · S`
+- [ ] Not started
+
+**Found in the docs review of PR #43 (E-5, 2026-11-13), read from the source.**
+
+**Ours today.** An observation's `PopupText` collects the named non-interactive nodes of every
+window walked **as a popup** — an owned window lifted out of its owner, a desktop-level popup —
+and deliberately never the target window's. A dialog or message box usually becomes the active,
+titled, inventory-listed window, so `observe:"foreground"` after the action that opened it makes
+that dialog the **target**: its question ("Do you want to save changes?") is plain text, so it has
+no row in the snapshot, and it is not in `PopupText` either. The caller sees the dialog's buttons
+but not what they answer. The question does come back when the window that opened the dialog is
+observed (`observe:"window"` on one of its elements), because the dialog is then lifted out as an
+owned window. Workaround today: `find_element` with `kind:"text"` on the dialog.
+
+**Sketch.** When the observed target window is itself an owned window (it has a `GW_OWNER`),
+include its non-interactive named nodes in `PopupText` under its label, with the same rules and
+caps (once per window, collapsed, text 200 / label 80 characters, 50 lines in all).
+
+**Touches.** `Services/UIAutomationService.cs` (`SnapshotAsync`, the `PopupText` collection),
+`docs/design/E-5-observe.md`, `skills/windows/SKILL.md` (drop the workaround).
+
+**Tests.** A foreground owned dialog with a static question: `observe:"foreground"` returns the
+question in `PopupText`; an unowned foreground window's labels still do not appear there.
+
+**Done when.** Observing the foreground after opening a message box returns its question.
+
 ---
 
 ## A — Desktop state and screenshots
@@ -2582,7 +2610,7 @@ which the inventory does not flag active) goes through the same per-window walk 
 in an observation its root ladder (`GetForegroundRoot(timeoutsPropagate: true)`) stops at a
 timeout instead of falling to the focused element or the desktop root. Beyond the sketch, an
 observation also returns what its popups **say**: `SnapshotResult.PopupText` (null for every other
-snapshot), rendered after the snapshot as `Popup text (not controls, no ids):` — each walked node of a popup that is not an interactive row and has a name gives one line `<popup label>: <name>`, in walk order (owned windows first), each name once per popup, line breaks collapsed, clipped to 200 characters; the popup's own root name counts only when nothing inside it spoke; at most 50 lines, the 50th then `... (more popup text not shown)` —
+snapshot), rendered after the snapshot as `Popup text (not controls, no ids):` — each walked node of a popup that is not an interactive row and has a name gives one line `<popup label>: <name>`, in walk order (owned windows first), each name once per popup, line breaks collapsed, the text clipped to 200 characters and the label folded to one line and clipped to 80; the popup's own root name counts only when nothing inside it spoke; at most 50 lines, the 50th then `... (more popup text not shown)` —
 covering every owned window lifted out and every desktop-level popup, never the target window or
 the foreground-fallback root; so a hovered control's tooltip and a message box's question come
 back (`ObservePopupTextIntegrationTests`, on a real comctl32 tracking tooltip). A plain `snapshot` there
@@ -2624,7 +2652,7 @@ when" bar is met in a test, not live:** a real WinForms `ContextMenuStrip`, open
 child PowerShell process, is listed item by item by an observation-shaped snapshot of its form
 (by handle, with popups); the click-through-the-tool half is covered by the mocked unit tests. The
 `UIAutomation` category and a third-party app were not run. Neighbour gaps found and not fixed are
-D-39 … D-47.
+D-39 … D-48.
 
 ### E-6 — `sequence`: an ordered batch of UI steps in one call  `P2 · M`
 - [ ] Not started

@@ -161,7 +161,7 @@ no row for it (rows are controls), so before this an observation walked the text
 and the one thing the caller wanted — what the popup said — was missing. With `IncludePopups`,
 `SnapshotResult.PopupText` collects it for every window walked **as a popup** (an owned window
 lifted out of its owner, a desktop-level popup — never the target window or the
-foreground-fallback root, whose labels the caller reaches with `find_element kind:text`): each walked node of a popup that is not an interactive row and has a name gives one line `<popup label>: <name>`, in walk order (owned windows first), each name once per popup, line breaks collapsed, clipped to 200 characters; the popup's own root name counts only when nothing inside it spoke; at most 50 lines, the 50th then `... (more popup text not shown)`.
+foreground-fallback root, whose labels the caller reaches with `find_element kind:text`): each walked node of a popup that is not an interactive row and has a name gives one line `<popup label>: <name>`, in walk order (owned windows first), each name once per popup, line breaks collapsed, the text clipped to 200 characters and the label folded to one line and clipped to 80; the popup's own root name counts only when nothing inside it spoke; at most 50 lines, the 50th then `... (more popup text not shown)`.
 `Observation` appends it after the rendered snapshot as `Popup text (not controls, no ids):` and the
 lines, or nothing. It is null for every non-observation snapshot, so `snapshot`'s JSON and text
 are unchanged. Hover-and-observe (`click` with `clicks:0`, `observe`) therefore returns a
@@ -249,4 +249,6 @@ tooltip, and observing the window that opened a message box returns its question
   desktop scope; observations no longer do it), D-44 (`FlashOverlayTests` outside the desktop collection), D-45 (the takeover hotkey does
   not interrupt an observation), D-46 (an owned window shown after the owner relation was
   enumerated stays nested, clipped, in its owner's rows), D-47 (the popup pass reads every desktop
-  window's handle and process id through UI Automation instead of natively).
+  window's handle and process id through UI Automation instead of natively), D-48 (a dialog or
+  message box that is itself the foreground window is the target, so `observe:"foreground"` does
+  not return its question; observing the window that opened it does).

@@ -18,8 +18,8 @@
     line, `Popup text (not controls, no ids):` and one `<popup label>: <text>` line per named
     non-interactive element of each window walked as a popup — an owned window lifted out of its
     owner, or a desktop-level popup; never the target window or the foreground-fallback root — in
-    walk order (owned windows first), each text once per popup, line breaks collapsed, clipped to
-    200 characters, at most 50 lines (the 50th then `... (more popup text not shown)`). A popup's
+    walk order (owned windows first), each text once per popup, line breaks collapsed, the text
+    clipped to 200 characters and the label folded to one line and clipped to 80, at most 50 lines (the 50th then `... (more popup text not shown)`). A popup's
     own name counts only when nothing inside it spoke, so a tooltip is its text and a dialog
     titled "Save As" does not add `Save As: Save As`. So hovering a control (`click` with
     `clicks:0`) and observing returns its tooltip, and observing the window that opened a message
@@ -111,7 +111,7 @@
   PowerShell process, opened from code) and `ObservePopupTextIntegrationTests` (a real comctl32
   tracking tooltip owned by its host, shown with no input, in `Fixtures/OwnedTrackingTooltip.cs`)
   as Integration. Not verified live: the `UIAutomation`
-  category and a third-party app were not run. Gaps found and not fixed are parity D-39 … D-47.
+  category and a third-party app were not run. Gaps found and not fixed are parity D-39 … D-48.
 - **`find_element` filters by automation id, control type and class, searches inside an element,
   and pages** (E-4). Six parameters on an existing tool, so an unnamed icon button is one call by
   a stable property, and a dialog the caller already holds is searched on its own:
