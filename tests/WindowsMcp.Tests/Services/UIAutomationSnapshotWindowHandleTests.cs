@@ -33,6 +33,9 @@ internal sealed class FakeUiWindows : IDisposable
 
     public UIA3Automation Automation { get; } = new();
 
+    /// <summary>Every NativeWindowHandle read of any fake this instance made (a cross-process call on a real element).</summary>
+    public int HandleReads { get; private set; }
+
     public AutomationElement Window(string name, long handle, int pid = 4242,
         (int X, int Y, int W, int H)? bounds = null, bool offscreen = false, int controlType = ButtonType,
         bool handleSupported = true, bool pidSupported = true, bool broken = false,
@@ -50,7 +53,7 @@ internal sealed class FakeUiWindows : IDisposable
             if (id == lib.BoundingRectangle.Id) return new double[] { b.X, b.Y, b.W, b.H };
             if (id == lib.IsOffscreen.Id) return offscreen;
             if (id == lib.ProcessId.Id) return pidFailure is not null ? throw pidFailure : pidSupported ? pid : Automation.NotSupportedValue;
-            if (id == lib.NativeWindowHandle.Id) return handleSupported ? (int)handle : Automation.NotSupportedValue;
+            if (id == lib.NativeWindowHandle.Id) { HandleReads++; return handleSupported ? (int)handle : Automation.NotSupportedValue; }
             if (id == lib.IsEnabled.Id) return true;
             return Automation.NotSupportedValue;
         }

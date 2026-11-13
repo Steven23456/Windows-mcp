@@ -21,10 +21,13 @@
     menu's items in the same call. And because UI Automation nests an **owned** top-level window
     (a dialog, an owned popup) under its owner — clipped to the owner's rectangle and under the
     owner's title — an observation lifts each one out: a descendant whose native handle is its own
-    Win32 root window is removed from the owner's rows and walked as its own root, clipped to its
-    own rectangle and labelled with its inventory title, else its UIA name, else `popup`, right
-    after its owner. So an owned dialog reaching outside its owner is observed whole and once. The
-    plain `snapshot` tool includes neither popups nor this (parity D-39, D-43).
+    Win32 root window is skipped by the owner's walk (never entered) and walked as its own root,
+    clipped to its own rectangle and labelled with its inventory title, else its UIA name, else
+    `popup`, right after its owner. Its elements are visited and charged to the element budget
+    once, so with a short budget the owner's rows come first, then the owned window's. This holds
+    for the foreground fallback too (an untitled or tool window in front that the inventory does
+    not flag active). So an owned dialog reaching outside its owner is observed whole and once.
+    The plain `snapshot` tool includes neither popups nor this (parity D-39, D-43).
   - `observe:window` observes the top-level window the target element belongs to, resolved
     **before** the action from the nearest native handle via Win32 `GetAncestor(GA_ROOT)`, so an
     element in an owned dialog answers the dialog, not its owner (UI Automation nests owned windows
@@ -48,7 +51,8 @@
   title — refused with a title or another scope; a handle that no longer names a window is a
   `KeyNotFoundException`, a timeout resolving or probing it propagates as a `TimeoutException`)
   and `IncludePopups` (the process's popups and the owned windows nested under each walked
-  window; `OwnedWindowsUnder`, `WithoutSubtreesOf`, `ClosedNotHung`). One shared helper, `Tools/Observation.cs`
+  window; `OwnedWindowsUnder`, `ClosedNotHung`, the per-window `WalkWindow`, and
+  `UiTraverser.Walk`'s optional `skipHandles`) and the `ForegroundRoot` test seam. One shared helper, `Tools/Observation.cs`
   (`AroundAsync`, with a `Delay` seam), behind thin wrappers over private `XxxCore` methods in
   `Tools/InputTools.cs` and `Tools/UIAutomationTools.cs`; `UIAutomationService` gains
   `UnlistedWindow` and the `RootWindowOf` / `ElementFromHandle` test seams, and
@@ -59,7 +63,8 @@
   snapshot with the action. No tool added (still 69), no new service. Tests:
   `ObservationToolsTests`, `ObservationSurfaceTests`, `UIAutomationServiceElementWindowTests`,
   `UIAutomationSnapshotWindowHandleTests`, `UIAutomationSnapshotPopupsTests`,
-  `UIAutomationSnapshotOwnedWindowsTests` and `ObserveWindowTimeoutTests` (Unit), and
+  `UIAutomationSnapshotOwnedWindowsTests`, `UIAutomationSnapshotOwnedWindowBudgetTests` and
+  `ObserveWindowTimeoutTests` (Unit), and
   `UIAutomationServiceElementWindowIntegrationTests`,
   `UIAutomationServiceObserveWindowsIntegrationTests` (real owner/owned-dialog pairs, untitled,
   tool and popup windows in `Fixtures/OwnedWindowFamily.cs`, the real `WindowService`) and

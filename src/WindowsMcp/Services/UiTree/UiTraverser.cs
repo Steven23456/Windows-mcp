@@ -24,7 +24,14 @@ internal sealed class UiTraverser
 
     internal UiTraverser(UIA3Automation automation) => _automation = automation;
 
-    internal IReadOnlyList<UiWalkEntry> Walk(AutomationElement root, string windowTitle, ElementBudget budget)
+    /// <param name="skipHandles">
+    /// E-5: native handles of windows nested under <paramref name="root"/> that are walked as roots
+    /// of their own (owned dialogs and popups). The walk does not enter them, so their elements
+    /// are neither listed here nor charged to the budget here. Null (every caller but an
+    /// observation) reads no handle and changes nothing.
+    /// </param>
+    internal IReadOnlyList<UiWalkEntry> Walk(AutomationElement root, string windowTitle, ElementBudget budget,
+        IReadOnlySet<long>? skipHandles = null)
     {
         var entries = new List<UiWalkEntry>();
 
@@ -68,15 +75,19 @@ internal sealed class UiTraverser
             catch { cachedRoot = root; }
 
             var windowRect = ReadBounds(cachedRoot) ?? new Bounds(0, 0, 0, 0);
-            Visit(cachedRoot, windowTitle, windowRect, depth: 0, parentIndex: -1, budget, entries);
+            Visit(cachedRoot, windowTitle, windowRect, depth: 0, parentIndex: -1, budget, entries, skipHandles);
         }
         return entries;
     }
 
     private void Visit(AutomationElement el, string window, Bounds windowRect, int depth, int parentIndex,
-        ElementBudget budget, List<UiWalkEntry> entries)
+        ElementBudget budget, List<UiWalkEntry> entries, IReadOnlySet<long>? skipHandles)
     {
         if (budget.Truncated) return;
+        // The handle is in the cache request, so this costs no call to the provider.
+        if (skipHandles is not null && depth > 0
+            && skipHandles.Contains(Try(() => el.Properties.NativeWindowHandle.ValueOrDefault.ToInt64(), 0L)))
+            return;
 
         UiNode? node;
         try { node = ReadNode(el, window, windowRect, depth); }
@@ -97,7 +108,7 @@ internal sealed class UiTraverser
         foreach (var child in children)
         {
             if (budget.Truncated) return;
-            Visit(child, window, windowRect, depth + 1, myIndex, budget, entries);
+            Visit(child, window, windowRect, depth + 1, myIndex, budget, entries, skipHandles);
         }
     }
 

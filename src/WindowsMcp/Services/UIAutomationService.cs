@@ -333,14 +333,48 @@ public sealed class UIAutomationService : IUIAutomationService
                 if (pid != 0) walkedPids.Add(pid);
             }
 
+            // One window, and — for an observation — the owned windows nested under it.
+            // E-5: UI Automation nests an OWNED top-level window (a dialog, an owned popup) under
+            // its owner, where a plain walk sees it clipped to the owner's rectangle and under the
+            // owner's title, and not at all where it lies outside. For an observation the owner's
+            // walk skips each one, and it is walked as the window it is: once, and charged to the
+            // element budget once.
+            bool liftOwned = request.IncludePopups && request.Scope != SnapshotScope.Desktop;
+            void WalkWindow(AutomationElement root, string title, long hwnd, DomState dom)
+            {
+                var owned = liftOwned && dom == DomState.None ? OwnedWindowsUnder(root, hwnd) : [];
+                HashSet<long>? ownedHandles = owned.Count > 0 ? owned.Select(o => o.Hwnd).ToHashSet() : null;
+                perWindow.Add((title, traverser.Walk(root, title, budget, ownedHandles), dom));
+
+                foreach (var (ownedRoot, ownedHwnd) in owned)
+                {
+                    if (budget.Truncated) break;
+                    if (!walkedHandles.Add(ownedHwnd)) continue;
+                    try
+                    {
+                        var listedTitle = windows.FirstOrDefault(x => x.Hwnd == ownedHwnd)?.Title;
+                        var name = string.IsNullOrEmpty(listedTitle) ? TryGetName(ownedRoot) : listedTitle;
+                        var label = name.Length > 0 ? name : "popup";
+                        // One nested deeper is walked in its own turn, not inside this one.
+                        perWindow.Add((label, traverser.Walk(ownedRoot, label, budget, ownedHandles), DomState.None));
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        LogSkipped("an owned window", ex);
+                    }
+                }
+            }
+
             if (request.Scope == SnapshotScope.Foreground && active is null)
             {
                 // No inventory entry is flagged active (the desktop, a cloaked window): fall back
                 // to whatever UIA says is in front, as get_state does. No inventory row means no
                 // IsBrowser either, so DOM mode does not apply here.
-                var root = GetForegroundRoot();
-                perWindow.Add((TryGetName(root), traverser.Walk(root, TryGetName(root), budget), DomState.None));
+                var root = ForegroundRoot?.Invoke() ?? GetForegroundRoot();
                 try { Walked(root, 0, 0); } catch (Exception ex) when (ex is not OperationCanceledException) { }
+                // Through the same walk as a listed window: an untitled or tool window in front
+                // has owned dialogs too.
+                WalkWindow(root, TryGetName(root), NativeHandleOf(root), DomState.None);
             }
 
             foreach (var w in targets)
@@ -380,34 +414,7 @@ public sealed class UIAutomationService : IUIAutomationService
                         if (document is null) dom = DomState.NoPage;
                         else { root = document; dom = DomState.Page; }
                     }
-                    var entries = traverser.Walk(root, title, budget);
-
-                    // E-5: UI Automation nests an OWNED top-level window (a dialog, an owned popup)
-                    // under its owner, so the walk above saw it clipped to the owner's rectangle
-                    // and under the owner's title — and not at all where it lies outside. For an
-                    // observation each one is lifted out and walked as the window it is.
-                    var owned = request.IncludePopups && request.Scope != SnapshotScope.Desktop && dom == DomState.None ? OwnedWindowsUnder(root, w.Hwnd) : [];
-                    if (owned.Count > 0) entries = WithoutSubtreesOf(entries, owned);
-                    perWindow.Add((title, entries, dom));
-
-                    foreach (var (ownedRoot, ownedHwnd) in owned)
-                    {
-                        if (budget.Truncated) break;
-                        if (!walkedHandles.Add(ownedHwnd)) continue;
-                        try
-                        {
-                            var listedTitle = windows.FirstOrDefault(x => x.Hwnd == ownedHwnd)?.Title;
-                            var name = string.IsNullOrEmpty(listedTitle) ? TryGetName(ownedRoot) : listedTitle;
-                            var label = name.Length > 0 ? name : "popup";
-                            var ownedEntries = traverser.Walk(ownedRoot, label, budget);
-                            // One nested deeper is walked in its own turn, not inside this one.
-                            perWindow.Add((label, WithoutSubtreesOf(ownedEntries, owned.Where(o => o.Hwnd != ownedHwnd).ToList()), DomState.None));
-                        }
-                        catch (Exception ex) when (ex is not OperationCanceledException)
-                        {
-                            LogSkipped("an owned window", ex);
-                        }
-                    }
+                    WalkWindow(root, title, w.Hwnd, dom);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -592,38 +599,6 @@ public sealed class UIAutomationService : IUIAutomationService
             result.AddRange(children);
         }
         return result.ToArray();
-    }
-
-    /// <summary>
-    /// E-5: a walk's rows without the subtrees rooted at the windows in <paramref name="owned"/>.
-    /// The rows are in pre-order, so a subtree is the run that follows its root; the rows that
-    /// remain keep their order and their parent links.
-    /// </summary>
-    private static IReadOnlyList<UiWalkEntry> WithoutSubtreesOf(IReadOnlyList<UiWalkEntry> entries,
-        IReadOnlyCollection<(AutomationElement Root, long Hwnd)> owned)
-    {
-        if (owned.Count == 0 || entries.Count == 0) return entries;
-        var handles = owned.Select(o => o.Hwnd).ToHashSet();
-        // A handle read is a cross-process call: only rows of a type an owned window has are asked.
-        var types = owned.Select(o => TryGetControlType(o.Root)).ToHashSet();
-
-        var newIndex = new int[entries.Count];   // -1 = dropped
-        var kept = new List<UiWalkEntry>(entries.Count);
-        for (int i = 0; i < entries.Count; i++)
-        {
-            var entry = entries[i];
-            bool underDropped = entry.ParentIndex >= 0 && newIndex[entry.ParentIndex] < 0;
-            bool isOwnedRoot = i > 0 && types.Contains(entry.Node.ControlType)
-                               && handles.Contains(NativeHandleOf(entry.Element));
-            if (underDropped || isOwnedRoot)
-            {
-                newIndex[i] = -1;
-                continue;
-            }
-            newIndex[i] = kept.Count;
-            kept.Add(entry.ParentIndex >= 0 ? entry with { ParentIndex = newIndex[entry.ParentIndex] } : entry);
-        }
-        return kept.Count == entries.Count ? entries : kept;
     }
 
     /// <summary>E-5: a stand-in inventory row for a window the inventory leaves out (untitled, a tool window, a popup).</summary>
@@ -1346,6 +1321,12 @@ public sealed class UIAutomationService : IUIAutomationService
     /// several fake roots. Null (always, outside tests) means the live desktop.
     /// </summary>
     internal Func<AutomationElement[]>? DesktopWindows { get; set; }
+
+    /// <summary>
+    /// PR #43 Q2: the root a foreground snapshot walks when no inventory window is flagged active, so a
+    /// headless test can hand it a fake. Null (always, outside tests) means the live foreground root.
+    /// </summary>
+    internal Func<AutomationElement>? ForegroundRoot { get; set; }
 
     /// <summary>E-5: Win32 GetAncestor(GA_ROOT) — a handle's root window, which stops at an owned window. A seam for fake handles.</summary>
     internal Func<nint, nint> RootWindowOf { get; set; } = Win32RootWindow;

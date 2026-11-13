@@ -157,11 +157,13 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
        UiTraverser.Walk(root, title, budget) per window under one CacheRequest;
        a window whose walk throws is logged and skipped;
        IncludePopups (E-5 observations only, not scope=desktop):
-         per walked window (not a DOM page), OwnedWindowsUnder finds the owned
-         top-level windows UIA nests under it (own handle == its GA_ROOT);
-         WithoutSubtreesOf cuts them from the owner's rows and each is walked
-         as its own root right after the owner (inventory title, else UIA
-         name, else "popup"), never twice;
+         per walked window (WalkWindow; not a DOM page; the foreground
+         fallback too), OwnedWindowsUnder first finds the owned top-level
+         windows UIA nests under it (own handle == its GA_ROOT); the owner's
+         Walk(..., skipHandles) does not enter them, and each is walked as its
+         own root right after the owner (inventory title, else UIA name, else
+         "popup"), never twice — its elements charged to the budget once,
+         the owner's rows first;
          then every on-screen, unlisted, not-yet-walked top-level window of a
          walked process — an open menu, a dropdown, a tooltip — same budget
 

@@ -279,3 +279,172 @@ public sealed class ObserveWindowTimeoutTests : IDisposable
         _windows.Verify(w => w.ListAsync(It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 }
+
+/// <summary>
+/// PR #43 second review round. Q1: an owned window's elements are charged to the element budget
+/// ONCE. The owner's walk skips the owned subtrees (it does not descend into an element whose
+/// native handle is an owned window's), so they are neither visited nor charged there; each owned
+/// window is then walked as its own root. Truncation falls where that single pass puts it: the
+/// owner's own rows first (including those AFTER the owned window in document order), then the
+/// owned window's. <c>ElementCount</c> counts what the result holds. Without <c>IncludePopups</c>
+/// nothing changes and no handle is read during the walk for this purpose.
+/// Q2: the Foreground fallback (no inventory window flagged active: an untitled or tool window in
+/// front) gives its root the same owned-window treatment, through the <c>ForegroundRoot</c> seam.
+/// </summary>
+[Trait("Category", "Unit")]
+public sealed class UIAutomationSnapshotOwnedWindowBudgetTests : IDisposable
+{
+    private const int WindowType = 50032;
+    private const long Host = 0xAB10;
+    private const long Owned = 0xAC01;
+    private const long Palette = 0xAD00;
+
+    private static readonly MonitorInfo[] OneMonitor = [new(0, "Monitor0", 0, 0, 1920, 1080, true)];
+
+    private readonly FakeUiWindows _fakes = new();
+
+    public void Dispose() => _fakes.Dispose();
+
+    private AutomationElement Button(string name, (int X, int Y, int W, int H) bounds) => _fakes.Window(name, 0, bounds: bounds);
+
+    /// <summary>An owned dialog wholly inside its host, so today's owner walk visits and charges all of it.</summary>
+    private AutomationElement Dialog(params AutomationElement[] buttons) =>
+        _fakes.Window("Owned dialog", Owned, controlType: WindowType, bounds: (150, 150, 200, 120), children: buttons);
+
+    private AutomationElement HostWith(params AutomationElement[] children) =>
+        _fakes.Window("Host", Host, controlType: WindowType, bounds: (100, 100, 400, 300), children: children);
+
+    /// <summary>host, Host button 1, [dialog: Dialog button 1, Dialog button 2], Host button 2 - six elements.</summary>
+    private AutomationElement SixElementHost() => HostWith(
+        Button("Host button 1", (110, 110, 50, 20)),
+        Dialog(Button("Dialog button 1", (160, 160, 50, 20)), Button("Dialog button 2", (160, 200, 50, 20))),
+        Button("Host button 2", (110, 350, 50, 20)));
+
+    private UIAutomationService NewService(AutomationElement host, bool hostIsActive = true)
+    {
+        var windows = new Mock<IWindowService>();
+        windows.Setup(w => w.ListAsync(It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Window("Host", hwnd: Host, pid: 4242, isActive: hostIsActive)]);
+        windows.Setup(w => w.EnumerateMonitorsAsync(It.IsAny<CancellationToken>())).ReturnsAsync(OneMonitor);
+        var input = new Mock<IInputService>();
+        input.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new CursorPosition(10, 10));
+        var svc = new UIAutomationService(input.Object, windows.Object);
+        svc.ElementFromHandle = h => h == Host ? host : null;
+        svc.RootWindowOf = h => h;
+        svc.DesktopWindows = () => [];
+        return svc;
+    }
+
+    private static string[] Rows(SnapshotResult snap) => snap.Interactive.Select(e => $"{e.Window}: {e.Name}").ToArray();
+
+    private static int Nodes(ElementTree t) => 1 + t.Children.Sum(Nodes);
+
+    // ---- Q1: charged once --------------------------------------------------------------------------
+
+    [Fact]
+    public async Task An_exact_budget_holds_the_host_and_its_owned_dialog_with_nothing_truncated()
+    {
+        // host, host button, owned dialog, dialog button: four elements, a budget of four.
+        using var svc = NewService(HostWith(Button("Host button", (110, 110, 50, 20)), Dialog(Button("Dialog button", (160, 160, 50, 20)))));
+
+        var snap = await svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Window, MaxElements: 4, WindowHwnd: Host, IncludePopups: true));
+
+        Rows(snap).Should().Equal(["Host: Host button", "Owned dialog: Dialog button"]);
+        snap.Truncated.Should().BeFalse("every element fits: the dialog is charged once, not once inside its owner and again on its own");
+        snap.ElementCount.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task Element_count_is_what_the_result_holds_with_no_phantom_count_for_removed_rows()
+    {
+        using var svc = NewService(SixElementHost());
+
+        var snap = await svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Window, IncludeTree: true, WindowHwnd: Host, IncludePopups: true));
+
+        snap.Tree!.Children.Sum(Nodes).Should().Be(6, "precondition: host 3 + dialog 3");
+        snap.ElementCount.Should().Be(6, "the owned window's elements counted once");
+    }
+
+    [Theory]
+    [InlineData(3, new[] { "Host: Host button 1", "Host: Host button 2" })]
+    [InlineData(4, new[] { "Host: Host button 1", "Host: Host button 2" })]
+    [InlineData(5, new[] { "Host: Host button 1", "Host: Host button 2", "Owned dialog: Dialog button 1" })]
+    public async Task A_short_budget_truncates_where_one_pass_would_owner_first_and_keeps_the_owners_later_rows(int max, string[] rows)
+    {
+        // The owner's rows AFTER the dialog in document order (Host button 2) come before any of
+        // the dialog's: the dialog's first pass inside the owner used to spend the budget on them.
+        using var svc = NewService(SixElementHost());
+
+        var snap = await svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Window, MaxElements: max, WindowHwnd: Host, IncludePopups: true));
+
+        Rows(snap).Should().Equal(rows);
+        snap.Truncated.Should().BeTrue();
+        snap.ElementCount.Should().Be(max);
+    }
+
+    // ---- Q1 guards: without IncludePopups nothing changes ------------------------------------------
+
+    [Fact]
+    public async Task Without_popups_the_budget_falls_as_today_through_the_nested_dialog()
+    {
+        using var svc = NewService(SixElementHost());
+
+        var snap = await svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Window, MaxElements: 4, WindowHwnd: Host));
+
+        Rows(snap).Should().Equal(["Host: Host button 1", "Host: Dialog button 1"], "pre-order through the nested dialog, as the plain snapshot always walked");
+        snap.Truncated.Should().BeTrue();
+        snap.ElementCount.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task Without_popups_no_handle_is_read_during_the_walk()
+    {
+        using var svc = NewService(SixElementHost());
+
+        await svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Window, WindowHwnd: Host));
+
+        _fakes.HandleReads.Should().Be(0, "the skip set exists only for an observation; a handle read is a cross-process call");
+    }
+
+    // ---- Q2: the foreground fallback -----------------------------------------------------------------
+
+    /// <summary>An untitled tool palette in front (no inventory row is active) with an owned dialog that reaches outside it.</summary>
+    private AutomationElement PaletteWithDialog() => _fakes.Window("Tool palette", Palette, controlType: WindowType,
+        bounds: (100, 100, 400, 300),
+        children:
+        [
+            Button("Palette button", (110, 110, 50, 20)),
+            _fakes.Window("Owned dialog", Owned, controlType: WindowType, bounds: (450, 150, 300, 300),
+                children: [Button("Owned inside button", (460, 160, 30, 20)), Button("Owned outside button", (600, 420, 100, 20))]),
+        ]);
+
+    [Fact]
+    public async Task Foreground_fallback_with_popups_lifts_the_owned_dialog_out_of_the_root_in_front()
+    {
+        var palette = PaletteWithDialog();
+        using var svc = NewService(SixElementHost(), hostIsActive: false);
+        svc.ForegroundRoot = () => palette;
+        svc.DesktopWindows = () => [_fakes.Window("Owned dialog reported again", Owned, bounds: (450, 150, 300, 300))];
+
+        var snap = await svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Foreground, IncludePopups: true));
+
+        Rows(snap).Should().Equal(
+            ["Tool palette: Palette button", "Owned dialog: Owned inside button", "Owned dialog: Owned outside button"],
+            "the same treatment as a listed window: lifted out, walked once as its own root, unclipped by the palette");
+    }
+
+    [Fact]
+    public async Task Foreground_fallback_without_popups_is_unchanged()
+    {
+        // Guard. Red until the ForegroundRoot seam is wired (the stub is not read yet, so today
+        // the real foreground window is walked); once wired, this is today's behaviour.
+        var palette = PaletteWithDialog();
+        using var svc = NewService(SixElementHost(), hostIsActive: false);
+        svc.ForegroundRoot = () => palette;
+
+        var snap = await svc.SnapshotAsync(new SnapshotRequest(SnapshotScope.Foreground));
+
+        Rows(snap).Should().Equal(["Tool palette: Palette button", "Tool palette: Owned inside button"],
+            "nested and clipped to the palette, under the palette's name");
+    }
+}

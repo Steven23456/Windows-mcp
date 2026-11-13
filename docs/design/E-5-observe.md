@@ -116,14 +116,28 @@ where it reaches outside. With `IncludePopups` and a scope other than `desktop` 
 window walked as a DOM page), each walked window is searched for them (`OwnedWindowsUnder`):
 descendants with a native handle that is its own Win32 root (`RootWindowOf`), whatever control
 type the provider gives it (a captioned dialog is a `Window`, a bare popup a `Pane`; an MDI child
-or an in-window XAML "window" is not one). Their subtrees are removed from the owner's rows
-(`WithoutSubtreesOf`, which keeps the remaining rows' order and parent links), and each is walked
-as an independent root — clipped to its own rectangle, labelled with its inventory title, else
-its UIA name, else `popup` — right after its owner and before the desktop-level popups, under the
-same budget. A handle already walked is not walked again, and a window nested in another owned one
-is walked in its own turn, not inside it. So an owned dialog lying beside or reaching outside its
-owner is observed whole, once, under its own title. (Review fix on PR #43.) The `snapshot` tool
-does not do this: in desktop scope it still lists an owned dialog's rows twice (D-43).
+or an in-window XAML "window" is not one). They are found **before** the owner is walked, and
+their handles go to `UiTraverser.Walk` as `skipHandles`: the owner's walk does not enter an element
+whose native handle (read from the cache request, so no extra provider call) is in the set. Each is
+then walked as an independent root — clipped to its own rectangle, labelled with its inventory
+title, else its UIA name, else `popup` — right after its owner and before the desktop-level
+popups, under the same budget, with the same set so a window nested in another owned one is walked
+in its own turn, not inside it. A handle already walked is not walked again. So an owned window's
+elements are visited, and **charged to the element budget, once**: `ElementCount` is what the
+result holds, and with a short budget the owner's rows come first, then the owned window's. An
+owned dialog lying beside or reaching outside its owner is observed whole, once, under its own
+title.
+
+The per-window walk is one local function, `WalkWindow`, used for every target window **and** for
+the foreground fallback (no inventory window flagged active — an untitled or tool window in
+front), so that window's owned dialogs are lifted out too; `ForegroundRoot` is the internal test
+seam for the fallback's root.
+
+History (review fixes on PR #43): the first fix walked the owner whole and then removed the owned
+subtrees from its rows (`WithoutSubtreesOf`, since deleted). That charged an owned window's
+elements to the budget twice, so with an exact budget a dialog's controls were dropped; the
+second fix replaced it with `skipHandles`. The `snapshot` tool does none of this: in desktop scope
+it still lists an owned dialog's rows twice (D-43).
 
 ## Failure rules
 
@@ -159,7 +173,7 @@ does not do this: in desktop scope it still lists an owned dialog's rows twice (
 | The seven schemas and descriptions carry the parameters and notes; `key`/`shortcut` advertise no `window` | `ObservationSurfaceTests` | Unit |
 | `GetElementWindowAsync`: own handle, ancestor handle, desktop root never the answer, unknown/expired/gone refused, a timeout propagates | `UIAutomationServiceElementWindowTests` | Unit |
 | `WindowHwnd`: the scope/title rules, an unlisted window walked, a closed one a `KeyNotFoundException`; `IncludePopups` order, filters and budget | `UIAutomationSnapshotWindowHandleTests`, `UIAutomationSnapshotPopupsTests` | Unit |
-| Owned windows lifted out of their owner and walked once under their own label; a by-handle timeout propagates and an observation turns it into the failure note, not the foreground fallback | `UIAutomationSnapshotOwnedWindowsTests`, `ObserveWindowTimeoutTests` | Unit |
+| Owned windows skipped by their owner's walk and walked once under their own label, the foreground fallback included; charged to the budget once, owner first under a short budget; a by-handle timeout propagates and an observation turns it into the failure note, not the foreground fallback | `UIAutomationSnapshotOwnedWindowsTests`, `UIAutomationSnapshotOwnedWindowBudgetTests`, `ObserveWindowTimeoutTests` | Unit |
 | On real windows with the real `WindowService`: an element in an owned dialog answers the dialog; an owned dialog observed whole under its own title (two owner/owned pairs); untitled, tool and popup windows observed by handle | `UIAutomationServiceElementWindowIntegrationTests`, `UIAutomationServiceObserveWindowsIntegrationTests` (`Fixtures/OwnedWindowFamily.cs`) | Integration |
 | The done-when: a real WinForms `ContextMenuStrip` (opened from code in a child PowerShell process, no input injected) is listed item by item by a by-handle snapshot with popups, and not without | `ObserveRealContextMenuIntegrationTests` | Integration |
 
