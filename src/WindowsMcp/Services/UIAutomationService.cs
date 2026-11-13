@@ -347,6 +347,9 @@ public sealed class UIAutomationService : IUIAutomationService
             // walk skips each one, and it is walked as the window it is: once, and charged to the
             // element budget once.
             bool liftOwned = request.IncludePopups && request.Scope != SnapshotScope.Desktop;
+            // Which entries of perWindow are popups (an owned window lifted out of its owner, or a
+            // desktop-level popup) rather than a window the caller asked for.
+            var popupWindows = new HashSet<int>();
             // E-5: an observation's caller is told about a hung provider. A snapshot that quietly
             // skipped the observed window would come back under a header saying it was observed.
             bool observing = request.IncludePopups;
@@ -371,6 +374,7 @@ public sealed class UIAutomationService : IUIAutomationService
                         var label = name.Length > 0 ? name : "popup";
                         // One nested deeper is walked in its own turn, not inside this one.
                         perWindow.Add((label, traverser.Walk(ownedRoot, label, budget, ownedHandles, timeoutsPropagate: observing), DomState.None));
+                        popupWindows.Add(perWindow.Count - 1);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException && !(observing && ex is TimeoutException))
                     {
@@ -493,6 +497,7 @@ public sealed class UIAutomationService : IUIAutomationService
                         var label = name.Length > 0 ? name : "popup";
                         if (hwnd != 0) walkedHandles.Add(hwnd);
                         perWindow.Add((label, traverser.Walk(popup, label, budget, timeoutsPropagate: true), DomState.None));
+                        popupWindows.Add(perWindow.Count - 1);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException and not TimeoutException)
                     {
@@ -507,13 +512,19 @@ public sealed class UIAutomationService : IUIAutomationService
             var scrollable = new List<SnapshotScrollable>();
             var trees = new List<ElementTree>();
             var pages = new List<SnapshotPage>();
+            var popupText = new List<string>();
             // No lock around the whole block: every snapshot runs on the one STA thread, so two
             // cannot interleave, and the cache guards its own state (D-11).
             {
                 _cache.EvictSnapshot();
 
-                foreach (var (title, entries, dom) in perWindow)
+                for (int windowIndex = 0; windowIndex < perWindow.Count; windowIndex++)
                 {
+                    var (title, entries, dom) = perWindow[windowIndex];
+                    bool isPopup = popupWindows.Contains(windowIndex);
+                    string? popupRootName = null;
+                    var popupNames = new List<string>();
+
                     var ids = new string[entries.Count];
                     for (int i = 0; i < entries.Count; i++)
                     {
@@ -524,7 +535,20 @@ public sealed class UIAutomationService : IUIAutomationService
                             element = null;
                         if (element is not null) interactive.Add(element);
                         if (region is not null) scrollable.Add(region);
+
+                        // E-5: what a popup SAYS. A tooltip, or a dialog's "Save changes?", is plain
+                        // text: it is not a control, so it is not a row, and without this an
+                        // observation of it would come back empty.
+                        if (isPopup && element is null && entries[i].Node.Name.Length > 0)
+                        {
+                            if (i == 0) popupRootName = entries[i].Node.Name;
+                            else if (!popupNames.Contains(entries[i].Node.Name)) popupNames.Add(entries[i].Node.Name);
+                        }
                     }
+                    // The popup's own name only when nothing inside it spoke: a tooltip is its name,
+                    // but a dialog's title is already its label.
+                    if (popupNames.Count == 0 && popupRootName is not null) popupNames.Add(popupRootName);
+                    foreach (var name in popupNames) popupText.Add($"{title}: {OneLineClipped(name, MaxPopupTextLength)}");
                     if (request.IncludeTree && entries.Count > 0)
                         trees.Add(ToTree(entries, ids));
                     if (dom == DomState.Page && entries.Count > 0)
@@ -537,9 +561,15 @@ public sealed class UIAutomationService : IUIAutomationService
             ElementTree? tree = request.IncludeTree
                 ? new ElementTree(new ElementInfo("desktop", "", "Desktop", true, false, null, null, null, null), trees.ToArray())
                 : null;
+            if (popupText.Count > MaxPopupTextLines)
+            {
+                popupText.RemoveRange(MaxPopupTextLines - 1, popupText.Count - (MaxPopupTextLines - 1));
+                popupText.Add("... (more popup text not shown)");
+            }
             return (Interactive: interactive.ToArray(), Scrollable: scrollable.ToArray(), Tree: tree,
                     Count: budget.Count, budget.Truncated,
-                    Pages: request.UseDom ? pages.ToArray() : null);
+                    Pages: request.UseDom ? pages.ToArray() : null,
+                    PopupText: popupText.Count > 0 ? popupText.ToArray() : null);
         }, ct);
 
         StageTiming[]? stages = null;
@@ -563,7 +593,21 @@ public sealed class UIAutomationService : IUIAutomationService
             ElementCount: walked.Count,
             CaptureMs: sw.ElapsedMilliseconds,
             Stages: stages,
-            Pages: walked.Pages);
+            Pages: walked.Pages,
+            PopupText: walked.PopupText);
+    }
+
+    /// <summary>E-5: how much of one popup text an observation quotes, and how many lines of it in all.</summary>
+    private const int MaxPopupTextLength = 200;
+    private const int MaxPopupTextLines = 50;
+
+    /// <summary>One line of at most <paramref name="max"/> characters: line breaks become spaces, the rest is "...".</summary>
+    private static string OneLineClipped(string text, int max)
+    {
+        var line = string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        if (line.Length <= max) return line;
+        int cut = char.IsHighSurrogate(line[max - 1]) ? max - 1 : max;
+        return line[..cut] + "...";
     }
 
     /// <summary>

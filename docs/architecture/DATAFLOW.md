@@ -346,6 +346,10 @@ work is the parameter check and the result is the body's string untouched.
      snapshots are no longer valid)[; truncated at the element limit, so call snapshot
      with scope, window or max_elements for the rest]:
      <SnapshotRenderer.Render(snapshot)>
+     [<blank line>
+      Popup text (not controls, no ids):          — only when snapshot.PopupText has lines:
+      <popup label>: <text>                         named non-interactive nodes of owned windows
+      ...]                                          and desktop popups, ≤ 50 lines, ≤ 200 chars each
 
    Step 5 throws (not a cancellation) →
      <action result>

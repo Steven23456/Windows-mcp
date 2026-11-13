@@ -17,8 +17,9 @@ internal sealed class Observation
     internal const string ToolNote =
         " observe: none (default) returns only the result described above. foreground, or window (the top-level window " +
         "the target element belongs to; needs an element_id), waits settle_ms after the action and then appends a blank " +
-        "line, a header and a fresh snapshot of that window, with any menu, dropdown or other popup its process has open, " +
-        "to the result; that snapshot replaces the element ids (el_N) of every earlier snapshot. window is resolved before " +
+        "line, a header and a fresh snapshot of that window, with any menu, dropdown, dialog or other popup its process has " +
+        "open, to the result, then a 'Popup text' section with what those popups say (a tooltip, a dialog's message: text, " +
+        "not controls); that snapshot replaces the element ids (el_N) of every earlier snapshot. window is resolved before " +
         "the action: when the element's window cannot be determined, or its id is unknown, expired or gone, the call is " +
         "refused without acting. If the window closed because of the action, the foreground window is observed instead and " +
         "the header says so. A snapshot that fails afterwards is reported as a note after the result, not an error: the " +
@@ -27,8 +28,9 @@ internal sealed class Observation
     /// <summary>The same for key and shortcut, which have no target element.</summary>
     internal const string ToolNoteNoElement =
         " observe: none (default) returns only the result described above. foreground waits settle_ms after the action " +
-        "and then appends a blank line, a header and a fresh snapshot of the foreground window, with any menu, dropdown " +
-        "or other popup its process has open, to the result; that snapshot replaces the element ids (el_N) of every " +
+        "and then appends a blank line, a header and a fresh snapshot of the foreground window, with any menu, dropdown, " +
+        "dialog or other popup its process has open, to the result, then a 'Popup text' section with what those popups say " +
+        "(a tooltip, a dialog's message: text, not controls); that snapshot replaces the element ids (el_N) of every " +
         "earlier snapshot. observe:window is refused here, because this call has no target element. A snapshot that " +
         "fails afterwards is reported as a note after the result, not an error: the action was still performed.";
 
@@ -138,6 +140,10 @@ internal sealed class Observation
         // The renderer's own truncation footer names snapshot's parameters; say whose they are.
         if (snapshot.Truncated)
             header += "; truncated at the element limit, so call snapshot with scope, window or max_elements for the rest";
-        return result + "\n\n" + header + ":\n" + SnapshotRenderer.Render(snapshot);
+        var text = result + "\n\n" + header + ":\n" + SnapshotRenderer.Render(snapshot);
+        // What the popups say: a tooltip, or a dialog's question, is text, not a row above.
+        if (snapshot.PopupText is { Length: > 0 } popupText)
+            text += "\n\nPopup text (not controls, no ids):\n" + string.Join('\n', popupText);
+        return text;
     }
 }

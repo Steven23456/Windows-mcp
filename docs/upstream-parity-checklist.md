@@ -2580,7 +2580,12 @@ budget the owner's rows come first) — so an owned dialog reaching outside its 
 whole, once, under its own title. The foreground fallback (an untitled or tool window in front,
 which the inventory does not flag active) goes through the same per-window walk (`WalkWindow`);
 in an observation its root ladder (`GetForegroundRoot(timeoutsPropagate: true)`) stops at a
-timeout instead of falling to the focused element or the desktop root. A plain `snapshot` there
+timeout instead of falling to the focused element or the desktop root. Beyond the sketch, an
+observation also returns what its popups **say**: `SnapshotResult.PopupText` (null for every other
+snapshot), rendered after the snapshot as `Popup text (not controls, no ids):` — each walked node of a popup that is not an interactive row and has a name gives one line `<popup label>: <name>`, in walk order (owned windows first), each name once per popup, line breaks collapsed, clipped to 200 characters; the popup's own root name counts only when nothing inside it spoke; at most 50 lines, the 50th then `... (more popup text not shown)` —
+covering every owned window lifted out and every desktop-level popup, never the target window or
+the foreground-fallback root; so a hovered control's tooltip and a message box's question come
+back (`ObservePopupTextIntegrationTests`, on a real comctl32 tracking tooltip). A plain `snapshot` there
 reads neither the root's native handle nor its process id (the bookkeeping and owned-window
 lookup run only in an observation), so a provider that times out on them cannot fail it. (4) Order: observe and `settle_ms` are
 validated, and the window looked up, before the tool's own argument checks and before any input;
@@ -2609,7 +2614,8 @@ the calls that replace snapshot ids. Tests: `ObservationToolsTests`, `Observatio
 `UIAutomationSnapshotPopupsTests`, `UIAutomationSnapshotOwnedWindowsTests`,
 `UIAutomationSnapshotOwnedWindowBudgetTests`, `ObserveWindowTimeoutTests` and
 `UIAutomationSnapshotObservationTimeoutTests`, `UiTraverserTimeoutTests`,
-`UIAutomationSnapshotObservationLabelTests` and rows in `UiRootsTests` (Unit), and on real windows with the real `WindowService`
+`UIAutomationSnapshotObservationLabelTests`, `UIAutomationSnapshotPopupTextTests`,
+`ObservePopupTextTests` and rows in `UiRootsTests` (Unit), and on real windows with the real `WindowService`
 (Integration): `UIAutomationServiceElementWindowIntegrationTests`,
 `UIAutomationServiceObserveWindowsIntegrationTests` (`Fixtures/OwnedWindowFamily.cs`: two
 owner/owned-dialog pairs, a window owned by an owned window, a hidden owned window, untitled, tool

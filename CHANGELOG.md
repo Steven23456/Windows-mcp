@@ -14,6 +14,18 @@
     said "a second block"; appending to the one string was chosen deliberately because these tools
     return a string that existing clients and tests read.) A truncated observation says so in its
     header and points at `snapshot` with scope, window or `max_elements`.
+  - **What popups say.** After the snapshot the observation appends, when there is any, a blank
+    line, `Popup text (not controls, no ids):` and one `<popup label>: <text>` line per named
+    non-interactive element of each window walked as a popup — an owned window lifted out of its
+    owner, or a desktop-level popup; never the target window or the foreground-fallback root — in
+    walk order (owned windows first), each text once per popup, line breaks collapsed, clipped to
+    200 characters, at most 50 lines (the 50th then `... (more popup text not shown)`). A popup's
+    own name counts only when nothing inside it spoke, so a tooltip is its text and a dialog
+    titled "Save As" does not add `Save As: Save As`. So hovering a control (`click` with
+    `clicks:0`) and observing returns its tooltip, and observing the window that opened a message
+    box returns its question. The text was already walked; before, it had no row (text is not a
+    control) and was dropped. New `SnapshotResult.PopupText` (`string[]?`, omitted from JSON when
+    null; null for every non-observation snapshot, so `snapshot`'s JSON and text are unchanged).
   - It is a real snapshot: it **replaces every earlier snapshot's element ids**, as `snapshot`
     does, and it walks the server's default element budget. It also walks the **popups of the
     observed window's process** — an open menu, a dropdown, a tooltip: untitled top-level windows
@@ -88,14 +100,17 @@
   `UIAutomationSnapshotWindowHandleTests`, `UIAutomationSnapshotPopupsTests`,
   `UIAutomationSnapshotOwnedWindowsTests`, `UIAutomationSnapshotOwnedWindowBudgetTests`,
   `ObserveWindowTimeoutTests`, `UIAutomationSnapshotObservationTimeoutTests`,
-  `UiTraverserTimeoutTests`, `UIAutomationSnapshotObservationLabelTests` and rows in
-  `UiRootsTests` (Unit), and
+  `UiTraverserTimeoutTests`, `UIAutomationSnapshotObservationLabelTests`,
+  `UIAutomationSnapshotPopupTextTests`, `ObservePopupTextTests` and rows in `UiRootsTests` (Unit),
+  and
   `UIAutomationServiceElementWindowIntegrationTests`,
   `UIAutomationServiceObserveWindowsIntegrationTests` (real owner/owned-dialog pairs, a window
   owned by an owned window, a hidden owned window, untitled, tool and popup windows in
   `Fixtures/OwnedWindowFamily.cs`, the real `WindowService` and the real owner relation) and
   `ObserveRealContextMenuIntegrationTests` (a real WinForms `ContextMenuStrip` in a child
-  PowerShell process, opened from code) as Integration. Not verified live: the `UIAutomation`
+  PowerShell process, opened from code) and `ObservePopupTextIntegrationTests` (a real comctl32
+  tracking tooltip owned by its host, shown with no input, in `Fixtures/OwnedTrackingTooltip.cs`)
+  as Integration. Not verified live: the `UIAutomation`
   category and a third-party app were not run. Gaps found and not fixed are parity D-39 … D-47.
 - **`find_element` filters by automation id, control type and class, searches inside an element,
   and pages** (E-4). Six parameters on an existing tool, so an unnamed icon button is one call by

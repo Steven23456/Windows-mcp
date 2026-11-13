@@ -267,7 +267,9 @@ up before the action; it needs an `element_id` (`drag`: the destination element,
 origin), so `key`, `shortcut` and coordinate targets refuse it, and if the action closed that
 window the foreground window is observed instead. The observation is a real snapshot: it
 replaces the `el_N` ids of every earlier one. A snapshot that fails afterwards does not fail the
-action — the result ends with a note saying the action was performed and must not be repeated.
+action — the result ends with a note saying the action was performed and must not be repeated. When a popup says something — a tooltip, a message box's question — the
+observation ends with a `Popup text (not controls, no ids):` section of `<popup label>: <text>`
+lines, so `click(clicks: 0, observe: "foreground")` on a control returns its tooltip.
 
 `multi_select(targets_json, ctrl?)` and `multi_edit(entries_json)` do a whole batch in one call.
 `targets_json` is a JSON array of `{x, y}` points or `{element_id}` objects (a JSON string holding

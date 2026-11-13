@@ -111,7 +111,7 @@ public sealed class ObservationToolsTests
             interactive: [Element(id: "el_40", window: "Fg App - Notepad", controlType: "MenuItem", name: "File", action: "click")],
             elementCount: 9);
 
-        public SnapshotResult WindowSnap { get; } = Result(
+        public SnapshotResult WindowSnap { get; set; } = Result(
             windows: [Window("Save As", hwnd: ElementWindow, isActive: true)],
             active: Window("Save As", hwnd: ElementWindow, isActive: true),
             interactive: [Element(id: "el_41", window: "Save As", controlType: "Button", name: "OK", action: "click")],
@@ -1134,6 +1134,55 @@ public sealed class ObservationToolsTests
             "{\"action\":\"hover\",\"x\":120,\"y\":210,\"button\":\"left\",\"clicks\":0,\"elementId\":\"el_12\",\"name\":\"Save\",\"modifiers\":null}\n\n");
         text.Should().EndWith(SnapshotRenderer.Render(rig.ForegroundSnap));
     }
+
+    // ============================================================================================
+    // PR #43 Z3: popup text after the rendered snapshot
+    // ============================================================================================
+
+    private const string PopupTextHeading = "Popup text (not controls, no ids):";
+
+    [Theory]
+    [InlineData("foreground")]
+    [InlineData("window")]
+    public async Task Z3_popup_text_follows_the_rendered_snapshot_after_a_blank_line_and_its_heading(string observe)
+    {
+        var rig = new Rig();
+        rig.ForegroundSnap = rig.ForegroundSnap with { PopupText = ["popup: Saved to Documents", "Find: 3 matches"] };
+        rig.WindowSnap = rig.WindowSnap with { PopupText = ["popup: Saved to Documents", "Find: 3 matches"] };
+        var snap = observe == "foreground" ? rig.ForegroundSnap : rig.WindowSnap;
+
+        var text = await rig.Act("click", observe);
+
+        text.Should().EndWith(SnapshotRenderer.Render(snap) + "\n\n" + PopupTextHeading + "\npopup: Saved to Documents\nFind: 3 matches",
+            "the rendered snapshot unchanged, then a blank line, the heading and one line per entry, LF-separated");
+        text.Should().StartWith(Baseline["click"] + "\n\n");
+    }
+
+    [Fact]
+    public async Task Z3_popup_text_follows_the_foreground_fallback_after_the_window_closed_too()
+    {
+        var rig = new Rig();
+        rig.SnapshotFailure[SnapshotScope.Window] = new KeyNotFoundException("window closed (wmcp-e5)");
+        rig.ForegroundSnap = rig.ForegroundSnap with { PopupText = ["popup: Saved"] };
+
+        var text = await rig.Act("click", "window");
+
+        text.Split('\n')[2].Should().ContainEquivalentOf("gone");
+        text.Should().EndWith(SnapshotRenderer.Render(rig.ForegroundSnap) + "\n\n" + PopupTextHeading + "\npopup: Saved");
+    }
+
+    [Fact]
+    public async Task Z3_guard_an_empty_popup_text_appends_nothing()
+    {
+        var rig = new Rig();
+        rig.ForegroundSnap = rig.ForegroundSnap with { PopupText = [] };
+
+        var text = await rig.Act("click", "foreground");
+
+        text.Should().EndWith(SnapshotRenderer.Render(rig.ForegroundSnap)).And.NotContain(PopupTextHeading);
+    }
+
+    // The null case is every exact-text row above (O5, W3, W4): PopupText defaults to null there.
 
     // ============================================================================================
     // The Delay seam's default

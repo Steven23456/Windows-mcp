@@ -27,6 +27,9 @@ reading what it opened — is the one where the extra round trip is always neede
 
   Observed the foreground window after 250 ms (a new snapshot: el_N ids from earlier snapshots are no longer valid):
   <SnapshotRenderer.Render(snapshot)>
+
+  Popup text (not controls, no ids):          <- only when a popup said something
+  <popup label>: <text>
   ```
 
   For `window` the header reads `Observed the element's window after N ms (…)`; when that window
@@ -151,6 +154,19 @@ window on the one UI Automation thread whatever the element limit — and now th
 asked natively; `RootWindowOf` is left to `GetElementWindowAsync`. The `snapshot` tool does none of this: in desktop scope
 it still lists an owned dialog's rows twice (D-43).
 
+### Popup text
+
+A tooltip, a message box's question or a dialog's explanatory line is plain text: the snapshot has
+no row for it (rows are controls), so before this an observation walked the text and dropped it,
+and the one thing the caller wanted — what the popup said — was missing. With `IncludePopups`,
+`SnapshotResult.PopupText` collects it for every window walked **as a popup** (an owned window
+lifted out of its owner, a desktop-level popup — never the target window or the
+foreground-fallback root, whose labels the caller reaches with `find_element kind:text`): each walked node of a popup that is not an interactive row and has a name gives one line `<popup label>: <name>`, in walk order (owned windows first), each name once per popup, line breaks collapsed, clipped to 200 characters; the popup's own root name counts only when nothing inside it spoke; at most 50 lines, the 50th then `... (more popup text not shown)`.
+`Observation` appends it after the rendered snapshot as `Popup text (not controls, no ids):` and the
+lines, or nothing. It is null for every non-observation snapshot, so `snapshot`'s JSON and text
+are unchanged. Hover-and-observe (`click` with `clicks:0`, `observe`) therefore returns a
+tooltip, and observing the window that opened a message box returns its question.
+
 ## Failure rules
 
 - **Refusals come first.** `observe` and `settle_ms` are parsed and range-checked, and the window
@@ -217,6 +233,8 @@ it still lists an owned dialog's rows twice (D-43).
 | Owned windows skipped by their owner's walk and walked once under their own label, the foreground fallback included; charged to the budget once, owner first under a short budget; owned windows from a fake owner relation (`OwnedWindowsOf`); a by-handle timeout, and with `IncludePopups` a timeout in discovery, bookkeeping or the walk, propagates and an observation turns it into the failure note, not the foreground fallback | `UIAutomationSnapshotOwnedWindowsTests`, `UIAutomationSnapshotOwnedWindowBudgetTests`, `ObserveWindowTimeoutTests`, `UIAutomationSnapshotObservationTimeoutTests` | Unit |
 | Strict walk: a timeout from the cache fetch, any property or pattern read, the skip-set handle read or the children read propagates with `timeoutsPropagate`, and is swallowed without it; the root ladder stops at a timeout only in strict mode | `UiTraverserTimeoutTests`, `UiRootsTests` | Unit |
 | A window label read times out → propagates in an observation, "" without one; a plain foreground-fallback snapshot reads no root handle or process id | `UIAutomationSnapshotObservationLabelTests` | Unit |
+| Popup text: which windows and nodes contribute, order, once per popup, collapse and clip, the root-name rule, the 50-line cap, null outside observations; the appended section | `UIAutomationSnapshotPopupTextTests`, `ObservePopupTextTests`, Z3 rows in `ObservationToolsTests` | Unit |
+| A real comctl32 tracking tooltip owned by its host, shown with no input, comes back as popup text | `ObservePopupTextIntegrationTests` (`Fixtures/OwnedTrackingTooltip.cs`) | Integration |
 | On real windows with the real `WindowService`: an element in an owned dialog answers the dialog; an owned dialog observed whole under its own title (two owner/owned pairs), a window owned by an owned window, a hidden owned window left out — through the real owner relation; untitled, tool and popup windows observed by handle | `UIAutomationServiceElementWindowIntegrationTests`, `UIAutomationServiceObserveWindowsIntegrationTests` (`Fixtures/OwnedWindowFamily.cs`) | Integration |
 | The done-when: a real WinForms `ContextMenuStrip` (opened from code in a child PowerShell process, no input injected) is listed item by item by a by-handle snapshot with popups, and not without | `ObserveRealContextMenuIntegrationTests` | Integration |
 

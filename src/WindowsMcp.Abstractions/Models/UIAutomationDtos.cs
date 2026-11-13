@@ -240,7 +240,11 @@ public record SnapshotResult(
     int ElementCount,
     long CaptureMs,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] StageTiming[]? Stages = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SnapshotPage[]? Pages = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] SnapshotPage[]? Pages = null,
+    // E-5: for an observation only — what the popups it walked SAY: the plain text of each owned
+    // window lifted out of its owner and each desktop-level popup, as "<label>: <text>" lines.
+    // Text is not a control, so it has no row and no id; null for every other snapshot.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[]? PopupText = null);
 
 // ---- B-6 wait_for conditions --------------------------------------------------------------
 
