@@ -56,12 +56,18 @@
     window no longer falls through to the focused element or the desktop root), finding its owned
     windows, the name read that labels an unlisted, owned, fallback or popup window, any read in
     the walk (the subtree cache fetch, every node property and pattern read, the children read),
-    or the popup pass (listing the desktop's windows, reading or walking a
-    popup) — ends in that same failure note rather than a snapshot missing rows. Other failures
+    or the popup pass (listing the desktop's windows; for one of the observed process's own
+    popups, its offscreen flag, bounds, label and walk) — ends in that same failure note rather
+    than a snapshot missing rows. The one exception: a desktop window that is only a popup
+    *candidate* — until its native handle and process id have answered and show it belongs to a
+    walked process — is skipped and logged when either read times out, so a hung window of an
+    unrelated application cannot fail the observation of a healthy one (parity D-47). Other failures
     there keep their behaviour (a popup that cannot
     be read is skipped and logged; a desktop list that cannot be read costs the popups, not the
     snapshot), and the plain `snapshot` tool still logs and skips a window that times out.
-  New `IUIAutomationService.GetElementWindowAsync(elementId, ct)` → the window handle;
+  New `IUIAutomationService.GetElementWindowAsync(elementId, ct)` → the window handle (its
+  liveness check is `ClosedNotHung`, so a timeout on that pre-action read refuses `observe:window`
+  before any input rather than reading as a destroyed element);
   `SnapshotRequest` gains `WindowHwnd` (with `Scope == Window`, one window by handle instead of a
   title — refused with a title or another scope; a handle that no longer names a window is a
   `KeyNotFoundException`, a timeout resolving or probing it propagates as a `TimeoutException`)
@@ -90,7 +96,7 @@
   `Fixtures/OwnedWindowFamily.cs`, the real `WindowService` and the real owner relation) and
   `ObserveRealContextMenuIntegrationTests` (a real WinForms `ContextMenuStrip` in a child
   PowerShell process, opened from code) as Integration. Not verified live: the `UIAutomation`
-  category and a third-party app were not run. Gaps found and not fixed are parity D-39 … D-46.
+  category and a third-party app were not run. Gaps found and not fixed are parity D-39 … D-47.
 - **`find_element` filters by automation id, control type and class, searches inside an element,
   and pages** (E-4). Six parameters on an existing tool, so an unnamed icon button is one call by
   a stable property, and a dialog the caller already holds is searched on its own:

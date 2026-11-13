@@ -175,7 +175,10 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
          name read of an unlisted/owned/fallback/popup window; discovery;
          bookkeeping; every read in Walk(..., timeoutsPropagate): cache
          fetch, property/pattern reads, children; the popup pass: desktop
-         list, popup filter read, popup walk); without IncludePopups a
+         list, and for the observed process's own popup its offscreen flag,
+         bounds, label and walk) — EXCEPT a popup candidate: a timeout on a
+         desktop window's handle or process-id read, before it is known to
+         belong to a walked process, skips it (logged); without IncludePopups a
          timeout is a logged skip and the walk swallows it, as before (D-5),
          and the foreground fallback reads no handle or process id of its root
 
@@ -319,6 +322,7 @@ work is the parameter check and the result is the body's string untouched.
              → RootWindowOf(handle) = GetAncestor(GA_ROOT)        (an owned dialog
                                                                     answers itself)
            unknown / expired / gone / undeterminable → refused, nothing sent
+           liveness = ClosedNotHung: a timeout on it propagates, also before any input
          → hwnd
 
 3. action()  = ClickCore(...)   — the tool's own argument checks, target resolution, input

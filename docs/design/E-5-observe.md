@@ -74,8 +74,9 @@ dialog the element is in, and a destroyed element cannot say which window it was
   element_id. Use observe:foreground.`
 - An unknown or expired id gets the element cache's refusal, a destroyed element `UiRefusals.Gone`,
   and an element whose window cannot be determined `The window that <element> (el_N) belongs to
-  could not be determined. Use observe:foreground.` — all before any input. A timeout in the walk
-  (a hung provider) propagates.
+  could not be determined. Use observe:foreground.` — all before any input. The liveness check is
+  `ClosedNotHung`, so a timeout on it — like a timeout in the walk (a hung provider) — propagates
+  and refuses `observe:window` before any input, rather than reading as a destroyed element.
 
 The snapshot then takes that one window **by handle**: `SnapshotRequest.WindowHwnd` (only with
 `Scope == Window`, never with a title). The handle need not be in the window inventory, which
@@ -173,7 +174,14 @@ it still lists an owned dialog's rows twice (D-43).
   property and pattern read through `Try(...)`, `ReadBounds` and around `ReadNode`, the skip-set
   handle read, and the children read; a `[ThreadStatic]` flag carries the mode to the static read
   helpers for the length of the walk), and the desktop-level popup pass — listing the desktop's
-  top-level windows, reading a popup in the filter, and the popup's own walk. The observation
+  top-level windows and, for one of the observed process's own popups, its offscreen flag, bounds,
+  label and walk. **The one exception is a popup candidate:** until a desktop window's native
+  handle and process id have both answered and show it belongs to a walked process, a timeout on
+  either read skips that window (logged as a skipped popup window) and the scan goes on. Why: the
+  popup pass reads every top-level window on the desktop, most of them other applications', and a
+  hung window of an unrelated application must not fail the observation of a healthy one — it
+  could not have held the rows the caller asked for. (Decided with the user after review; D-47
+  would remove the reads altogether.) The observation
   then returns the failure note instead of a snapshot under an "Observed …" header with rows
   missing. There is no property-read exception in an observation. Non-timeout failures keep their
   behaviour: a window or popup that cannot be read is logged and skipped, and a desktop window
@@ -222,4 +230,5 @@ it still lists an owned dialog's rows twice (D-43).
   `max_elements`/`use_dom` on an observation), D-43 (an owned dialog listed twice by `snapshot` in
   desktop scope; observations no longer do it), D-44 (`FlashOverlayTests` outside the desktop collection), D-45 (the takeover hotkey does
   not interrupt an observation), D-46 (an owned window shown after the owner relation was
-  enumerated stays nested, clipped, in its owner's rows).
+  enumerated stays nested, clipped, in its owner's rows), D-47 (the popup pass reads every desktop
+  window's handle and process id through UI Automation instead of natively).

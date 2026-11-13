@@ -11,17 +11,17 @@ E-1, E-2, E-3, E-4 (with D-20) and E-5.
 SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
-This is the working list of everything upstream can do that this server cannot (plus forty-six
+This is the working list of everything upstream can do that this server cannot (plus forty-seven
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 and D-10/D-11
 logged 2026-11-10 — **all eleven are now fixed** — then D-12…D-18, logged 2026-11-11 by the
 D-10/D-11 review, D-19…D-22, logged 2026-11-12 during E-1, D-23…D-27, logged 2026-11-12
 during E-2, D-28…D-32, logged 2026-11-12 by the E-3 review, D-33…D-38, logged 2026-11-12
-during E-4, and D-39…D-46, logged 2026-11-12 during E-5, all still open except D-31, which E-3's
+during E-4, and D-39…D-47, logged 2026-11-12 during E-5, all still open except D-31, which E-3's
 review round fixed, and D-20, which E-4 fixed; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
 phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and phase 5 shipped A-14,
 A-12 phase 1, A-10 and A-5 phase 1 — so every section-A row is ticked, with only A-5's Firefox
 phase left open and A-12's phase 2 deliberately not planned; section B is ticked too, and
-C-5/C-6 close section C — section S, D-12…D-46 (less D-20 and D-31) and section E are the work that is left; section E
+C-5/C-6 close section C — section S, D-12…D-47 (less D-20 and D-31) and section E are the work that is left; section E
 is not upstream parity but an agent-efficiency backlog from a review of this server's own tools).
 Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
@@ -156,6 +156,7 @@ function names are the stable anchor.
 | D-44 | `FlashOverlayTests.A_visible_overlay_is_not_in_the_window_inventory` is outside the desktop test collection and can flake beside tests that open windows | P3 | S | — | ☐ |
 | D-45 | The takeover hotkey does not interrupt an observation's settle wait or snapshot | P3 | S | S-11, E-5, D-29 | ☐ |
 | D-46 | Owned-window discovery sees only windows visible when it enumerates: one shown later stays nested, clipped, in its owner's rows | P3 | S | E-5 | ☐ |
+| D-47 | The popup pass reads every desktop window's handle and process id through UI Automation; finding the observed process's popups natively would not touch unrelated applications | P3 | S | E-5 | ☐ |
 | E-1 | Server instructions in the MCP handshake | P1 | S | — | ☑ |
 | E-2 | `interact_element`: expand, collapse, set_value, scroll_into_view | P1 | S | D-10 | ☑ |
 | E-3 | `click` modifiers; `key` repeat and hold | P2 | S | — | ☑ |
@@ -171,7 +172,7 @@ function names are the stable anchor.
 **Suggested order.** **Defects D-1 … D-11 are done** (D-12 … D-18, logged 2026-11-11 by the
 D-10/D-11 review, D-19 … D-22, logged 2026-11-12 during E-1, D-23 … D-27, logged 2026-11-12
 during E-2, D-28 … D-32, logged 2026-11-12 by the E-3 review, D-33 … D-38, logged 2026-11-12
-during E-4, and D-39 … D-46, logged 2026-11-12 during E-5, are open — except D-31, fixed in E-3's
+during E-4, and D-39 … D-47, logged 2026-11-12 during E-5, are open — except D-31, fixed in E-3's
 review round, and D-20, fixed by E-4), and
 **so are sections
 A, B and C** (A-5's Firefox phase and
@@ -1427,6 +1428,31 @@ walked under its own title, and not twice.
 **Done when.** An owned window that appears during an observation is still observed as its own
 window, or the limitation is accepted with the reason recorded here.
 
+### D-47 — The popup pass reads unrelated applications through UI Automation  `P3 · S`
+- [ ] Not started
+
+**Found by the E-5 review (2026-11-13), read from the source.**
+
+**Ours today.** An observation's desktop-level popup pass enumerates the desktop's UIA children
+(`_automation.GetDesktop().FindAllChildren()`, or the `DesktopWindows` seam) and reads each one's
+`NativeWindowHandle` and `ProcessId` through UI Automation to find the observed process's unlisted
+popups — a cross-process call into every top-level window's provider, unrelated applications
+included. A hung one costs a UIA timeout per read; E-5 skips such a *candidate* (logged) instead of
+failing the observation, but still pays for asking it.
+
+**Sketch.** Find candidates natively, as owned windows already are: `EnumWindows` +
+`GetWindowThreadProcessId` (plus `IsWindowVisible` and the inventory/walked filters) picks the
+walked processes' unlisted top-level windows without touching any provider, and only those are
+resolved with `ElementFromHandle`. The candidate-timeout exception then has nothing left to cover.
+
+**Touches.** `Services/UIAutomationService.cs` (the popup pass in `SnapshotAsync`, a seam beside
+`OwnedWindowsOf`), `NativeMethods.txt` (`GetWindowThreadProcessId`).
+
+**Tests.** A fake native window list with a window of another process whose provider would hang:
+it is never resolved or read; the observed process's popup is walked.
+
+**Done when.** An observation reads no UI Automation property of another application's window.
+
 ---
 
 ## A — Desktop state and screenshots
@@ -2526,7 +2552,8 @@ resolved **before** the action by the new `IUIAutomationService.GetElementWindow
 element's nearest native handle (itself, else an ancestor that is not the desktop root, at most
 200 levels) through Win32 `GetAncestor(GA_ROOT)` — UI Automation nests an owned dialog under its
 owner, so the top of the UIA tree would answer the wrong window; an unknown, expired or destroyed
-id, or an element with no determinable window, refuses the call with nothing sent. It needs an
+id, or an element with no determinable window, refuses the call with nothing sent; the liveness
+check is `ClosedNotHung`, so a timeout on it refuses too, as a timeout, not as a destroyed element. It needs an
 element target (`key`, `shortcut` and coordinate/cursor/focus targets refuse it; `drag` uses the
 destination element, else the origin). (2) `SnapshotRequest.WindowHwnd` snapshots that one window
 by handle whether or not the filtered inventory lists it (untitled and tool windows work — the
@@ -2567,8 +2594,13 @@ longer falls through a hung rung to the focused element or the desktop root), th
 labels an unlisted, owned, fallback or popup window (`Label` → `NameUnlessHung`; a non-timeout
 failure still gives "", so `popup`), owned-window discovery, the pid/handle bookkeeping, every read in the walk (`UiTraverser.Walk`'s
 `timeoutsPropagate`: the subtree cache fetch, each node property and pattern read, the children
-read), and the popup pass (listing the desktop's top-level windows, reading a popup in the
-filter, walking it) — so a hung provider gives the failure note, never a snapshot missing rows.
+read), and the popup pass (listing the desktop's top-level windows; for one of the observed
+process's own popups, its offscreen flag, bounds, label and walk) — so a hung provider gives the
+failure note, never a snapshot missing rows. The one exception, decided with the user after
+review: a desktop window that is only a popup *candidate* — until its native handle and process id
+have both answered and show it belongs to a walked process — is skipped and logged when either
+read times out, and the scan goes on, so a hung window of an unrelated application cannot fail the
+observation of a healthy window (D-47).
 Non-timeout failures keep their skip-and-log behaviour; the plain `snapshot` keeps D-5's skip
 throughout. The `snapshot` description, `ElementCache`'s expired-id
 message and the server instructions (1 978 characters) now list "any action with observe" among
@@ -2586,7 +2618,7 @@ when" bar is met in a test, not live:** a real WinForms `ContextMenuStrip`, open
 child PowerShell process, is listed item by item by an observation-shaped snapshot of its form
 (by handle, with popups); the click-through-the-tool half is covered by the mocked unit tests. The
 `UIAutomation` category and a third-party app were not run. Neighbour gaps found and not fixed are
-D-39 … D-46.
+D-39 … D-47.
 
 ### E-6 — `sequence`: an ordered batch of UI steps in one call  `P2 · M`
 - [ ] Not started

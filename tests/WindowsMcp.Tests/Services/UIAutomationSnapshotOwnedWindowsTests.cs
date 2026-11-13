@@ -447,6 +447,33 @@ public sealed class ObserveWindowTimeoutTests : IDisposable
         acted.Should().BeFalse("the window is resolved before the action, so the action is never sent to a hung provider");
     }
 
+    [Theory]
+    [InlineData("handle")]
+    [InlineData("process")]
+    public async Task Y4_observe_foreground_with_a_hung_unrelated_window_returns_the_observation_with_the_popup(string read)
+    {
+        // User-approved: a hung window of another application does not turn a healthy observation
+        // into the failure note. Through the real service; the hung window is listed first.
+        _svc.ElementFromHandle = h => _fakes.Window("Some app button", h);
+        var timeout = new TimeoutException($"unrelated {read} read timed out (wmcp-e5)");
+        var hung = read == "handle"
+            ? _fakes.Window("Hung window", 0xAB30, pid: 999, bounds: (150, 150, 100, 20),
+                propertyFailures: new Dictionary<string, Exception> { ["NativeWindowHandle"] = timeout })
+            : _fakes.Window("Hung window", 0xAB30, pid: 999, bounds: (150, 150, 100, 20), pidFailure: timeout);
+        _svc.DesktopWindows = () =>
+        [
+            hung,
+            _fakes.Window("Context menu", 0xAB31, controlType: 50009, bounds: (150, 180, 120, 80),
+                children: [_fakes.Window("Menu item A", 0, bounds: (155, 185, 100, 20))]),
+        ];
+
+        var text = await new Observation(_svc).AroundAsync("foreground", 0, null, CancellationToken.None, () => Task.FromResult("acted"));
+
+        text.Should().StartWith("acted\n\nObserved", "an observation, not the failure note");
+        text.Should().Contain("Menu item A", "the healthy popup of the observed process is in it");
+        text.Should().NotContain("Observation failed");
+    }
+
     [Fact]
     public async Task Observe_window_whose_window_really_closed_still_falls_back_to_the_foreground()
     {
@@ -586,20 +613,64 @@ public sealed class UIAutomationSnapshotObservationTimeoutTests : IDisposable
         return data;
     }
 
+    // ---- Y1 (user-approved, reverses round 4's U2b for these two reads) --------------------------
+    // A candidate is "ours" only once its handle AND its process id have answered and the pid is a
+    // walked one. Until then a hung window may belong to any application: a timeout on either read
+    // skips that candidate (logged) and the pass goes on - one hung unrelated window must not turn a
+    // healthy observation into the failure note. Once a candidate IS ours, a timeout still
+    // propagates (Y2: offscreen, bounds, label, walk - W3, W2d and U2c rows).
+
+    private AutomationElement HealthyPopup() =>
+        _fakes.Window("Menu item A", 0xAB31, bounds: (150, 180, 100, 20));
+
+    private AutomationElement HungCandidate(string read, Exception failure) => read == "handle"
+        ? _fakes.Window("Hung window", 0xAB30, pid: 999, bounds: (150, 150, 100, 20),
+            propertyFailures: new Dictionary<string, Exception> { ["NativeWindowHandle"] = failure })
+        : _fakes.Window("Hung window", 0xAB30, pid: 999, bounds: (150, 150, 100, 20), pidFailure: failure);
+
     [Theory]
     [MemberData(nameof(ScopesTimesFilterRead))]
-    public async Task U2b_a_timeout_reading_a_popup_in_the_filter_propagates(SnapshotScope scope, string read)
+    public async Task Y1_a_timeout_reading_a_candidates_handle_or_process_skips_it_and_the_pass_goes_on(SnapshotScope scope, string read)
     {
-        var hung = new TimeoutException($"popup {read} read timed out (wmcp-e5)");
-        var popup = read == "handle"
-            ? _fakes.Window("Menu item A", 0xAB30, bounds: (150, 150, 100, 20), readFailure: hung)
-            : _fakes.Window("Menu item A", 0xAB30, bounds: (150, 150, 100, 20), pidFailure: hung);
+        // Re-pinned from U2b_a_timeout_reading_a_popup_in_the_filter_propagates.
         using var svc = NewService(_fakes.Window("Host button", Host));
-        svc.DesktopWindows = () => [popup];
+        svc.DesktopWindows = () => [HungCandidate(read, new TimeoutException($"{read} read timed out (wmcp-e5)")), HealthyPopup()];
 
-        Func<Task> act = () => svc.SnapshotAsync(Observation(scope));
+        var snap = await svc.SnapshotAsync(Observation(scope));
 
-        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
+        snap.Interactive.Select(e => e.Name).Should().Equal(["Host button", "Menu item A"],
+            "the hung candidate is skipped and the healthy popup of the observed process after it is still walked");
+        snap.Truncated.Should().BeFalse();
+        _log.Records.Should().Contain(r => r.Message.Contains("popup window", StringComparison.Ordinal), "the skipped candidate is logged");
+    }
+
+    [Theory]
+    [MemberData(nameof(ScopesTimesFilterRead))]
+    public async Task Y4_a_hung_unrelated_window_before_a_healthy_popup_leaves_the_observation_whole(SnapshotScope scope, string read)
+    {
+        // The scenario the user cares about, as its own row: the hung window is listed FIRST.
+        using var svc = NewService(_fakes.Window("Host button", Host));
+        svc.DesktopWindows = () => [HungCandidate(read, new TimeoutException($"unrelated {read} read timed out (wmcp-e5)")), HealthyPopup()];
+
+        Func<Task<SnapshotResult>> act = () => svc.SnapshotAsync(Observation(scope));
+
+        var snap = (await act.Should().NotThrowAsync()).Subject;
+        snap.Interactive.Select(e => e.Name).Should().Equal(["Host button", "Menu item A"]);
+        snap.Truncated.Should().BeFalse();
+    }
+
+    [Theory]
+    [MemberData(nameof(ScopesTimesFilterRead))]
+    public async Task Y5_guard_a_non_timeout_failure_reading_a_candidates_handle_or_process_is_skipped_and_logged(SnapshotScope scope, string read)
+    {
+        using var svc = NewService(_fakes.Window("Host button", Host));
+        svc.DesktopWindows = () =>
+            [HungCandidate(read, new System.Runtime.InteropServices.COMException($"{read} read failed (wmcp-e5)", unchecked((int)0x80004005))), HealthyPopup()];
+
+        var snap = await svc.SnapshotAsync(Observation(scope));
+
+        snap.Interactive.Select(e => e.Name).Should().Equal(["Host button", "Menu item A"]);
+        _log.Records.Should().Contain(r => r.Message.Contains("popup window", StringComparison.Ordinal));
     }
 
     [Theory]

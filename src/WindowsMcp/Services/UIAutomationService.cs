@@ -465,9 +465,26 @@ public sealed class UIAutomationService : IUIAutomationService
                     if (budget.Truncated) break;
                     try
                     {
-                        long hwnd = popup.Properties.NativeWindowHandle.TryGetValue(out var h) ? h.ToInt64() : 0;
-                        if (hwnd != 0 && (listed.Contains(hwnd) || walkedHandles.Contains(hwnd))) continue;
-                        if (!popup.Properties.ProcessId.TryGetValue(out var pid) || !walkedPids.Contains(pid)) continue;
+                        // Whose window is it? Until its handle and process have answered it is
+                        // only a candidate — most are other applications' windows — and one that
+                        // hangs on these two reads is skipped: a hung unrelated application must
+                        // not fail the observation of a healthy window.
+                        long hwnd;
+                        int pid;
+                        try
+                        {
+                            hwnd = popup.Properties.NativeWindowHandle.TryGetValue(out var h) ? h.ToInt64() : 0;
+                            if (hwnd != 0 && (listed.Contains(hwnd) || walkedHandles.Contains(hwnd))) continue;
+                            if (!popup.Properties.ProcessId.TryGetValue(out pid) || !walkedPids.Contains(pid)) continue;
+                        }
+                        catch (TimeoutException ex)
+                        {
+                            LogSkipped("a popup window", ex);
+                            continue;
+                        }
+
+                        // From here it is the observed process's own popup, and a timeout is the
+                        // hung provider the caller must hear about.
                         if (popup.Properties.IsOffscreen.ValueOrDefault) continue;
                         var bounds = popup.Properties.BoundingRectangle.ValueOrDefault;
                         if (bounds.Width <= 0 || bounds.Height <= 0) continue;
