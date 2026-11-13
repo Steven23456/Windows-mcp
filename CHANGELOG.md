@@ -2,6 +2,71 @@
 
 ### Added
 
+- **Session state: is the desktop reachable, and is the server elevated?** (E-8; still 70 tools,
+  one new service). When the workstation is locked, the session is disconnected or a UAC prompt is
+  up on the secure desktop, `snapshot` used to fail on its cursor read or return an empty or stale
+  tree with nothing saying why, and elevation was visible only through a full `startup_report`:
+  - `system_info(category:"session")` (any case) returns, with no WMI query, `{Elevated,
+    IntegrityLevel (Untrusted|Low|Medium|MediumPlus|High|System|Protected|Unknown), UserName,
+    SessionId, Interactive, ConnectState (Active|Disconnected|…|Unknown), Locked (true|false|null),
+    InputDesktop ("Default" is the user's; null when not read), InputDesktopAccess (Opened | Denied
+    — `OpenInputDesktop` refused with access denied, which is what a secure desktop looks like |
+    Unknown — any other failure, which raises no note), InputDesktopError (the Win32 error when the
+    open failed, else null), InputAvailable, Note}`. The description says `Elevated` means a full
+    administrator token, that `IntegrityLevel` decides whether elevated windows can be driven, and
+    what is not detected (a UAC prompt not on the secure desktop, an elevated foreground window, a
+    minimised remote-desktop client). The unknown-category refusal now lists `session`, and a null
+    category is refused instead of failing.
+  - `InputAvailable`/`Note` come from ordered rules (`Services/SessionNotes.cs`, pure), first match
+    wins: no interactive desktop (first, because a session-0 server also reports `Disconnected`) →
+    locked → disconnected → the input desktop (`Denied`, or an opened `Winlogon`, is "a secure
+    desktop has the input (a UAC prompt, or the sign-in or lock screen)"; any other opened name but
+    `Default` is named, with every control and line-separator character a space and cut at 64, so a
+    crafted desktop name cannot add a line — a name that cleans to nothing is "An unnamed desktop";
+    `Unknown` raises nothing) → available. Each note but the no-desktop one ends "Stop and tell the
+    user."; with every read failing the state is available with no note.
+  - **`snapshot` starts with `Warning: <note>`** when input does not reach the user's desktop
+    (`SnapshotResult.SessionNote` in JSON, omitted when null). A snapshot that succeeds gets the
+    note attached. One that **fails** — on a locked or secure desktop the cursor read is refused, so
+    without this the warning could never arrive — while the session reports input unavailable
+    returns an empty snapshot carrying the note and `Unavailable:true` (omitted from JSON when
+    false) instead of the error; an `ArgumentException` or the caller's cancellation still
+    propagates, and a fault in the probe never fails a snapshot. The renderer is shared, so the same
+    line opens an E-5 observation's snapshot (under its header) and an annotated screenshot's
+    element list (though `screenshot(annotate:true)` reads the cursor itself first and still fails
+    there, D-66). The `snapshot` description names every reason, says the lists are empty with
+    `Unavailable:true` when the snapshot could not be taken, and tells the model to stop and tell
+    the user instead of retrying.
+  - **Callers of an unavailable snapshot say why.** `wait_for` `text_exists`/`focused_element`
+    ends at once, `Satisfied:false`, with the session note as `Detail`, instead of waiting out the
+    timeout and reporting "not found anywhere on screen" (its description says so);
+    `scrape(source:"dom")` is refused with the note instead of "is not a browser window".
+  - It only reports: nothing is elevated, unlocked, switched or dismissed, and input tools still
+    act as before.
+  New `ISessionService.GetAsync()` → `SessionState` (`Abstractions/Models/SessionDtos.cs`, 12
+  fields), never throwing except for cancellation: each fact is read independently and a failed
+  read is that field's unknown value. `SessionService` reads through the internal `ISessionProbe`
+  seam; `Win32SessionProbe` (its own `DllImport`s: `GetTokenInformation(TokenIntegrityLevel)`,
+  `WTSQuerySessionInformation` for the connect state and `WTSSessionInfoEx` lock flags,
+  `OpenInputDesktop` + `GetUserObjectInformation`) is the only caller of the APIs. Its
+  `InputDesktop()` returns `(Name, Error)` — the name, or no name and the Win32 error the open
+  failed with — and throws only when an opened desktop's name cannot be read; the service maps error
+  5 to `Denied` and any other to `Unknown`. Pure helpers `IntegrityLevels` (RID → name) and
+  `SessionNotes`; `ProcessElevation.IsElevated()` is the check `StartupReportService` had privately,
+  now shared (its output is unchanged). `UIAutomationService` takes the service as an optional
+  constructor argument; registered in `Hosting/WindowsMcpHost.AddWindowsMcp` (40 → 41 services).
+  Tests: `SessionNotesTests`, `IntegrityLevelsTests`, `SessionServiceTests`,
+  `SessionServiceIntegrationTests` and `Win32SessionProbeIntegrationTests`, `ProcessElevationTests`
+  and `ProcessElevationIntegrationTests`, `UIAutomationSnapshotSessionNoteTests`,
+  `UIAutomationSnapshotSessionNoteIntegrationTests`, `UIAutomationSnapshotUnavailableTests` and
+  `WaitForUnavailableTests`, plus additions to `SystemToolsTests`, `SnapshotRendererTests`,
+  `SnapshotDtosTests`, `UIAutomationToolsTests`, `ObservationToolsTests`, `ScreenToolsTests`,
+  `WebToolsTests` and `WindowsMcpHostTests`. Not verified live: no real UAC prompt, lock or
+  disconnect was exercised — those states were driven only through a fake probe, the cursor read
+  failing on a locked desktop is reasoned from `GetCursorPos`'s documented behaviour, and that a
+  secure desktop yields error 5 has not been observed (`InputDesktopError` is what a live check
+  reads) — and the `UIAutomation` category was not run. Gaps found and not fixed are parity D-66
+  and D-68 … D-73 (D-67 was fixed before shipping).
 - **`screenshot` and `ocr` capture a window or an element; `ocr` returns word positions** (E-7;
   still 70 tools). Capturing one window no longer means `window(action:"list")`, reading its
   bounds and passing them back as a `region`, and text read from an app with no UI tree (a
@@ -1194,6 +1259,12 @@
 
 ### Fixed
 
+- **`wait_for` no longer spins in its last millisecond** (found during E-8). `WaitLoopAsync`
+  clamps each sleep to the remaining budget, and `Task.Delay` rounds a sub-millisecond wait down
+  to zero, so a wait whose budget had under 1 ms left could run hundreds of back-to-back polls
+  before the deadline passed. The loop now stops when less than 1 ms remains
+  (`Services/UIAutomationService.cs`). This was the cause of the intermittent
+  `WaitForServiceTests.Wait_loop_floors_a_zero_interval_at_ten_milliseconds` failure.
 - **Refusals the caller could not read now arrive as text** (parity D-10, and the family the review
   found around it). `ToolErrors.IsCallerFacing` admits six exception types; a refusal raised as any
   other reached the client as `An error occurred invoking '<tool>'.`. Fixed at each call site:

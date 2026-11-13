@@ -17,6 +17,10 @@ internal static class SnapshotRenderer
     {
         var lines = new List<string>();
 
+        // E-8: why the tree below is empty or stale, before the tree.
+        if (!string.IsNullOrWhiteSpace(r.SessionNote))
+            lines.Add($"Warning: {r.SessionNote}");
+
         lines.Add(r.CursorMonitorIndex < 0
             ? $"Cursor: ({r.Cursor.X}, {r.Cursor.Y}) on no display"
             : $"Cursor: ({r.Cursor.X}, {r.Cursor.Y}) on display {r.CursorMonitorIndex}");

@@ -199,10 +199,23 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
                     ElementLimit, ElementCount, CaptureMs,
                     Stages? (--profile-snapshot: header, walk),
                     Pages?  (use_dom only; null otherwise, so a plain
-                             snapshot serialises exactly as before) }
+                             snapshot serialises exactly as before),
+                    SessionNote? (E-8: SnapshotAsync wraps steps 2-4
+                             (SnapshotCoreAsync) and asks ISessionService
+                             .GetAsync() once: success → the state's Note
+                             attached (null normally); a throw other than
+                             ArgumentException / the caller's cancellation
+                             while InputAvailable is false → an EMPTY result
+                             carrying the Note, Unavailable = true (on a
+                             locked or secure desktop
+                             the cursor read is refused); else the error
+                             propagates; a probe fault → no note) }
 
 5. MCP Response:
-   format="text" (default) → SnapshotRenderer.Render(result)  — compact rows,
+   format="text" (default) → SnapshotRenderer.Render(result)  — "Warning:
+                             <SessionNote>" first when set (also in an E-5
+                             observation and screenshot annotate's list), then
+                             compact rows,
                              then the Pages section, the truncation note and
                              the "Timing:" line when each applies
    format="json"           → JsonSerializer.Serialize(result)
@@ -904,7 +917,7 @@ UIAutomationService.WaitForAsync(WaitRequest)
   │                   NO ◄────────────────────────┘            │   │
   │                   ▼                                        │   │
   │        remaining = timeout_ms − clock.Elapsed              │   │
-  │           ≤ 0 ? ─┬── NO → await Task.Delay(               │   │
+  │         < 1 ms? ─┬── NO → await Task.Delay(               │   │
   │                  │        min(max(10, interval_ms),        │   │
   │                  │            remaining)) ─────────────────┘   │
   │                 YES                                            │
@@ -922,6 +935,12 @@ now". Roadmap C4: the call **always** answers with a `WaitForResult` — a timeo
 poll failed) is that same result with a detail saying so, not a `TimeoutException`. The tool
 serialises the result, so the `"null"` string it used to return on a miss is gone.
 
+Two E-8 refinements not drawn above: a `text_exists`/`focused_element` poll whose snapshot is
+`Unavailable` (it could not be taken and the session says input is unavailable) ends the wait at
+once with `Satisfied:false` and the session note as `Detail`; and the loop stops when less than
+1 ms of the budget remains, because `Task.Delay` rounds a sub-millisecond wait to zero and the
+loop would otherwise spin through hundreds of polls before the deadline.
+
 The original `WaitForAsync(text, …)` overload and its `PollAsync` loop — `null` on a clean miss,
 `TimeoutException` when every poll failed — are still on `IUIAutomationService`, but no tool
 calls them any more.
@@ -935,7 +954,7 @@ Host.CreateApplicationBuilder(args)
         │
         ▼
 builder.Services.AddSingleton<IInputService, InputService>()
-  ...  (40 services + the ScreenshotOptions record from --screenshot-scale,
+  ...  (41 services + the ScreenshotOptions record from --screenshot-scale,
        --flash, --profile-snapshot and --screenshot-backend, the
        UiTreeOptions record from --max-tree-elements and --profile-snapshot,
        the TransportOptions record from --transport: Stateless over HTTP,
@@ -1215,7 +1234,7 @@ Scrollable (1):
 
 | Location | Behavior | Notes |
 |----------|----------|-------|
-| `WaitFor` | Polls immediately, then every `interval_ms` (default 500 ms, range 0-5000, 10 ms floor) up to `timeout_ms` (default 10 s, range 0-120000); the sleep is clamped to the remaining budget | Only tool with a polling loop; a failed poll is retried, and a timeout — every-poll-failed included — is a `WaitForResult` with `Satisfied:false`, never a throw (roadmap C4) |
+| `WaitFor` | Polls immediately, then every `interval_ms` (default 500 ms, range 0-5000, 10 ms floor) up to `timeout_ms` (default 10 s, range 0-120000); the sleep is clamped to the remaining budget, and under 1 ms left ends the loop; an `Unavailable` snapshot ends a `text_exists`/`focused_element` wait at once (E-8) | Only tool with a polling loop; a failed poll is retried, and a timeout — every-poll-failed included — is a `WaitForResult` with `Satisfied:false`, never a throw (roadmap C4) |
 | `InputService` clicks | No delays: clicks are back-to-back `SendInput`; the cursor is placed with `SetCursorPos` and read back before any button event | A clamped (off-monitor) point throws rather than clicking elsewhere |
 | `InputService.TypeAsync` | `TypeOptions.PaceMs` (default 5 ms) between the steps of a typing plan, never after the last one; a paste waits 150 ms after `ctrl+v` before restoring the previous clipboard text | The settle only runs on the real simulator sink, so the unit tests do not pay it. The target reads the clipboard on its own schedule, which is what the settle covers |
 | `InputService.DragAsync(…, durationMs, steps)` | `durationMs / steps` between the interpolated moves (default 300 ms / 20 = 15 ms), including after the last one; `durationMs:0` moves without pausing | A drop target needs real motion, not a teleport; the button is released in a `finally`, so a cancelled drag never leaves it down |

@@ -238,4 +238,49 @@ public class SnapshotDtosTests
         doc.RootElement.GetProperty("Pages").ValueKind.Should().Be(JsonValueKind.Array);
         doc.RootElement.GetProperty("Pages").GetArrayLength().Should().Be(0);
     }
+
+    // ---- E-8: SessionNote, additive and invisible until there is one ------------------------
+
+    private static SnapshotResult Plain() =>
+        new([], null, new CursorPosition(0, 0), -1, [], [], null, false, 500, 0, 12);
+
+    [Fact]
+    public void SnapshotResult_session_note_defaults_to_null_so_every_existing_construction_still_compiles()
+        => Plain().SessionNote.Should().BeNull();
+
+    [Fact]
+    public void SnapshotResult_without_a_session_note_omits_the_property_from_json()
+    {
+        var json = JsonSerializer.Serialize(Plain());
+
+        json.Should().NotContain("SessionNote", "a normal snapshot's JSON is byte-identical to a pre-E-8 one");
+    }
+
+    [Fact]
+    public void SnapshotResult_with_a_session_note_writes_it()
+    {
+        const string note = "The workstation is locked: nothing on the user's desktop can be seen or driven until the user unlocks it. Stop and tell the user.";
+
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(Plain() with { SessionNote = note }));
+
+        doc.RootElement.GetProperty("SessionNote").GetString().Should().Be(note);
+    }
+
+    // ---- E-8 R3 decision A: Unavailable, invisible until true ---------------------------------
+
+    [Fact]
+    public void SnapshotResult_is_not_unavailable_by_default()
+        => Plain().Unavailable.Should().BeFalse();
+
+    [Fact]
+    public void SnapshotResult_omits_Unavailable_from_json_when_false_even_with_a_note()
+        => JsonSerializer.Serialize(Plain() with { SessionNote = "a note" }).Should().NotContain("Unavailable");
+
+    [Fact]
+    public void SnapshotResult_writes_Unavailable_true()
+    {
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(Plain() with { SessionNote = "a note", Unavailable = true }));
+
+        doc.RootElement.GetProperty("Unavailable").GetBoolean().Should().BeTrue();
+    }
 }

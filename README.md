@@ -228,7 +228,7 @@ gated by `confirm` (`Hosting/ServerInstructions.cs`, under 2 000 characters).
 | Process / Shell | `process`, `process_inspect`, `start_process`, `powershell` (with `background: true` for jobs, `timeout_seconds` to bound one call), `job`, `service`, `scheduled_task`, `event_log` |
 | File | `file_search`, `file_manage`, `file_dialog`, `file_read`, `file_write`, `file_info`, `file_hash`, `file_streams`, `archive` |
 | Disk | `disk_inspect`, `storage_health` |
-| System | `system_info`, `audio`, `notification`, `security_audit`, `reliability`, `driver_list`, `wmi_query`, `env`, `power_action` |
+| System | `system_info` (incl. `category: "session"`), `audio`, `notification`, `security_audit`, `reliability`, `driver_list`, `wmi_query`, `env`, `power_action` |
 | Security | `verify_signature`, `defender_status`, `cert_store` |
 | Startup | `startup_report` |
 | Network | `network`, `firewall` |
@@ -271,6 +271,22 @@ replaces the `el_N` ids of every earlier one. A snapshot that fails afterwards d
 action — the result ends with a note saying the action was performed and must not be repeated. When a popup says something — a tooltip, a message box's question — the
 observation ends with a `Popup text (not controls, no ids):` section of `<popup label>: <text>`
 lines, so `click(clicks: 0, observe: "foreground")` on a control returns its tooltip.
+
+When the user's desktop cannot be seen or driven — the workstation is locked, the session is
+disconnected, a secure desktop (a UAC prompt, the sign-in or lock screen) has the input, or the
+server has no interactive desktop — `snapshot`'s text starts with a `Warning: <reason>` line
+(`SessionNote` in its JSON), because the rows below are empty or stale. When the snapshot could
+not be taken at all (on a locked or secure desktop the cursor read is refused) it returns an
+empty snapshot under that line (`Unavailable: true` in JSON) instead of the error; `wait_for`
+`text_exists`/`focused_element` then ends at once with the note as `Detail`, and
+`scrape(source: "dom")` is refused with it. The same line opens an observation's
+snapshot and an annotated screenshot's element list. Other tools carry no warning.
+`system_info(category: "session")` reports the server's own session without WMI: `{Elevated,
+IntegrityLevel, UserName, SessionId, Interactive, ConnectState, Locked, InputDesktop,
+InputDesktopAccess, InputDesktopError, InputAvailable, Note}`. `IntegrityLevel` decides whether elevated windows
+can be driven (Windows drops a Medium server's input to a High window); a UAC prompt not on the
+secure desktop, an elevated foreground window and a minimised remote-desktop client are not
+detected. It only reports — nothing is elevated, unlocked or dismissed.
 
 `multi_select(targets_json, ctrl?)` and `multi_edit(entries_json)` do a whole batch in one call.
 `targets_json` is a JSON array of `{x, y}` points or `{element_id}` objects (a JSON string holding

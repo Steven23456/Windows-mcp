@@ -102,7 +102,7 @@ public sealed class StartupReportService : IStartupReportService
         catch { /* no UserChoice */ }
 
         return new StartupHeader(Environment.MachineName, Environment.OSVersion.VersionString,
-            IsElevated(), DateTime.UtcNow, bootMode, user, defaultBrowser);
+            ProcessElevation.IsElevated(), DateTime.UtcNow, bootMode, user, defaultBrowser);
     }
 
     // ---- processes ----------------------------------------------------------------------
@@ -578,16 +578,6 @@ public sealed class StartupReportService : IStartupReportService
 
     private static bool LooksLikeGuid(string? s) =>
         s is not null && s.StartsWith('{') && s.EndsWith('}') && Guid.TryParse(s, out _);
-
-    private static bool IsElevated()
-    {
-        try
-        {
-            using var id = WindowsIdentity.GetCurrent();
-            return new WindowsPrincipal(id).IsInRole(WindowsBuiltInRole.Administrator);
-        }
-        catch { return false; }
-    }
 
     private static string? TryGetCurrentUserSid()
     {

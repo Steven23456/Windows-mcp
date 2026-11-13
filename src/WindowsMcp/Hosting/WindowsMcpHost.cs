@@ -121,6 +121,7 @@ internal static class WindowsMcpHost
         services.AddSingleton<IUsnService, UsnService>();
         services.AddSingleton<IWatchService, WatchService>();
         services.AddSingleton<IJobService, JobService>();
+        services.AddSingleton<ISessionService, SessionService>();   // E-8: elevation, lock, input desktop
 
         return services
             .AddMcpServer(o =>

@@ -7,22 +7,22 @@
 [Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1,
 phase 3's A-2/A-3/A-4, phase 4's A-6 and phase 5's A-14, A-12 (phase 1), A-10 and A-5 (phase 1),
 then all of section B and all of section C (C-7, C-4, C-2, C-3, C-1, C-6, C-5), D-10/D-11, S-11,
-E-1, E-2, E-3, E-4 (with D-20), E-5, E-6 and E-7.
+E-1, E-2, E-3, E-4 (with D-20), E-5, E-6, E-7 and E-8.
 SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
-This is the working list of everything upstream can do that this server cannot (plus sixty-five
+This is the working list of everything upstream can do that this server cannot (plus seventy-three
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 and D-10/D-11
 logged 2026-11-10 — **all eleven are now fixed** — then D-12…D-18, logged 2026-11-11 by the
 D-10/D-11 review, D-19…D-22, logged 2026-11-12 during E-1, D-23…D-27, logged 2026-11-12
 during E-2, D-28…D-32, logged 2026-11-12 by the E-3 review, D-33…D-38, logged 2026-11-12
 during E-4, D-39…D-48, logged 2026-11-12 during E-5 and its review, D-49…D-53, logged
-2026-11-13 by the E-6 review, and D-54…D-65, logged 2026-11-13 during E-7 and its review, all still open except D-31, which E-3's
-review round fixed, and D-20, which E-4 fixed; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
+2026-11-13 by the E-6 review, D-54…D-65, logged 2026-11-13 during E-7 and its review, and D-66…D-73, logged 2026-11-13 during E-8 and its review, all still open except D-31, which E-3's
+review round fixed, D-20, which E-4 fixed, and D-67, which E-8's review fixed; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
 phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and phase 5 shipped A-14,
 A-12 phase 1, A-10 and A-5 phase 1 — so every section-A row is ticked, with only A-5's Firefox
 phase left open and A-12's phase 2 deliberately not planned; section B is ticked too, and
-C-5/C-6 close section C — section S, D-12…D-65 (less D-20 and D-31) and section E are the work that is left; section E
+C-5/C-6 close section C — section S, D-12…D-73 (less D-20, D-31 and D-67) and section E are the work that is left; section E
 is not upstream parity but an agent-efficiency backlog from a review of this server's own tools).
 Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
@@ -176,6 +176,14 @@ function names are the stable anchor.
 | D-63 | A minimised window ahead of a visible one with the same title is refused by a capture instead of the visible one being used | P3 | S | B-10, E-7 | ☐ |
 | D-64 | `screenshot`'s `format`/`output`/`backend` as JSON null throw a masked `NullReferenceException` | P3 | S | — | ☐ |
 | D-65 | `Hide()` and the indicator's suspend return before the compositor has presented a frame without the overlay, so an immediate capture may still contain it (plausible) | P3 | S | A-14, S-11, D-59 | ☐ |
+| D-66 | The session warning rides only on a rendered snapshot: input, `sequence`, capture (annotate included: its own cursor read fails first), `get_state`, `find_element` and `wait_for`'s element and `active_window` conditions act or read against a locked or secure desktop with no warning | P3 | S | E-8 | ☐ |
+| D-67 | The session note is read only after a snapshot succeeds, so a snapshot that throws on a locked or secure desktop gives the error without the reason | P3 | S | E-8 | ☑ |
+| D-68 | An unelevated server cannot tell a UAC prompt from the sign-in or lock screen, and a UAC prompt not on the secure desktop is not detected | P3 | S | E-8 | ☐ |
+| D-69 | UIPI: input to a foreground window of higher integrity than the server is silently dropped; nothing compares integrity levels | P3 | S | E-8, D-68 | ☐ |
+| D-70 | A minimised remote-desktop client stops rendering: captures are black or stale and no session field reveals it | P3 | S | E-8 | ☐ |
+| D-71 | The session probe runs synchronously on every snapshot and every `wait_for` text/focus poll, with no cache and no timeout | P3 | S | E-8 | ☐ |
+| D-72 | Secure-desktop detection rests on `OpenInputDesktop` failing with `ERROR_ACCESS_DENIED`, not verified on a live UAC prompt or lock screen (the raw error is now reported as `InputDesktopError`) | P3 | S | E-8 | ☐ |
+| D-73 | Every caller that interprets a snapshot needs its own policy for an `Unavailable` one; a caller without one reads "empty" | P3 | S | E-8 | ☐ |
 | E-1 | Server instructions in the MCP handshake | P1 | S | — | ☑ |
 | E-2 | `interact_element`: expand, collapse, set_value, scroll_into_view | P1 | S | D-10 | ☑ |
 | E-3 | `click` modifiers; `key` repeat and hold | P2 | S | — | ☑ |
@@ -183,7 +191,7 @@ function names are the stable anchor.
 | E-5 | `observe`: action tools return the state they produced | P1 | M | D-11 · [E-5](design/E-5-observe.md) | ☑ |
 | E-6 | `sequence`: an ordered batch of UI steps in one call | P2 | M | E-5, S-11 · [E-6](design/E-6-sequence.md) | ☑ |
 | E-7 | Capture by window / element; OCR word positions | P2 | M | — · [E-7](design/E-7-capture-targets-ocr-words.md) | ☑ |
-| E-8 | Session state: elevation, lock, secure desktop | P2 | S–M | — | ☐ |
+| E-8 | Session state: elevation, lock, secure desktop | P2 | S–M | — · [E-8](design/E-8-session-state.md) | ☑ |
 | E-9 | `file_edit` and content search for remote hosts | P2 | M | — | ☐ |
 | E-10 | Named toolsets on top of S-1 | P3 | S | S-1 | ☐ |
 | E-11 | Stable element ids and a snapshot diff | P3 | L | E-5, D-11 | ☐ |
@@ -192,8 +200,8 @@ function names are the stable anchor.
 D-10/D-11 review, D-19 … D-22, logged 2026-11-12 during E-1, D-23 … D-27, logged 2026-11-12
 during E-2, D-28 … D-32, logged 2026-11-12 by the E-3 review, D-33 … D-38, logged 2026-11-12
 during E-4, D-39 … D-48, logged 2026-11-12 during E-5 and its review, and D-49 … D-53, logged
-2026-11-13 by the E-6 review, and D-54 … D-65, logged 2026-11-13 during E-7 and its review, are open — except D-31, fixed in E-3's
-review round, and D-20, fixed by E-4), and
+2026-11-13 by the E-6 review, D-54 … D-65, logged 2026-11-13 during E-7 and its review, and D-66 … D-73, logged 2026-11-13 during E-8 and its review, are open — except D-31, fixed in E-3's
+review round, D-20, fixed by E-4, and D-67, fixed in E-8's review round), and
 **so are sections
 A, B and C** (A-5's Firefox phase and
 D-2's `interact_element(type) clear` are the open sub-items; A-12's phase 2 is not planned). What
@@ -209,8 +217,8 @@ opt-in sampling and the annotation table, per-item test seeds) is in
 **Section E (added 2026-11-10) is not upstream parity.** It comes from a review of this server's
 own tool surface for how many round trips and tokens an AI client spends driving it, and the same
 review logged D-10 and D-11 (both done 2026-11-11, so E-2 and E-5 are unblocked). E-1, E-2,
-E-3, E-4 and E-5 are done (2026-11-12), and E-6 and E-7 (2026-11-13). Order for the rest:
-E-8, E-9, E-10. E-11 is last and conditional: measure the snapshot
+E-3, E-4 and E-5 are done (2026-11-12), and E-6, E-7 and E-8 (2026-11-13). Order for the rest:
+E-9, E-10. E-11 is last and conditional: measure the snapshot
 cost after E-5 (now possible) before committing to it. `todo.md` still records every UI-automation tool as never
 verified live — that sweep outranks any E item that builds on those tools.
 
@@ -1911,6 +1919,205 @@ same rect with `backend:"wgc"`, repeated: the second picture never shows the glo
 
 **Done when.** Confirmed and fixed, or shown not to happen with the evidence recorded here.
 
+### D-66 — The session warning rides only on a rendered snapshot  `P3 · S`
+- [ ] Not started
+
+**Found during E-8 (2026-11-13), read from the source; recorded as not in scope in
+[E-8](design/E-8-session-state.md).**
+
+**Ours today.** `SessionState.Note` reaches the caller only through `SnapshotResult.SessionNote`,
+which `SnapshotRenderer` prints: `snapshot`, an action's `observe` block, `sequence`'s final
+observation and `screenshot(annotate:true)`'s element list. Everything else acts or reads against a
+locked, disconnected or secure desktop with no warning: `click`, `type`, `key`, `shortcut`,
+`scroll`, `drag`, `interact_element` and `sequence` without `observe` send input that goes nowhere;
+`screenshot` and `ocr` return whatever the screen copy gives (black or stale is expected; not
+verified live); `get_state`, `find_element`, `get_element` and `get_text` read a tree that is
+empty or stale; `wait_for`'s `element_exists`, `element_enabled` and `active_window` conditions never ask the
+session (they read the find or the window list, not a snapshot), so they poll to the timeout and
+report nothing found with no reason, as `find_element` reports no matches — since E-8's second
+review pass its `text_exists`/`focused_element` conditions end at once with the note instead. **Found
+by E-8's review:** `screenshot(annotate:true)` reads the cursor itself (`IInputService
+.GetCursorPositionAsync`) before its snapshot, so on a locked or secure desktop it fails with the
+bare cursor error and never reaches the snapshot that would carry the warning (pinned by
+`ScreenToolsTests.Screenshot_annotate_on_a_locked_desktop_fails_on_its_own_cursor_read_before_the_snapshot`);
+and a `sequence` runs its steps against an unavailable desktop — only its final `observe`
+snapshot, if asked for, carries the note.
+
+**Sketch.** Append the same one-line note to those tools' results when the probe says input is
+unavailable (cheap: a few system calls), or refuse input tools then, naming the reason; for
+`wait_for`, end the wait early with the note.
+
+**Touches.** `Tools/InputTools.cs`, `Tools/ScreenTools.cs`, `Tools/UIAutomationTools.cs`,
+`Tools/SequenceTools.cs`, possibly a shared filter in `Hosting/WindowsMcpHost.cs`.
+
+**Tests.** A fake session service reporting a lock: each listed tool's result carries the note (or
+refuses), and with no note nothing changes.
+
+**Done when.** No UI tool answers on a locked or secure desktop without saying so.
+
+### D-67 — A snapshot that throws on a locked or secure desktop gives no reason  `P3 · S`
+- [x] Done 2026-11-13 — fixed in E-8's review round, before E-8 shipped; in
+  `CHANGELOG.md [Unreleased]` under E-8. `UIAutomationService.SnapshotAsync` now wraps the walk
+  (`SnapshotCoreAsync`): when it throws anything but an `ArgumentException` or the caller's
+  cancellation, the session is asked once, and if it reports `InputAvailable:false` the call returns
+  an empty snapshot carrying the note (no windows, cursor `(0,0)` on no display, no elements), so
+  `snapshot`, an observation and every renderer print the `Warning:` line. Otherwise the original
+  exception propagates. Tests: `UIAutomationSnapshotUnavailableTests`. Not run on a real locked
+  desktop; the trigger (the cursor read being refused there) is reasoned from `GetCursorPos`'s
+  documented behaviour. `screenshot(annotate:true)` is not covered: it fails on its own cursor read
+  first (D-66).
+
+**Found during E-8 (2026-11-13), read from the source.**
+
+**Was.** `UIAutomationService.SnapshotAsync` read the note only while building its result, after
+the header reads and the walk; a snapshot that threw first — and on a locked or secure desktop the
+cursor read is refused, so it always did — surfaced that error alone, with nothing saying why.
+
+### D-68 — A UAC prompt cannot be told from the sign-in screen, and one off the secure desktop is missed  `P3 · S`
+- [ ] Not started
+
+**Found during E-8 (2026-11-13), read from the source; partly recorded as not in scope in
+[E-8](design/E-8-session-state.md).**
+
+**Ours today.** `OpenInputDesktop` failing with access denied (`InputDesktopAccess` `Denied`) is
+all an unelevated (indeed any non-SYSTEM) process sees of the secure desktop, so
+`SessionNotes` can only say "a secure desktop has the input (a UAC prompt, or the sign-in or lock
+screen)". `Locked` separates the lock case when Windows reports it; a UAC prompt, the
+Ctrl+Alt+Del screen and a sign-in screen without a lock flag read the same. And when UAC is set not
+to switch to the secure desktop (`PromptOnSecureDesktop` = 0), the consent prompt is an ordinary
+window on `Default`: `InputDesktop` is `Default`, no note is raised, and input may be blocked by the
+prompt's integrity level without anything saying so.
+
+**Sketch.** For the second case, look for the consent UI on the user's desktop (a top-level
+`consent.exe` window, or the `Credential Dialog Xaml Host` class) and raise a UAC note; for the
+first, accept the ambiguity or name the likely case from `Locked` and `ConnectState` more
+precisely.
+
+**Touches.** `Services/SessionNotes.cs`, `Services/Win32SessionProbe.cs` / `ISessionProbe.cs`.
+
+**Tests.** A fake probe whose window list holds the consent window on `Default`: the note says a UAC
+prompt is up.
+
+**Done when.** A UAC prompt is reported whether or not it uses the secure desktop.
+
+### D-69 — Input to a higher-integrity foreground window is silently dropped (UIPI)  `P3 · S`
+- [ ] Not started
+
+**Found by the E-8 review (2026-11-13), read from the source.**
+
+**Ours today.** `SessionState` reports the server's own `IntegrityLevel`, and the `system_info`
+description says a Medium server's input to a High window is dropped. But nothing compares the
+foreground (or target) window's process integrity with the server's: with an elevated app in front,
+or a UAC prompt that is not on the secure desktop (D-68), `click`/`type`/`key` send input that
+User Interface Privilege Isolation discards, the tools report success, and `InputAvailable` stays
+true.
+
+**Sketch.** Read the target or foreground window's process integrity level (`OpenProcess` with
+`PROCESS_QUERY_LIMITED_INFORMATION` + `GetTokenInformation(TokenIntegrityLevel)`, reusing
+`IntegrityLevels`) and, when it is higher than the server's, append a note to the input tool's
+result or refuse naming both levels; optionally report the foreground's level in `system_info`
+`session`.
+
+**Touches.** `Services/SessionService.cs` / `ISessionProbe.cs`, `Tools/InputTools.cs`.
+
+**Tests.** A fake probe with a High foreground and a Medium server: an input tool's result says the
+input will be dropped.
+
+**Done when.** Input aimed at a window the server cannot drive says so.
+
+### D-70 — A minimised remote-desktop client is not detected  `P3 · S`
+- [ ] Not started
+
+**Found by the E-8 review (2026-11-13); behaviour of Windows, not verified live here.**
+
+**Ours today.** When the remote-desktop client showing this session is minimised on the client
+machine, the remote session stops rendering: captures come back black or stale and input may not
+take, while `ConnectState` is still `Active`, nothing is locked and the input desktop is `Default`,
+so `InputAvailable` is true and no note is raised. The `system_info` description lists it as not
+detected.
+
+**Sketch.** Find a signal for it (a blank frame from a capture of the whole desktop, the session's
+display state through WTS, or the RemoteFX/RDP policy that keeps rendering) and add it to the
+state, or document the `RemoteDesktop_SuppressWhenMinimized` client setting as the workaround.
+
+**Touches.** `Services/SessionService.cs`, `Services/Win32SessionProbe.cs`, docs.
+
+**Tests.** Whatever signal is chosen, through the fake probe.
+
+**Done when.** A minimised remote-desktop client is reported, or the workaround is documented where
+the model reads it.
+
+### D-71 — The session probe runs on every snapshot and poll, uncached and untimed  `P3 · S`
+- [ ] Not started
+
+**Found by the E-8 review (2026-11-13), read from the source.**
+
+**Ours today.** `UIAutomationService.SnapshotAsync` calls `ISessionService.GetAsync` once per
+snapshot (after the walk, or after the walk failed). `SessionService.GetAsync` is synchronous: two
+`WTSQuerySessionInformation` RPCs, the token and identity reads and `OpenInputDesktop` +
+`GetUserObjectInformation`, with no cache and no timeout. It therefore runs on every `snapshot`,
+every observation, every annotated screenshot and every `wait_for` `text_exists`/`focused_element`
+poll; a slow or hung terminal-services RPC delays each of them.
+
+**Sketch.** Cache the state for a short time (a second or two) and bound the probe with a timeout
+that yields the unknown state; optionally skip it on `wait_for` polls whose result carries no note
+(D-66).
+
+**Touches.** `Services/SessionService.cs`, possibly `Services/UIAutomationService.cs`.
+
+**Tests.** A fake probe that blocks: the snapshot completes within the timeout with no note; two
+snapshots inside the cache window probe once.
+
+**Done when.** The probe's cost per snapshot is bounded and repeated polls do not each pay it.
+
+### D-72 — Secure-desktop detection rests on one unverified error code  `P3 · S`
+- [ ] Not started
+
+**Found by the E-8 review (2026-11-13), read from the source; not verified live.**
+
+**Ours today.** `SessionService` maps `Win32SessionProbe.InputDesktop()`'s failed open to
+`InputDesktopAccess` `Denied` (the secure-desktop note) only when the Win32 error is
+`ERROR_ACCESS_DENIED` (5); any other error is `Unknown`, raising no note. That a non-SYSTEM
+process gets exactly access-denied on a UAC prompt's or the lock screen's secure desktop is
+expected but has not been observed here. If Windows returns another code there, a secure desktop
+reads as "Unknown, no note" — only `Locked` would still catch the lock case, and a UAC prompt
+would go unreported. **Since E-8's second review pass** the raw error is reported as
+`SessionState.InputDesktopError`, so one live check settles it; still unverified.
+
+**Sketch.** Run SNAPSHOT-09 (UAC prompt) and SNAPSHOT-10 (lock) in the e2e plan, record
+`InputDesktopError` on each, and widen the mapping if it differs.
+
+**Touches.** `Services/SessionService.cs` (the mapping); the e2e results.
+
+**Tests.** Live only; then a unit row for any additional code mapped.
+
+**Done when.** The code returned on a live UAC prompt and lock screen is recorded and mapped.
+
+### D-73 — Every snapshot consumer needs its own policy for an `Unavailable` snapshot  `P3 · S`
+- [ ] Not started
+
+**Found by the E-8 second review pass (2026-11-13), read from the source.**
+
+**Ours today.** When a snapshot cannot be taken and the session reports input unavailable,
+`UIAutomationService.SnapshotAsync` returns an empty `SnapshotResult` with `Unavailable:true` and
+the note. Renderers print the note, but a caller that *interprets* the lists must check the flag
+itself, or it reads "no windows, no elements" as the truth. Two do: `WaitLoopAsync` (for
+`text_exists`/`focused_element`) and `WebTools`'s `scrape(source:"dom")`. Every other consumer, and
+any future one (a snapshot diff, E-11; a capture step; a new wait condition), has to remember to,
+and silently reports "empty" or "not found" when it does not.
+
+**Sketch.** A shared helper that interprets a snapshot for a caller — throws (or returns) the note
+when `Unavailable` — and is the only way callers read the lists; or make `SnapshotAsync` throw a
+caller-facing `InvalidOperationException` carrying the note for callers that did not opt into the
+empty result.
+
+**Touches.** `Services/UIAutomationService.cs`, `Tools/WebTools.cs` and any future consumer.
+
+**Tests.** A consumer that reads the lists, fed an `Unavailable` snapshot: it reports the note, not
+"empty".
+
+**Done when.** No code path can read an `Unavailable` snapshot's empty lists as a real answer.
+
 ---
 
 ## A — Desktop state and screenshots
@@ -3216,7 +3423,7 @@ run; the mapping is covered by unit tests and by `Integration` tests that recogn
 frame through a negative origin. Neighbour gaps logged: D-54 … D-65.
 
 ### E-8 — Session state: elevation, lock, secure desktop  `P2 · S–M`
-- [ ] Not started
+- [x] Done 2026-11-13 — [design note](design/E-8-session-state.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (not verified live)
 
 **Ours today.** Elevation is already caller-visible, but only as a by-product: `startup_report`
 puts `IsElevated()` in its header, and the default summary and the JSON both print `Elevated`. That
@@ -3243,6 +3450,54 @@ an `Integration` test that the real probe answers on the test machine without th
 
 **Done when.** With a UAC prompt showing, `snapshot` says the secure desktop has the input and
 that the user must answer it.
+
+**As landed:** a new `ISessionService.GetAsync()` → `SessionState(Elevated, IntegrityLevel,
+UserName, SessionId, Interactive, ConnectState, Locked, InputDesktop, InputDesktopAccess,
+InputDesktopError, InputAvailable, Note)`, registered in `AddWindowsMcp` (40 → 41 services), never
+throwing except for cancellation: every fact is read independently and a failed read is that
+field's unknown value (`Interactive` falls back to true; with every read failing the state is
+available with no note). The sketch's shape gained `ConnectState`, `InputDesktopAccess`,
+`InputDesktopError`, `InputAvailable` and `Note`. Raw reads go through the internal
+`ISessionProbe` seam; `Win32SessionProbe` declares its own `DllImport`s rather than adding to
+`NativeMethods.txt` as the sketch's "Touches" said (`GetTokenInformation(TokenIntegrityLevel)`,
+`WTSQuerySessionInformation` for `WTSConnectState` and `WTSSessionInfoEx` lock flags,
+`OpenInputDesktop` + `GetUserObjectInformation(UOI_NAME)`). Its `InputDesktop()` returns
+`(Name, Error)` — the name, or no name and the Win32 error the open failed with — and throws only
+when an opened desktop's name cannot be read; the service maps a name → `Opened`, error 5
+(`ERROR_ACCESS_DENIED`) → `Denied`, any other error or a throw → `Unknown`, and reports the error as
+`InputDesktopError`. The elevation check is shared, as sketched: `ProcessElevation.IsElevated()`,
+moved out of `StartupReportService` unchanged. `IntegrityLevels.Name(rid)` and
+`SessionNotes.Evaluate` are pure; the note rules are, first match wins, no interactive desktop →
+locked → disconnected → the input desktop (`Denied`, or an opened `Winlogon`, is "a secure desktop
+has the input (a UAC prompt, or the sign-in or lock screen)"; any other opened name but `Default`
+is named, folded to one line with every control and line-separator character a space and cut at
+64, "An unnamed desktop" when nothing is left; `Unknown` raises nothing) → available.
+`system_info(category:"session")` returns the state as JSON with no WMI query (the unknown-category
+refusal lists `session`; a null category is refused); its description says what `Elevated`,
+`IntegrityLevel` and `InputDesktopError` mean and what is not detected. `snapshot`:
+`SnapshotResult.SessionNote` and `Unavailable` (both omitted when null/false). A snapshot that
+succeeds gets the note attached; one that **fails** — on a locked or secure desktop the cursor read
+is refused, reasoned from `GetCursorPos`'s documented behaviour — while the session reports input
+unavailable returns an empty snapshot carrying the note with `Unavailable:true` instead of the
+error, while an `ArgumentException` or the caller's cancellation still propagates (this fixed D-67
+before shipping). Two callers act on `Unavailable`: `wait_for` `text_exists`/`focused_element` ends
+at once, unsatisfied, with the note as `Detail`, and `scrape(source:"dom")` is refused with the
+note. `SnapshotRenderer` prints the note as the first line, `Warning: <note>`, so it also opens an
+E-5 observation's snapshot and an annotated screenshot's element list; the `snapshot` and
+`wait_for` descriptions say so. `UIAutomationService` takes the service as an optional constructor
+argument. Found on the way and fixed (CHANGELOG "Fixed"): `wait_for`'s loop now stops when under
+1 ms of its budget remains, instead of spinning through hundreds of zero-length `Task.Delay` polls
+in its last millisecond. Tests: `SessionNotesTests`, `IntegrityLevelsTests`, `SessionServiceTests`,
+`SessionServiceIntegrationTests` and `Win32SessionProbeIntegrationTests`, `ProcessElevationTests`
+and `ProcessElevationIntegrationTests`, `UIAutomationSnapshotSessionNoteTests`,
+`UIAutomationSnapshotSessionNoteIntegrationTests`, `UIAutomationSnapshotUnavailableTests` and
+`WaitForUnavailableTests`, plus additions to `SystemToolsTests`, `SnapshotRendererTests`,
+`SnapshotDtosTests`, `UIAutomationToolsTests`, `ObservationToolsTests`, `ScreenToolsTests`,
+`WebToolsTests` and `WindowsMcpHostTests`. **The "done when" bar was not run live:** no real UAC
+prompt was shown with `snapshot` reporting the secure desktop; the lock, disconnect and
+secure-desktop states were exercised only through the fake probe (the real probe runs only in the
+`Integration` tests, on whatever desktop the suite has), and the `UIAutomation` category was not
+run. Neighbour gaps logged: D-66 and D-68 … D-73.
 
 ### E-9 — `file_edit` and content search for remote hosts  `P2 · M`
 - [ ] Not started

@@ -1185,6 +1185,43 @@ public sealed class ObservationToolsTests
     // The null case is every exact-text row above (O5, W3, W4): PopupText defaults to null there.
 
     // ============================================================================================
+    // E-8: the session warning reaches an observation through the shared renderer
+    // ============================================================================================
+
+    private const string SecureDesktopNote =
+        "A secure desktop has the input (a UAC prompt, or the sign-in or lock screen): the user's desktop cannot be seen or driven until the user answers it. Stop and tell the user.";
+
+    [Theory]
+    [MemberData(nameof(SevenTools))]
+    public async Task Observe_puts_the_session_warning_directly_under_the_header(string tool)
+    {
+        // docs/design/E-8-session-state.md: the renderer is shared, so the same first line appears
+        // in an E-5 observation - right after the "Observed ..." header, before the Cursor line.
+        var rig = new Rig();
+        rig.ForegroundSnap = rig.ForegroundSnap with { SessionNote = SecureDesktopNote };
+        rig.WindowSnap = rig.WindowSnap with { SessionNote = SecureDesktopNote };
+
+        var text = await rig.Act(tool, "foreground");
+
+        var lines = text.Split('\n');
+        int header = Array.FindIndex(lines, l => l.StartsWith("Observed ", StringComparison.Ordinal));
+        header.Should().BeGreaterThan(0, "the observation header is there");
+        lines[header + 1].Should().Be("Warning: " + SecureDesktopNote, "the warning is the snapshot's first line");
+        lines[header + 2].Should().StartWith("Cursor: (", "and the snapshot follows it unchanged");
+        lines.Count(l => l.StartsWith("Warning:", StringComparison.Ordinal)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Observe_without_a_session_note_has_no_warning_line()
+    {
+        var rig = new Rig();
+
+        var text = await rig.Act("key", "foreground");
+
+        text.Should().NotContain("Warning:");
+    }
+
+    // ============================================================================================
     // The Delay seam's default
     // ============================================================================================
 

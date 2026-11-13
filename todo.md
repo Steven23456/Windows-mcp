@@ -106,7 +106,9 @@ stdio without touching the registered server — spawn the exe, `initialize` →
   `sequence` (E-6; plan rows SEQUENCE-01…04 — its done-when bar, Save As in one call, is
   SEQUENCE-01). E-7's window/element targets on `screenshot` and `ocr` and `ocr(format:"json")`
   are unverified live too: plan rows SCREENSHOT-20…24 and OCR-08…10 — its done-when bar, a
-  clicked OCR word centre landing on the word, is OCR-10
+  clicked OCR word centre landing on the word, is OCR-10. E-8's session warning and
+  `system_info(category:"session")` are unverified live too: SYSTEM_INFO-03 (a normal desktop),
+  SNAPSHOT-09 (a UAC prompt up — its done-when bar) and SNAPSHOT-10 (a locked remote host)
 
 ## 🟢 Ready / candidates (none blocking)
 

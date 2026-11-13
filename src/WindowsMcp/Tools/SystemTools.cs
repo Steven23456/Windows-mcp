@@ -16,6 +16,7 @@ public sealed class SystemTools
     private readonly ISecurityService _security;
     private readonly IReliabilityService _reliability;
     private readonly IDriverService _drivers;
+    private readonly ISessionService _session;
 
     public SystemTools(
         IWmiService wmi,
@@ -25,8 +26,10 @@ public sealed class SystemTools
         IAudioService audio,
         ISecurityService security,
         IReliabilityService reliability,
-        IDriverService drivers)
+        IDriverService drivers,
+        ISessionService session)
     {
+        _session = session;
         _wmi = wmi;
         _env = env;
         _power = power;
@@ -46,13 +49,17 @@ public sealed class SystemTools
         ["battery"] = "Win32_Battery",
     };
 
-    [McpServerTool(Title = "System info", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Query system information via WMI. category: os|memory|disk|gpu|battery.")]
+    [McpServerTool(Title = "System info", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Query system information. category: os|memory|disk|gpu|battery (WMI rows) | session. session reports the server's own session without WMI: {Elevated, IntegrityLevel (Untrusted|Low|Medium|MediumPlus|High|System|Protected|Unknown), UserName, SessionId, Interactive, ConnectState (Active|Disconnected|...), Locked (true|false|null when Windows does not say), InputDesktop (the desktop receiving input: 'Default' is the user's; null when it was not read), InputDesktopAccess (Opened | Denied: Windows refused to open it, which is what a secure desktop looks like | Unknown: it could not be read, which raises no note), InputDesktopError (the Win32 error when opening it failed: 5 is the access-denied refusal; null otherwise), InputAvailable, Note}. Elevated is true when the server's process token is in the Administrators role (a full administrator token). IntegrityLevel is what decides whether the windows of elevated programs can be driven: Windows drops the input a Medium server sends to a High window. InputAvailable:false means the workstation is locked, the session is disconnected, a secure desktop (a UAC prompt, the sign-in screen) has the input, or the server has no interactive desktop: UI tools cannot see or drive the user's desktop then, and Note says which and what the user must do. Not detected: a UAC prompt that is configured not to use the secure desktop, an elevated window in the foreground, and a minimised remote-desktop client (input is dropped or the picture is stale with InputAvailable still true). It only reports: nothing is elevated, unlocked or dismissed.")]
     public async Task<string> SystemInfo(
-        [Description("Category of system info: os, memory, disk, gpu, battery")] string category,
+        [Description("Category of system info: os, memory, disk, gpu, battery, session")] string category,
         CancellationToken ct = default)
     {
-        if (!WmiClassMap.TryGetValue(category, out var className))
-            throw new ArgumentException($"Unknown category '{category}'; expected os|memory|disk|gpu|battery");
+        // E-8: the server's own session, read directly - no WMI query.
+        if (string.Equals(category, "session", StringComparison.OrdinalIgnoreCase))
+            return JsonSerializer.Serialize(await _session.GetAsync(ct));
+
+        if (category is null || !WmiClassMap.TryGetValue(category, out var className))
+            throw new ArgumentException($"Unknown category '{category}'; expected os|memory|disk|gpu|battery|session");
 
         var rows = await _wmi.QueryAsync(className, ct: ct);
         return JsonSerializer.Serialize(rows);

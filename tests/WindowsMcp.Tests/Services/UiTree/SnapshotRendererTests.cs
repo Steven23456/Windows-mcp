@@ -653,6 +653,103 @@ public class SnapshotRendererTests
             "Pages (1):",
             "  el_7 \"A5 Probe Page\"  [v: 12%]");
 
+    // ---- E-8: the session warning, first, only when there is a note ---------------------------
+    // docs/design/E-8-session-state.md: SnapshotRenderer.Render prints SessionNote as the FIRST
+    // line, "Warning: <note>", so the model reads why the tree below is empty before it reads the
+    // tree. Without a note the text is byte-identical to what it was before E-8.
+
+    private const string SecureDesktop =
+        "A secure desktop has the input (a UAC prompt, or the sign-in or lock screen): the user's desktop cannot be seen or driven until the user answers it. Stop and tell the user.";
+
+    [Fact]
+    public void Render_prints_the_session_note_as_a_warning_on_the_first_line()
+        => SnapshotRenderer.Render(TwoWindowSnapshot() with { SessionNote = SecureDesktop })
+            .Split('\n')[0].Should().Be("Warning: " + SecureDesktop);
+
+    [Fact]
+    public void Render_with_a_session_note_is_the_warning_line_then_exactly_the_unwarned_text()
+    {
+        // Prepended, nothing else moves: the rest of the block is the pre-E-8 rendering, byte for byte.
+        var plain = TwoWindowSnapshot();
+
+        SnapshotRenderer.Render(plain with { SessionNote = SecureDesktop })
+            .Should().Be("Warning: " + SecureDesktop + "\n" + SnapshotRenderer.Render(plain));
+    }
+
+    [Fact]
+    public void Render_puts_the_warning_above_an_empty_desktop()
+        // The case the warning exists for: a locked or secure desktop walks to nothing, and the model
+        // must read the reason before it reads "Interactive (0 of 0 ...)".
+        => SnapshotRenderer.Render(Result(cursor: new CursorPosition(0, 0), cursorMonitorIndex: -1, elementCount: 0)
+                with
+        { SessionNote = "The workstation is locked: nothing on the user's desktop can be seen or driven until the user unlocks it. Stop and tell the user." })
+            .Should().Be(Lines(
+                "Warning: The workstation is locked: nothing on the user's desktop can be seen or driven until the user unlocks it. Stop and tell the user.",
+                "Cursor: (0, 0) on no display",
+                "Active window: none",
+                "Windows (z-order, topmost first):",
+                "Interactive (0 of 0, ids valid until the next snapshot):",
+                "Scrollable (0):"));
+
+    [Fact]
+    public void Render_keeps_the_warning_first_and_the_footers_last_when_every_block_is_present()
+    {
+        var lines = SnapshotRenderer.Render(
+            TwoWindowSnapshot(truncated: true) with
+            {
+                CaptureMs = 142,
+                Stages = HeaderAndWalk,
+                Pages = [ProbePage],
+                SessionNote = SecureDesktop,
+            }).Split('\n');
+
+        lines[0].Should().Be("Warning: " + SecureDesktop);
+        lines[1].Should().StartWith("Cursor: (", "the header follows the warning directly");
+        lines.Count(l => l.StartsWith("Warning:", StringComparison.Ordinal)).Should().Be(1, "one warning, once");
+        lines[^2].Should().Be(TruncationNote(500), "the truncation note stays second to last");
+        lines[^1].Should().Be("Timing: header 12 ms, walk 130 ms (total 142 ms)", "the timing line stays last");
+    }
+
+    [Fact]
+    public void Render_says_nothing_about_the_session_when_there_is_no_note()
+    {
+        var text = SnapshotRenderer.Render(TwoWindowSnapshot() with { SessionNote = null });
+
+        text.Should().NotContain("Warning");
+        text.Split('\n')[0].Should().StartWith("Cursor: (");
+        text.Should().Be(SnapshotRenderer.Render(TwoWindowSnapshot()), "null is the pre-E-8 rendering");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\t")]
+    public void Render_treats_a_blank_session_note_as_no_note(string blank)
+        // GREEN (implementation choice, design silent): a blank note would print "Warning: " - a
+        // warning that says nothing, and a line with trailing whitespace. It prints nothing instead.
+        => SnapshotRenderer.Render(TwoWindowSnapshot() with { SessionNote = blank })
+            .Should().Be(SnapshotRenderer.Render(TwoWindowSnapshot()));
+
+    [Fact]
+    public void Render_is_unchanged_by_the_Unavailable_flag()
+    {
+        // E-8 R3: the flag is for programs (wait_for, scrape); the model reads the Warning line.
+        SnapshotRenderer.Render(TwoWindowSnapshot() with { Unavailable = true })
+            .Should().Be(SnapshotRenderer.Render(TwoWindowSnapshot()));
+        SnapshotRenderer.Render(TwoWindowSnapshot() with { SessionNote = SecureDesktop, Unavailable = true })
+            .Should().Be(SnapshotRenderer.Render(TwoWindowSnapshot() with { SessionNote = SecureDesktop }));
+    }
+
+    [Fact]
+    public void Render_with_a_warning_still_uses_LF_and_leaves_no_trailing_whitespace()
+    {
+        var text = SnapshotRenderer.Render(TwoWindowSnapshot(truncated: true) with { SessionNote = SecureDesktop });
+
+        text.Should().NotContain("\r");
+        foreach (var line in text.Split('\n'))
+            line.Should().Be(line.TrimEnd());
+    }
+
     [Fact]
     public void Render_of_a_page_with_no_visible_text_is_just_the_header()
         // A page whose text is all below the fold still tells the model where it is and that

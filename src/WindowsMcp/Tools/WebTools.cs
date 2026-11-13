@@ -156,6 +156,10 @@ public sealed class WebTools
 
         var snapshot = await _uia.SnapshotAsync(
             new SnapshotRequest(SnapshotScope.Window, title, IncludeTree: false, MaxElements: 0, UseDom: true), ct);
+        // E-8: the snapshot could not be taken (locked, a secure desktop, ...): that is the reason,
+        // not "this is not a browser window".
+        if (snapshot.Unavailable)
+            throw new InvalidOperationException($"source:dom cannot read the page: {snapshot.SessionNote}");
         var pages = snapshot.Pages ?? [];
         var page = pages.FirstOrDefault(p => p.DocumentId is not null);
         if (page is null)

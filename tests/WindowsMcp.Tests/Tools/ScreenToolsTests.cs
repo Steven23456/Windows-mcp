@@ -1894,6 +1894,45 @@ public class ScreenToolsTests : IDisposable
     }
 
     [Fact]
+    public async Task Screenshot_annotate_element_list_starts_with_the_session_warning()
+    {
+        // E-8: the renderer is shared, so an annotated screenshot's element list carries the same
+        // first line a snapshot does - a picture of a lock screen comes with the reason.
+        const string note = "The workstation is locked: nothing on the user's desktop can be seen or driven until the user unlocks it. Stop and tell the user.";
+        var snapshot = SnapshotOf([Element("el_1", new Bounds(100, 100, 50, 20))]) with { SessionNote = note };
+        var tools = MakeTools(ShotMock().Object, uia: UiaMock(snapshot).Object);
+
+        var result = await tools.Screenshot(format: "png", output: "inline", annotate: true);
+
+        var list = result.Content[1].Should().BeOfType<TextContentBlock>().Subject.Text.Split('\n');
+        list[0].Should().Be("Warning: " + note);
+        list[1].Should().StartWith("Cursor: (");
+    }
+
+    [Fact]
+    public async Task Screenshot_annotate_on_a_locked_desktop_fails_on_its_own_cursor_read_before_the_snapshot()
+    {
+        // CHARACTERISATION (E-8 R2, h): pins CURRENT behaviour, which is NOT the E-8 contract. The tool
+        // reads the cursor itself (ScreenTools.Screenshot, before the A-6 snapshot) so on a locked or
+        // secure desktop the refused GetCursorPos ends the call before UIAutomationService.SnapshotAsync -
+        // and its empty-snapshot-with-warning answer - is ever reached. Logged as a D-item; when it is
+        // fixed, this test is the one to reverse.
+        const string cursorError = "GetCursorPos failed (Win32 error 5).";
+        var input = new Mock<IInputService>();
+        input.Setup(i => i.GetCursorPositionAsync(It.IsAny<CancellationToken>())).ThrowsAsync(new InvalidOperationException(cursorError));
+        var uia = UiaMock(EmptySnapshot with { SessionNote = "The workstation is locked: nothing on the user's desktop can be seen or driven until the user unlocks it. Stop and tell the user." });
+        var shot = ShotMock();
+        var tools = MakeTools(shot.Object, input: input.Object, uia: uia.Object);
+
+        Func<Task> act = () => tools.Screenshot(format: "png", output: "inline", annotate: true);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Be(cursorError);
+        uia.Verify(u => u.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the cursor is read before the annotate snapshot, so the warning never gets a chance");
+        shot.Verify(s => s.CaptureAsync(It.IsAny<ScreenRegion?>(), It.IsAny<CaptureOptions?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task Screenshot_annotate_text_block_is_exactly_the_rendered_filtered_snapshot()
     {
         // "Label N in the image is row N in the text from the SAME call" (roadmap A-6) only holds

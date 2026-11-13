@@ -726,6 +726,47 @@ public class WebToolsTests
         thrown.WithMessage("*source:http*", "and the alternative still comes with it");
     }
 
+    // ---- E-8 R3 decision A: a snapshot that could not be taken is not "not a browser" ----------
+
+    private const string LockedNote =
+        "The workstation is locked: nothing on the user's desktop can be seen or driven until the user unlocks it. Stop and tell the user.";
+
+    private static Mock<IUIAutomationService> UiaReturning(SnapshotResult snapshot)
+    {
+        var uia = new Mock<IUIAutomationService>();
+        uia.Setup(s => s.SnapshotAsync(It.IsAny<SnapshotRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(snapshot);
+        return uia;
+    }
+
+    /// <summary>What UIAutomationService returns when the snapshot failed and input is unavailable.</summary>
+    private static SnapshotResult UnavailableSnapshot =>
+        new([], null, new CursorPosition(0, 0), -1, [], [], null, false, 0, 0, 0, SessionNote: LockedNote, Unavailable: true);
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("A5 Probe Page - Microsoft Edge")]
+    public async Task Scrape_dom_of_an_unavailable_desktop_is_refused_with_the_session_note(string? window)
+    {
+        var windows = Windows(Window(title: "A5 Probe Page - Microsoft Edge", process: "msedge", isBrowser: true));
+
+        Func<Task> act = () => Scrape(Tools(Web(), UiaReturning(UnavailableSnapshot), windows), NoSampling(), source: "dom", window: window);
+
+        var message = (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message;
+        message.Should().Contain(LockedNote, "the reason the page could not be read is the session's");
+        message.Should().NotContain("is not a browser window", "the window IS a browser; the desktop could not be read");
+    }
+
+    [Fact]
+    public async Task Scrape_dom_of_a_snapshot_that_merely_carries_a_note_keeps_todays_refusal()
+    {
+        // Taken, but empty and annotated: not Unavailable, so today's message stands.
+        var taken = Result(pages: []) with { SessionNote = LockedNote };
+
+        Func<Task> act = () => Scrape(Tools(Web(), UiaReturning(taken), Windows()), NoSampling(), source: "dom", window: "Notepad");
+
+        (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("is not a browser window");
+    }
+
     [Fact]
     public async Task Scrape_dom_of_a_window_that_yields_no_page_is_refused_by_name()
     {
