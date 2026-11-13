@@ -418,6 +418,23 @@ public class ToolInventoryTests
     }
 
     /// <summary>
+    /// E-7: the checklist's "Touches" names <c>skills/windows/SKILL.md</c>. Word positions the
+    /// playbook never mentions are positions the model will not ask for — it will keep reading text
+    /// it cannot click. docs-agent owns the edit; this is what tells it to.
+    /// </summary>
+    [Fact]
+    public void The_skill_names_ocr_word_positions_and_capture_targets()
+    {
+        var skill = Skill();
+
+        // On the same line as `ocr`: snapshot's paragraph already says format:"json" for its own output.
+        Regex.IsMatch(skill, @"`ocr[`(][^\n]*format:\s*""?json").Should().BeTrue(
+            "the playbook must say ocr(format:\"json\") returns clickable word positions - run docs-agent");
+        Regex.IsMatch(skill, @"`(screenshot|ocr)`[^\n]*\bwindow:").Should().BeTrue(
+            "and that screenshot/ocr take a window (or element_id) instead of a region - run docs-agent");
+    }
+
+    /// <summary>
     /// C-1 R4: the file tools' safer defaults are a behaviour change a model only survives if the
     /// playbook names the flag to pass. docs-agent owns the edit; this is what tells it to.
     /// </summary>

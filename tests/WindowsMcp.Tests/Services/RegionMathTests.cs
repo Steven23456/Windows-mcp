@@ -372,4 +372,99 @@ public class RegionMathTests
         act.Should().Throw<ArgumentException>(
             "a region this size is not inside a 3840x1080 desktop and must be rejected, not clipped");
     }
+
+    // ======== E-7 — Clip: a window's or an element's rect, clipped to the virtual screen ======
+    //
+    // Unlike Validate (a rect the caller TYPED is rejected, not clipped), a rect a window or an
+    // element REPORTS is clipped: a maximised window overhangs its monitor by its invisible frame
+    // and a window dragged half off the edge is still worth reading. Null means nothing is left.
+
+    /// <summary>One 1920x1080 primary at the origin.</summary>
+    private static readonly ScreenRegion OneScreen = new(0, 0, 1920, 1080);
+
+    /// <summary>A secondary left of and above the primary: (-1920,-40) .. (1920,1080).</summary>
+    private static readonly ScreenRegion NegativeOrigin = new(-1920, -40, 3840, 1120);
+
+    [Theory]
+    [InlineData(100, 100, 800, 600)]       // well inside
+    [InlineData(0, 0, 1920, 1080)]         // exactly the virtual screen
+    [InlineData(0, 0, 1, 1)]               // one pixel at the origin
+    [InlineData(1919, 1079, 1, 1)]         // the last pixel
+    public void Clip_returns_a_rect_inside_the_virtual_screen_unchanged(int x, int y, int w, int h)
+    {
+        RegionMath.Clip(new Bounds(x, y, w, h), OneScreen).Should().Be(new ScreenRegion(x, y, w, h));
+    }
+
+    [Theory]
+    [InlineData(-50, 100, 400, 300, 0, 100, 350, 300)]        // overhangs the left edge
+    [InlineData(100, -50, 400, 300, 100, 0, 400, 250)]        // overhangs the top
+    [InlineData(1700, 100, 400, 300, 1700, 100, 220, 300)]    // overhangs the right edge
+    [InlineData(100, 900, 400, 300, 100, 900, 400, 180)]      // overhangs the bottom
+    [InlineData(-8, -8, 1936, 1096, 0, 0, 1920, 1080)]        // a maximised window's invisible frame, all four sides
+    [InlineData(1800, 1000, 400, 300, 1800, 1000, 120, 80)]   // the bottom-right corner
+    [InlineData(-100, -100, 300, 200, 0, 0, 200, 100)]        // the top-left corner
+    public void Clip_trims_whatever_overhangs_the_virtual_screen(
+        int x, int y, int w, int h, int ex, int ey, int ew, int eh)
+    {
+        RegionMath.Clip(new Bounds(x, y, w, h), OneScreen).Should().Be(new ScreenRegion(ex, ey, ew, eh));
+    }
+
+    [Theory]
+    [InlineData(5000, 100, 800, 600)]      // wholly right of the desktop
+    [InlineData(-900, 100, 800, 600)]      // wholly left
+    [InlineData(100, 2000, 800, 600)]      // wholly below
+    [InlineData(-32000, -32000, 160, 28)]  // where Windows parks a minimised window
+    public void Clip_of_a_rect_wholly_outside_the_virtual_screen_is_null(int x, int y, int w, int h)
+    {
+        RegionMath.Clip(new Bounds(x, y, w, h), OneScreen).Should().BeNull("nothing of the rect is on any screen");
+    }
+
+    [Theory]
+    [InlineData(1920, 100, 200, 200)]      // starts exactly at the right edge: x 1920 is off-screen
+    [InlineData(-200, 100, 200, 200)]      // ends exactly at the left edge: its last pixel is x -1
+    [InlineData(100, 1080, 200, 200)]      // starts exactly at the bottom edge
+    [InlineData(100, -200, 200, 200)]      // ends exactly at the top edge
+    public void Clip_of_a_rect_that_only_touches_an_edge_is_null(int x, int y, int w, int h)
+    {
+        // Half-open rects: touching is not overlapping. A 0-wide capture is a GDI error, not a picture.
+        RegionMath.Clip(new Bounds(x, y, w, h), OneScreen).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(100, 100, 0, 300)]
+    [InlineData(100, 100, 300, 0)]
+    [InlineData(100, 100, 0, 0)]
+    [InlineData(100, 100, -5, 300)]
+    [InlineData(100, 100, 300, -5)]
+    public void Clip_of_an_empty_or_negative_size_rect_is_null(int x, int y, int w, int h)
+    {
+        RegionMath.Clip(new Bounds(x, y, w, h), OneScreen).Should().BeNull("an empty rect has nothing to capture");
+    }
+
+    [Theory]
+    [InlineData(-1800, -20, 800, 600, -1800, -20, 800, 600)]      // wholly on the negative-origin secondary
+    [InlineData(-2000, -100, 500, 300, -1920, -40, 420, 240)]     // overhangs the secondary's top-left corner
+    [InlineData(-300, 100, 600, 200, -300, 100, 600, 200)]        // straddles the seam: the virtual screen is one space
+    [InlineData(1800, 1000, 400, 300, 1800, 1000, 120, 80)]       // overhangs the primary's bottom-right
+    public void Clip_works_in_a_virtual_screen_with_a_negative_origin(
+        int x, int y, int w, int h, int ex, int ey, int ew, int eh)
+    {
+        RegionMath.Clip(new Bounds(x, y, w, h), NegativeOrigin).Should().Be(new ScreenRegion(ex, ey, ew, eh));
+    }
+
+    [Fact]
+    public void Clip_of_a_rect_left_of_a_negative_origin_virtual_screen_is_null()
+    {
+        RegionMath.Clip(new Bounds(-4000, 0, 1000, 500), NegativeOrigin).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(100, 100, int.MaxValue, 50, 100, 100, 1820, 50)]  // x + width overflows int
+    [InlineData(100, 100, 50, int.MaxValue, 100, 100, 50, 980)]   // y + height overflows int
+    public void Clip_far_edge_arithmetic_does_not_wrap(int x, int y, int w, int h, int ex, int ey, int ew, int eh)
+    {
+        // The Validate lesson (R1j): x + width in int arithmetic wraps negative for a huge width,
+        // and the rect would look like it ends left of the screen.
+        RegionMath.Clip(new Bounds(x, y, w, h), OneScreen).Should().Be(new ScreenRegion(ex, ey, ew, eh));
+    }
 }

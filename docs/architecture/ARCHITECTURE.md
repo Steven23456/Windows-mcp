@@ -341,6 +341,8 @@ Windows-mcp.slnx
 │   │   │   ├── BatchTargets.cs            (B-7: the pure parser behind multi_select/multi_edit)
 │   │   │   ├── UIAutomationService.cs
 │   │   │   ├── ScreenshotService.cs       (+ WgcCaptureBackend, Annotator, FlashOverlay, FlashGlow)
+│   │   │   ├── OcrService.cs              (+ OcrGeometry — E-7's pure image-pixel →
+│   │   │   │                               virtual-desktop word mapping)
 │   │   │   ├── ControlIndicator.cs        (+ ControlIndicatorState, ControlIndicatorArt — S-11's
 │   │   │   │                               pure state and pixels; LayeredWindow — the overlay
 │   │   │   │                               window both it and FlashOverlay paint through)

@@ -104,7 +104,9 @@ stdio without touching the registered server — spawn the exe, `initialize` →
   `snapshot` · `get_state` · `get_element` · `find_element` · `interact_element` · `assert_element` ·
   `wait_for` · `get_text` · `get_table` · `ocr` · `file_dialog` · `multi_select` · `multi_edit` ·
   `sequence` (E-6; plan rows SEQUENCE-01…04 — its done-when bar, Save As in one call, is
-  SEQUENCE-01)
+  SEQUENCE-01). E-7's window/element targets on `screenshot` and `ocr` and `ocr(format:"json")`
+  are unverified live too: plan rows SCREENSHOT-20…24 and OCR-08…10 — its done-when bar, a
+  clicked OCR word centre landing on the word, is OCR-10
 
 ## 🟢 Ready / candidates (none blocking)
 

@@ -310,6 +310,25 @@ first, then the tool climbs a `SetForegroundWindow` → `AttachThreadInput` → 
 re-reads the foreground window after each rung, so `Success` is observed rather than assumed. A
 title that matches nothing is an error listing the open windows.
 
+`screenshot` and `ocr` capture the primary display by default, or a `region` (`x,y,w,h` in
+virtual-desktop pixels) or `display` (indices from `multi_monitor`). Instead they can take a
+`window` title (matched as above), an `hwnd`, or an `element_id`, and capture that target's screen
+rectangle; one kind of target per call, two kinds are refused. It is the rectangle the target
+occupies, not its own surface, so whatever covers it is in the picture (`switch_to_window` first);
+nothing is focused or restored, a minimised window or an element with no on-screen rectangle is
+refused, a target on no monitor is refused as off-screen, and one partly off the virtual screen is
+clipped. The result names the `target` used, adds `targetClipped: true` when clipping removed part
+of it (a maximised window normally does: its frame overhangs the monitor), and `region` is always
+the rect actually captured. `ocr(format: "json")` returns `{coordinateSpace, region, target?, textAngle?,
+text, lines:[{text, x, y, width, height, words:[{text, x, y, width, height, centerX, centerY}]}]}`
+with every rectangle in virtual-desktop pixels, so a word's `centerX`/`centerY` go straight to
+`click` — text in a remote-desktop session, a game or a canvas, which has no UI tree, can be
+clicked. For tilted text the engine reports words in its deskewed frame; they are rotated back by
+`textAngle`, which appears only when non-zero; each rectangle is then the upright bounding box
+around its tilted word or line, larger than the text and possibly reaching past `region`, while
+`centerX`/`centerY` are still the words' centres. The default `format: "text"` returns the recognised text only, as before. `ocr` hides an
+earlier capture's glow before it reads the screen.
+
 `launch(app_name, wait_for_window?, timeout_ms?)` takes the name a person would say. A path, or
 an executable name that exists, is started outright; anything else is resolved against an
 in-process catalog of Start Menu shortcuts and packaged (Store/MSIX) apps — matched exact, then

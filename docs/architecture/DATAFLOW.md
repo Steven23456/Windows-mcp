@@ -659,8 +659,13 @@ forced, waitedMs}]} for a pid or name kill; the tree kill keeps its text count.
      │ Screenshot()  │                  │                         │
      ├──────────────►│ resolve rect:    │                         │
      │               │ monitors, region │                         │
-     │               │ or display; then │                         │
-     │               │ read the cursor  │                         │
+     │               │ or display, or   │                         │
+     │               │ E-7 window/hwnd  │                         │
+     │               │ (WindowMatcher) /│                         │
+     │               │ element_id (Get- │                         │
+     │               │ ElementAsync) →  │                         │
+     │               │ RegionMath.Clip; │                         │
+     │               │ then read cursor │                         │
      │               │ annotate: one    │                         │
      │               │ SnapshotAsync    │                         │
      │               │ (desktop), keep  │                         │
@@ -683,16 +688,47 @@ forced, waitedMs}]} for a pid or name kill; the tree kill keeps its text count.
      │ + image block │                  │                         │
      │◄──────────────┤                  │                         │
      │               │                  │                         │
-     │ Ocr(region)   │                  │                         │
+     │ Ocr(region |  │                  │                         │
+     │  target)      │                  │                         │
      ├──────────────►│ same resolver,   │                         │
-     │               │ ExtractTextAsync │                         │
+     │               │ text: Extract-   │                         │
+     │               │ TextAsync / json:│                         │
+     │               │ RecognizeAsync   │                         │
      │               ├─────────────────►│                         │
      │               │                  │ OcrEngine.RecognizeAsync│
      │               │                  ├────────────────────────►│
      │               │                  │  (Windows.Media.Ocr)    │
-     │               │ recognised text  │◄────────────────────────┤
+     │               │                  │ json: OcrGeometry maps  │
+     │               │                  │ words → virtual desktop │
+     │               │ text | OcrResult │◄────────────────────────┤
      │◄──────────────┤◄─────────────────┤                         │
 ```
+
+**Capture targets (E-7).** `window`/`hwnd` and `element_id` are resolved in the same
+`ResolveRegionAsync` both tools call, before anything is captured — and, for `screenshot`, before
+`annotate`'s snapshot walk, which would evict the id. One kind of target per call is checked first
+(an `ArgumentException` naming both kinds, before any lookup). A window comes from
+`IWindowService.ListAsync(includeMinimized: true)` through `WindowMatcher.Match` (a miss lists the
+open titles); a minimised one is refused. An element comes from
+`IUIAutomationService.GetElementAsync`; one with no positive-size `Bounds` is refused. The
+target's own rect (`GetWindowRect`'s for a window, invisible resize border included) is clipped to
+the virtual screen by `RegionMath.Clip` — not rejected, as a typed `region` is — and a clipped
+rect that meets no monitor (nothing left, or only a gap between unequal monitors) is an
+"off-screen" refusal; a rect partly in a gap is captured as is. The captured rect is the screen rectangle the target occupies, so
+whatever covers it is in the picture; nothing is focused, raised or restored. The metadata (and
+`ocr`'s JSON) gains `target` and, when clipping removed part of it, `targetClipped: true`.
+
+**OCR word positions (E-7).** `ocr(format:"json")` calls `IOcrService.RecognizeAsync(r)` — the
+same full-resolution PNG capture and the same engine pass as `ExtractTextAsync` — and
+`OcrGeometry.ToLines` maps each engine word's image-pixel rect to virtual-desktop pixels from the
+capture origin and `CoordinateScale` (edges rounded, not sizes). For a non-zero `TextAngle` the
+engine's rectangles are in its deskewed frame, so each word's corners are first rotated back by
+the angle about the image centre and their axis-aligned box is used (larger than the tilted
+text; the centre is the word's); `textAngle` is in the JSON only when finite and non-zero, and a
+non-finite angle is treated as none. The tool adds each word's `centerX`/`centerY` (integer division) for `click`.
+`format` is validated before any lookup or capture. Both formats call `IFlashOverlay.Hide()` after
+the target is resolved and before the capture, so an earlier `screenshot`'s glow is never read as
+text; `ocr` shows no glow of its own.
 
 **Annotate path (A-6).** The snapshot walk runs **after** the rect is resolved and the cursor read
 and **before** the capture, so label N in the picture is row N of the text block from the same

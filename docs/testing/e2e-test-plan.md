@@ -1026,6 +1026,11 @@ exactly the `path` it was given (`file_manage delete confirm:true`).
 | SCREENSHOT-17 | T0 | S | `--profile-snapshot on --flash off --call screenshot '{"annotate":true,"output":"file"}'` | `stages` present with `resolve`, `cursor`, `snapshot`, `capture`, `resize`, `encode`. | delete |
 | SCREENSHOT-18 | T0 | L | Liveness and size: `{"display":"all","max_width":0,"max_height":0}` inline | A 5120×1440 JPEG inline (record the byte size); `system_info os` answers after. | — |
 | SCREENSHOT-19 | T0 | L | Session-0 / DRM window black-capture (A-10 "done when") | SKIPPED: needs a protected video playing; record as a future configuration. | — |
+| SCREENSHOT-20 | T0 | L | E-7 window target. `owned:Notepad` restored on display 1; `window list` → its `Title`, `Hwnd`, `Bounds`; `{"window":"<title>","output":"file"}`; `{"hwnd":<Hwnd>,"output":"file"}`; `{"window":"no-such-window","hwnd":<Hwnd>,"output":"file"}` | `region` == its `Bounds` (`GetWindowRect`'s: a few px of what is beside it at the left, right and bottom edges — D-55); `target {kind:"window", title, hwnd, matchStrategy:"exact", score}`, then `matchStrategy:"hwnd"` twice (hwnd wins over the title); no `selectedDisplays`, no `targetClipped`; Notepad's focus and z-order unchanged. | delete the files |
+| SCREENSHOT-21 | T0 | L | E-7 one kind per call: `{"window":"Notepad","region":"0,0,10,10"}`; `{"element_id":"el_1","display":"0"}`; `{"window":"Notepad","element_id":"el_1"}`; `{"window":"   ","output":"file"}`; `{"window":"zzqx-none"}` | `region and window name 2 different kinds of target; pass only one kind: a rect (region and/or display), a window (window and/or hwnd) or an element (element_id).`, then the same with `display and element_id`, `window and element_id`; no flash (nothing captured). Blank `window` = not given: the primary display. No match: `No top-level window matching 'zzqx-none'. Open windows: …`. | delete |
+| SCREENSHOT-22 | T2 | L | E-7 window states: `window minimize` the run's Notepad, `{"window":"<title>"}`; restore and maximise it on display 1, `{"window":"<title>","output":"file"}`; restore and `window move` it to `x:2400` (right edge past the virtual screen), same call | Minimised: `Window '<title>' is minimized, so it has no picture on screen; restore it first (window action:restore, or switch_to_window) and call again.`, and `window list` still says `Minimized` (nothing restored). Maximised: success, `region` inside the virtual screen, `targetClipped:true` (the frame overhangs the right edge). Moved: `region` ends at x 2559, `targetClipped:true`. A window moved wholly off every monitor (if the OS allows it): `Window '<title>' is off-screen: its bounds … have nothing on any monitor (the virtual screen spans x -2560..2559, y 0..1439 in virtual-desktop pixels; see multi_monitor). If it has just closed, …`. | restore the window's original bounds and state, verify |
+| SCREENSHOT-23 | T0 | L | E-7 element target: `snapshot` → `el_E` = Notepad's editor; `{"element_id":"el_E","annotate":true}`; `find_element include_offscreen:true` → an id with no on-screen bounds (a collapsed or scrolled-away row), `{"element_id":<it>}` | `region` == the editor's bounds, `target {kind:"element", elementId:"el_E", name, controlType}`, three blocks (the id was resolved before annotate's walk, which then replaces it — `el_E` is expired afterwards). No rect: `Element <id> has no rectangle on screen: it is scrolled out of view, collapsed or virtualised, or its window has closed. interact_element with action scroll_into_view may bring it into view; if its window closed, take a new snapshot.` (SKIPPED if no such element is found; record). | — |
+| SCREENSHOT-24 | T2 | L | E-7 covered target: the run's Notepad partly covered by a second run-owned window; `{"window":"<Notepad title>","output":"file"}` | The picture shows the covering window over Notepad — documented (the capture is the screen rectangle, not the window's surface; D-54). `switch_to_window` Notepad, repeat: Notepad's own pixels. | close the second window; delete |
 
 #### ocr (ReadOnly)
 
@@ -1036,8 +1041,11 @@ exactly the `path` it was given (`file_manage delete confirm:true`).
 | OCR-03 | T0 | L | `{"display":"99"}`; `{"region":"1,2,3"}` and the same `region` on `screenshot` | `Invalid display '99': index 99 is not a monitor; valid: 0,1 (see multi_monitor)`; byte-identical `Invalid region '1,2,3'; expected 'x,y,w,h'` from both tools. | — |
 | OCR-04 | T0 | L | `{"region":"-300,600,600,200"}` (seam) with a window straddling it | Text from both halves. | — |
 | OCR-05 | T0 | L | `{"display":"all"}` (5120 px wide) | Text, or the masked `An error occurred invoking 'ocr'.` from `OcrEngine.MaxImageDimension` — record; S3 if masked (fix family: check the engine's max dimension and refuse or tile). Liveness probe after. | — |
-| OCR-06 | T0 | S | `--flash on --call ocr '{}'` | No `flash` key, no glow (ocr never touches the overlay). | — |
+| OCR-06 | T0 | S | `--flash on --call ocr '{}'`; then, live, `screenshot {}` immediately followed by `ocr {}` | No `flash` key and no glow of its own (ocr only hides an earlier glow before reading, E-7); the second call's text contains nothing from the glow. | — |
 | OCR-07 | T0 | L | No language pack case | SKIPPED unless a pack is absent: then `No OCR language pack installed`. | — |
+| OCR-08 | T0 | L | E-7 targets: `owned:Notepad` showing `OCR-PROBE-<runid>` (as OCR-01); `{"window":"<title>"}`; `{"hwnd":<Hwnd>}`; `snapshot` → editor `el_E`, `{"element_id":"el_E"}`; the SCREENSHOT-21 two-kind calls and the SCREENSHOT-22 minimised call on `ocr` | The probe text each time, with no `region` lookup. The refusals are byte-identical to `screenshot`'s (one resolver). | restore the window |
+| OCR-09 | T0 | L | E-7 `format`: `{"window":"<title>","format":"json"}`; `{"format":"JSON","region":"<a blank area>"}`; `{"format":"xml"}` | One JSON object `{coordinateSpace:"virtual-desktop", region, target, text, lines:[{text, x, y, width, height, words:[{text, x, y, width, height, centerX, centerY}]}]}`, `text` == the `format:"text"` answer for the same target, every word inside `region`; no `textAngle` key for level text (it appears only when non-zero). Blank area: `text:""`, `lines:[]`, not an error. `Unknown format 'xml'; expected text\|json`, nothing captured (no flash either way). | — |
+| OCR-10 | T2 | L | E-7 "done when": the run's Notepad on display 0 (negative origin) holding `alpha OCRWORD gamma` in a large font; `{"window":"<title>","format":"json"}` → the word containing `OCRWORD` → `click {"x":centerX,"y":centerY,"clicks":2}`; `shortcut ctrl+c`; `clipboard get` | The word's `x` is negative; the double-click selects that word, so the clipboard holds exactly `OCRWORD`. The live counterpart of `OcrWordPositionDesktopTests`. | restore the clipboard; clear the tab |
 
 #### system_info, driver_list, reliability (ReadOnly)
 
@@ -1437,7 +1445,7 @@ Rewritten between the markers by `node scripts/e2e/sync-results.mjs`; not mainta
 
 <!-- INDEX-START -->
 
-552 test ids, 71 features (generated; do not edit by hand).
+589 test ids, 73 features (generated; do not edit by hand).
 
 | Feature | Tests | Ids |
 |---|---|---|
@@ -1445,7 +1453,7 @@ Rewritten between the markers by `node scripts/e2e/sync-results.mjs`; not mainta
 | ASSERT_ELEMENT | 8 | ASSERT_ELEMENT-01, ASSERT_ELEMENT-02, ASSERT_ELEMENT-03, ASSERT_ELEMENT-04, ASSERT_ELEMENT-05, ASSERT_ELEMENT-06, ASSERT_ELEMENT-07, ASSERT_ELEMENT-08 |
 | AUDIO | 6 | AUDIO-01, AUDIO-02, AUDIO-03, AUDIO-04, AUDIO-05, AUDIO-06 |
 | CERT_STORE | 3 | CERT_STORE-01, CERT_STORE-02, CERT_STORE-03 |
-| CLICK | 7 | CLICK-01, CLICK-02, CLICK-03, CLICK-04, CLICK-05, CLICK-06, CLICK-07 |
+| CLICK | 10 | CLICK-01, CLICK-02, CLICK-03, CLICK-04, CLICK-05, CLICK-06, CLICK-07, CLICK-08, CLICK-09, CLICK-10 |
 | CLIPBOARD | 8 | CLIPBOARD-01, CLIPBOARD-02, CLIPBOARD-03, CLIPBOARD-04, CLIPBOARD-05, CLIPBOARD-06, CLIPBOARD-07, CLIPBOARD-08 |
 | DEFENDER_STATUS | 1 | DEFENDER_STATUS-01 |
 | DISK_INSPECT | 6 | DISK_INSPECT-01, DISK_INSPECT-02, DISK_INSPECT-03, DISK_INSPECT-04, DISK_INSPECT-05, DISK_INSPECT-06 |
@@ -1461,7 +1469,7 @@ Rewritten between the markers by `node scripts/e2e/sync-results.mjs`; not mainta
 | FILE_SEARCH | 6 | FILE_SEARCH-01, FILE_SEARCH-02, FILE_SEARCH-03, FILE_SEARCH-04, FILE_SEARCH-05, FILE_SEARCH-06 |
 | FILE_STREAMS | 2 | FILE_STREAMS-01, FILE_STREAMS-02 |
 | FILE_WRITE | 8 | FILE_WRITE-01, FILE_WRITE-02, FILE_WRITE-03, FILE_WRITE-04, FILE_WRITE-05, FILE_WRITE-06, FILE_WRITE-07, FILE_WRITE-08 |
-| FIND_ELEMENT | 8 | FIND_ELEMENT-01, FIND_ELEMENT-02, FIND_ELEMENT-03, FIND_ELEMENT-04, FIND_ELEMENT-05, FIND_ELEMENT-06, FIND_ELEMENT-07, FIND_ELEMENT-08 |
+| FIND_ELEMENT | 12 | FIND_ELEMENT-01, FIND_ELEMENT-02, FIND_ELEMENT-03, FIND_ELEMENT-04, FIND_ELEMENT-05, FIND_ELEMENT-06, FIND_ELEMENT-07, FIND_ELEMENT-08, FIND_ELEMENT-09, FIND_ELEMENT-10, FIND_ELEMENT-11, FIND_ELEMENT-12 |
 | FIREWALL | 8 | FIREWALL-01, FIREWALL-02, FIREWALL-03, FIREWALL-04, FIREWALL-05, FIREWALL-06, FIREWALL-07, FIREWALL-08 |
 | FOCUS | 5 | FOCUS-01, FOCUS-02, FOCUS-03, FOCUS-04, FOCUS-05 |
 | FS_CHANGES | 3 | FS_CHANGES-01, FS_CHANGES-02, FS_CHANGES-03 |
@@ -1475,14 +1483,15 @@ Rewritten between the markers by `node scripts/e2e/sync-results.mjs`; not mainta
 | INTEGRITY | 9 | INTEGRITY-01, INTEGRITY-02, INTEGRITY-03, INTEGRITY-04, INTEGRITY-05, INTEGRITY-06, INTEGRITY-07, INTEGRITY-08, INTEGRITY-09 |
 | INTERACT_ELEMENT | 12 | INTERACT_ELEMENT-01, INTERACT_ELEMENT-02, INTERACT_ELEMENT-03, INTERACT_ELEMENT-04, INTERACT_ELEMENT-05, INTERACT_ELEMENT-06, INTERACT_ELEMENT-07, INTERACT_ELEMENT-08, INTERACT_ELEMENT-09, INTERACT_ELEMENT-10, INTERACT_ELEMENT-11, INTERACT_ELEMENT-12 |
 | JOB | 10 | JOB-01, JOB-02, JOB-03, JOB-04, JOB-05, JOB-06, JOB-07, JOB-08, JOB-09, JOB-10 |
-| KEY | 7 | KEY-01, KEY-02, KEY-03, KEY-04, KEY-05, KEY-06, KEY-07 |
+| KEY | 10 | KEY-01, KEY-02, KEY-03, KEY-04, KEY-05, KEY-06, KEY-07, KEY-08, KEY-09, KEY-10 |
 | LAUNCH | 9 | LAUNCH-01, LAUNCH-02, LAUNCH-03, LAUNCH-04, LAUNCH-05, LAUNCH-06, LAUNCH-07, LAUNCH-08, LAUNCH-09 |
 | MULTI_EDIT | 7 | MULTI_EDIT-01, MULTI_EDIT-02, MULTI_EDIT-03, MULTI_EDIT-04, MULTI_EDIT-05, MULTI_EDIT-06, MULTI_EDIT-07 |
 | MULTI_MONITOR | 7 | MULTI_MONITOR-01, MULTI_MONITOR-02, MULTI_MONITOR-03, MULTI_MONITOR-04, MULTI_MONITOR-05, MULTI_MONITOR-06, MULTI_MONITOR-07 |
 | MULTI_SELECT | 7 | MULTI_SELECT-01, MULTI_SELECT-02, MULTI_SELECT-03, MULTI_SELECT-04, MULTI_SELECT-05, MULTI_SELECT-06, MULTI_SELECT-07 |
 | NETWORK | 5 | NETWORK-01, NETWORK-02, NETWORK-03, NETWORK-04, NETWORK-05 |
 | NOTIFICATION | 6 | NOTIFICATION-01, NOTIFICATION-02, NOTIFICATION-03, NOTIFICATION-04, NOTIFICATION-05, NOTIFICATION-06 |
-| OCR | 7 | OCR-01, OCR-02, OCR-03, OCR-04, OCR-05, OCR-06, OCR-07 |
+| OBSERVE | 10 | OBSERVE-01, OBSERVE-02, OBSERVE-03, OBSERVE-04, OBSERVE-05, OBSERVE-06, OBSERVE-07, OBSERVE-08, OBSERVE-09, OBSERVE-10 |
+| OCR | 10 | OCR-01, OCR-02, OCR-03, OCR-04, OCR-05, OCR-06, OCR-07, OCR-08, OCR-09, OCR-10 |
 | POWER_ACTION | 6 | POWER_ACTION-01, POWER_ACTION-02, POWER_ACTION-03, POWER_ACTION-04, POWER_ACTION-05, POWER_ACTION-06 |
 | POWERSHELL | 10 | POWERSHELL-01, POWERSHELL-02, POWERSHELL-03, POWERSHELL-04, POWERSHELL-05, POWERSHELL-06, POWERSHELL-07, POWERSHELL-08, POWERSHELL-09, POWERSHELL-10 |
 | PROCESS | 12 | PROCESS-01, PROCESS-02, PROCESS-03, PROCESS-04, PROCESS-05, PROCESS-06, PROCESS-07, PROCESS-08, PROCESS-09, PROCESS-10, PROCESS-11, PROCESS-12 |
@@ -1493,9 +1502,10 @@ Rewritten between the markers by `node scripts/e2e/sync-results.mjs`; not mainta
 | RELIABILITY | 3 | RELIABILITY-01, RELIABILITY-02, RELIABILITY-03 |
 | SCHEDULED_TASK | 11 | SCHEDULED_TASK-01, SCHEDULED_TASK-02, SCHEDULED_TASK-03, SCHEDULED_TASK-04, SCHEDULED_TASK-05, SCHEDULED_TASK-06, SCHEDULED_TASK-07, SCHEDULED_TASK-08, SCHEDULED_TASK-09, SCHEDULED_TASK-10, SCHEDULED_TASK-11 |
 | SCRAPE | 12 | SCRAPE-01, SCRAPE-02, SCRAPE-03, SCRAPE-04, SCRAPE-05, SCRAPE-06, SCRAPE-07, SCRAPE-08, SCRAPE-09, SCRAPE-10, SCRAPE-11, SCRAPE-12 |
-| SCREENSHOT | 19 | SCREENSHOT-01, SCREENSHOT-02, SCREENSHOT-03, SCREENSHOT-04, SCREENSHOT-05, SCREENSHOT-06, SCREENSHOT-07, SCREENSHOT-08, SCREENSHOT-09, SCREENSHOT-10, SCREENSHOT-11, SCREENSHOT-12, SCREENSHOT-13, SCREENSHOT-14, SCREENSHOT-15, SCREENSHOT-16, SCREENSHOT-17, SCREENSHOT-18, SCREENSHOT-19 |
+| SCREENSHOT | 24 | SCREENSHOT-01, SCREENSHOT-02, SCREENSHOT-03, SCREENSHOT-04, SCREENSHOT-05, SCREENSHOT-06, SCREENSHOT-07, SCREENSHOT-08, SCREENSHOT-09, SCREENSHOT-10, SCREENSHOT-11, SCREENSHOT-12, SCREENSHOT-13, SCREENSHOT-14, SCREENSHOT-15, SCREENSHOT-16, SCREENSHOT-17, SCREENSHOT-18, SCREENSHOT-19, SCREENSHOT-20, SCREENSHOT-21, SCREENSHOT-22, SCREENSHOT-23, SCREENSHOT-24 |
 | SCROLL | 7 | SCROLL-01, SCROLL-02, SCROLL-03, SCROLL-04, SCROLL-05, SCROLL-06, SCROLL-07 |
 | SECURITY_AUDIT | 2 | SECURITY_AUDIT-01, SECURITY_AUDIT-02 |
+| SEQUENCE | 4 | SEQUENCE-01, SEQUENCE-02, SEQUENCE-03, SEQUENCE-04 |
 | SERVICE | 9 | SERVICE-01, SERVICE-02, SERVICE-03, SERVICE-04, SERVICE-05, SERVICE-06, SERVICE-07, SERVICE-08, SERVICE-09 |
 | SHORTCUT | 8 | SHORTCUT-01, SHORTCUT-02, SHORTCUT-03, SHORTCUT-04, SHORTCUT-05, SHORTCUT-06, SHORTCUT-07, SHORTCUT-08 |
 | SNAPSHOT | 8 | SNAPSHOT-01, SNAPSHOT-02, SNAPSHOT-03, SNAPSHOT-04, SNAPSHOT-05, SNAPSHOT-06, SNAPSHOT-07, SNAPSHOT-08 |
@@ -1507,7 +1517,7 @@ Rewritten between the markers by `node scripts/e2e/sync-results.mjs`; not mainta
 | TYPE | 8 | TYPE-01, TYPE-02, TYPE-03, TYPE-04, TYPE-05, TYPE-06, TYPE-07, TYPE-08 |
 | VERIFY_SIGNATURE | 4 | VERIFY_SIGNATURE-01, VERIFY_SIGNATURE-02, VERIFY_SIGNATURE-03, VERIFY_SIGNATURE-04 |
 | WAIT | 6 | WAIT-01, WAIT-02, WAIT-03, WAIT-04, WAIT-05, WAIT-06 |
-| WAIT_FOR | 9 | WAIT_FOR-01, WAIT_FOR-02, WAIT_FOR-03, WAIT_FOR-04, WAIT_FOR-05, WAIT_FOR-06, WAIT_FOR-07, WAIT_FOR-08, WAIT_FOR-09 |
+| WAIT_FOR | 10 | WAIT_FOR-01, WAIT_FOR-02, WAIT_FOR-03, WAIT_FOR-04, WAIT_FOR-05, WAIT_FOR-06, WAIT_FOR-07, WAIT_FOR-08, WAIT_FOR-09, WAIT_FOR-10 |
 | WATCH | 9 | WATCH-01, WATCH-02, WATCH-03, WATCH-04, WATCH-05, WATCH-06, WATCH-07, WATCH-08, WATCH-09 |
 | WINDOW | 10 | WINDOW-01, WINDOW-02, WINDOW-03, WINDOW-04, WINDOW-05, WINDOW-06, WINDOW-07, WINDOW-08, WINDOW-09, WINDOW-10 |
 | WMI_QUERY | 9 | WMI_QUERY-01, WMI_QUERY-02, WMI_QUERY-03, WMI_QUERY-04, WMI_QUERY-05, WMI_QUERY-06, WMI_QUERY-07, WMI_QUERY-08, WMI_QUERY-09 |

@@ -59,6 +59,30 @@ public sealed class ScreenTools
     private const string DisplayDescription =
         "Which monitor(s) to capture: 'all', or comma-separated zero-based indices in multi_monitor order (e.g. '1' or '0,2'); the union of several is captured. Default: the primary display. 'region' wins over this, but an invalid value still errors";
 
+    private const string WindowDescription =
+        "Capture the screen rectangle of this window instead of a region or display: its title, matched exact, then substring, then fuzzy (as the window tool does). A minimized window is refused; one partly off the virtual screen is clipped. Cannot be combined with region, display or element_id. Default: none";
+    private const string HwndDescription =
+        "Capture the screen rectangle of the window with this handle, as reported by window(action:\"list\"); with 'window' too, hwnd wins. Cannot be combined with region, display or element_id. Default: none";
+    private const string ElementIdDescription =
+        "Capture the screen rectangle of this element: an el_N id from snapshot, or an id from find_element or get_state. An element with no rectangle on screen is refused. Cannot be combined with region, display, window or hwnd. Default: none";
+
+    /// <summary>Appended to both tools' descriptions: what a window or element capture is, and is not.</summary>
+    private const string TargetNote =
+        " Instead of region/display, 'window' (a title), 'hwnd' (a handle) or 'element_id' picks the rect: one kind of target per call (a rect, a window or an element), two kinds are refused. " +
+        "A target capture is the screen rectangle the target occupies, not the target's own surface, so a window lying over it is in the picture: bring it to the front first (switch_to_window) when that matters. " +
+        "A maximized window normally reports targetClipped:true, because its invisible frame overhangs its monitor and is left out. " +
+        "Nothing is focused, raised, restored or scrolled by this call.";
+
+    /// <summary>screenshot only: annotate takes a snapshot, and a snapshot replaces snapshot ids.</summary>
+    private const string ElementIdWithAnnotateDescription =
+        "With annotate:true an el_N id from an earlier snapshot is replaced by the new ids in the returned element list (an id from find_element or get_state stays valid). " +
+        ElementIdDescription;
+
+    /// <summary>E-7: the window or element that picked the rect, as the caller is told about it.</summary>
+    /// <param name="Json">The <c>target</c> object of the metadata.</param>
+    /// <param name="Clipped">Clipping to the virtual screen removed part of the target's own rect.</param>
+    private sealed record CaptureTarget(object Json, bool Clipped);
+
     /// <summary>
     /// A-8: resolves the rect to capture from <paramref name="region"/> / <paramref name="display"/>
     /// against the live monitor inventory. <c>region</c> wins (validated against the virtual
@@ -69,23 +93,85 @@ public sealed class ScreenTools
     /// </summary>
     /// <returns>The rect, the inventory it was resolved against, and the selected indices (null
     /// unless <paramref name="display"/> picked the rect).</returns>
-    private async Task<(ScreenRegion Region, MonitorInfo[] Monitors, int[]? Selected)> ResolveRegionAsync(
-        string? region, string? display, CancellationToken ct = default)
+    private async Task<(ScreenRegion Region, MonitorInfo[] Monitors, int[]? Selected, CaptureTarget? Target)> ResolveRegionAsync(
+        string? region, string? display, string? window, long? hwnd, string? elementId, CancellationToken ct = default)
     {
+        // E-7: one kind of target per call, refused before anything is looked up. Blank counts as
+        // not given, as it always has for region and display.
+        if (string.IsNullOrWhiteSpace(window)) window = null;
+        if (string.IsNullOrWhiteSpace(elementId)) elementId = null;
+        var rectGiven = new[] { string.IsNullOrWhiteSpace(region) ? null : "region", string.IsNullOrWhiteSpace(display) ? null : "display" };
+        var windowGiven = new[] { window is null ? null : "window", hwnd is null ? null : "hwnd" };
+        var kinds = new[]
+        {
+            string.Join(" and ", rectGiven.Where(n => n is not null)),
+            string.Join(" and ", windowGiven.Where(n => n is not null)),
+            elementId is null ? "" : "element_id",
+        }.Where(k => k.Length > 0).ToArray();
+        if (kinds.Length > 1)
+            throw new ArgumentException(
+                $"{string.Join(" and ", kinds)} name {kinds.Length} different kinds of target; pass only one kind: a rect (region and/or display), a window (window and/or hwnd) or an element (element_id).");
+
         var monitors = await _windows.EnumerateMonitorsAsync(ct);
+
+        if (window is not null || hwnd is not null)
+        {
+            // The inventory and the matcher the window tool uses, so a miss reads the same.
+            var match = WindowMatcher.Match(await _windows.ListAsync(true, false, ct), window, hwnd);
+            var w = match.Window;
+            if (w.State == WindowState.Minimized)
+                throw new InvalidOperationException(
+                    $"Window '{UiRefusals.Clip(w.Title)}' is minimized, so it has no picture on screen; restore it first (window action:restore, or switch_to_window) and call again.");
+            var (rect, clipped) = ClipTarget($"Window '{UiRefusals.Clip(w.Title)}'", w.Bounds, monitors,
+                "If it has just closed, list the windows again (window action:list); otherwise move it onto a monitor (window action:move).");
+            return (rect, monitors, null, new CaptureTarget(
+                new { kind = "window", title = w.Title, hwnd = w.Hwnd, matchStrategy = match.Strategy, score = match.Score }, clipped));
+        }
+
+        if (elementId is not null)
+        {
+            var el = await _uia.GetElementAsync(elementId, ct);
+            if (el.Bounds is not { Width: > 0, Height: > 0 } bounds)
+                throw new InvalidOperationException(
+                    $"Element {elementId} has no rectangle on screen: it is scrolled out of view, collapsed or virtualised, or its window has closed. " +
+                    "interact_element with action scroll_into_view may bring it into view; if its window closed, take a new snapshot.");
+            var (rect, clipped) = ClipTarget($"Element {elementId}", bounds, monitors,
+                "Its window may be minimized or moved off the screen.");
+            return (rect, monitors, null, new CaptureTarget(
+                new { kind = "element", elementId = el.ElementId, name = el.Name, controlType = el.ControlType }, clipped));
+        }
+
         var selected = RegionMath.ParseDisplays(display, monitors.Length);
         var parsed = RegionMath.ParseRegion(region);
 
         if (parsed is not null)
         {
             RegionMath.Validate(parsed, RegionMath.VirtualScreen(monitors));
-            return (parsed, monitors, null);
+            return (parsed, monitors, null, null);
         }
         if (selected is not null)
-            return (RegionMath.Union(selected.Select(i => monitors[i]).ToArray()), monitors, selected);
+            return (RegionMath.Union(selected.Select(i => monitors[i]).ToArray()), monitors, selected, null);
 
         var primary = RegionMath.Primary(monitors);
-        return (new ScreenRegion(primary.X, primary.Y, primary.Width, primary.Height), monitors, null);
+        return (new ScreenRegion(primary.X, primary.Y, primary.Width, primary.Height), monitors, null, null);
+    }
+
+    /// <summary>
+    /// E-7: a target's own rect clipped to the virtual screen (a maximised window overhangs its
+    /// monitor by its frame), and whether that removed anything. Nothing left is a refusal — and
+    /// so is a rect that lies on no monitor: the virtual screen is the monitors' bounding box, and
+    /// with unequal monitors part of that box is shown by none of them.
+    /// </summary>
+    private static (ScreenRegion Rect, bool Clipped) ClipTarget(string what, Bounds bounds, MonitorInfo[] monitors, string hint)
+    {
+        var screen = RegionMath.VirtualScreen(monitors);
+        if (RegionMath.Clip(bounds, screen) is not { } rect
+            || !monitors.Any(m => RegionMath.Clip(new Bounds(rect.X, rect.Y, rect.Width, rect.Height), new ScreenRegion(m.X, m.Y, m.Width, m.Height)) is not null))
+            throw new InvalidOperationException(
+                $"{what} is off-screen: its bounds {bounds.X},{bounds.Y},{bounds.Width},{bounds.Height} have nothing on any monitor (the virtual screen spans " +
+                $"x {screen.X}..{screen.X + screen.Width - 1}, y {screen.Y}..{screen.Y + screen.Height - 1} in virtual-desktop pixels; see multi_monitor). {hint}");
+        bool clipped = rect.X != bounds.X || rect.Y != bounds.Y || rect.Width != bounds.Width || rect.Height != bounds.Height;
+        return (rect, clipped);
     }
 
     /// <summary>
@@ -105,7 +191,7 @@ public sealed class ScreenTools
         return $"virtual-desktop x = {region.X} + imageX × {s}, y = {region.Y} + imageY × {s} — use these for click/drag/scroll";
     }
 
-    [McpServerTool(Title = "Take screenshot", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Capture a screenshot and return it as MCP image content the model can see directly (parity A-7/A-8/A-9). Result content: a text block with one JSON object of metadata {width, height, originalWidth, originalHeight, format, backend ('gdi' or 'wgc': which capture backend actually produced this picture), coordinateSpace:'virtual-desktop', region (the rect actually captured, in virtual-desktop pixels), displays (every monitor: index, x, y, width, height, isPrimary), selectedDisplays? (when 'display' picked the rect), cursor {x, y, monitorIndex} (always: the mouse pointer in virtual-desktop pixels and which display it is on, -1 = none), cursorDrawn? ('icon' or 'ring', only when the pointer was painted onto the image), path? (file output), coordinateScale? (only when the image was downscaled) and note? (whenever image pixels are not virtual-desktop pixels 1:1 — a downscale, a region origin away from 0,0, or both: multiply image pixel coordinates by coordinateScale and add the region origin — the note spells it out; do this before calling click/drag/scroll)} followed, for inline output, by an image block. Default: the primary display, downscaled to fit max_width x max_height (1920x1080). If a capture comes back black, retry with backend 'wgc' — GDI returns black for GPU-accelerated and DRM-protected windows. With annotate:true (parity A-6) the same call also walks the desktop and returns the element list as a second text block — metadata, the element list (the rows snapshot prints, filtered to what this picture contains), then (inline output) the image — and draws a 2 px coloured box with a matching label chip around every interactive element in the picture; the labels are the snapshot's el_N ids, so label N in the image is row N of the text block from the same call, and they go straight to click/interact_element (valid until the next snapshot or annotated screenshot). Metadata then gains annotated:true, annotations (boxes that landed) and grid:{columns,rows} when a grid was asked for; grid captions are virtual-desktop coordinates, not image pixels.")]
+    [McpServerTool(Title = "Take screenshot", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Capture a screenshot and return it as MCP image content the model can see directly (parity A-7/A-8/A-9). Result content: a text block with one JSON object of metadata {width, height, originalWidth, originalHeight, format, backend ('gdi' or 'wgc': which capture backend actually produced this picture), coordinateSpace:'virtual-desktop', region (the rect actually captured, in virtual-desktop pixels), displays (every monitor: index, x, y, width, height, isPrimary), selectedDisplays? (when 'display' picked the rect), cursor {x, y, monitorIndex} (always: the mouse pointer in virtual-desktop pixels and which display it is on, -1 = none), cursorDrawn? ('icon' or 'ring', only when the pointer was painted onto the image), path? (file output), coordinateScale? (only when the image was downscaled) and note? (whenever image pixels are not virtual-desktop pixels 1:1 — a downscale, a region origin away from 0,0, or both: multiply image pixel coordinates by coordinateScale and add the region origin — the note spells it out; do this before calling click/drag/scroll)} followed, for inline output, by an image block. Default: the primary display, downscaled to fit max_width x max_height (1920x1080). If a capture comes back black, retry with backend 'wgc' — GDI returns black for GPU-accelerated and DRM-protected windows. With annotate:true (parity A-6) the same call also walks the desktop and returns the element list as a second text block — metadata, the element list (the rows snapshot prints, filtered to what this picture contains), then (inline output) the image — and draws a 2 px coloured box with a matching label chip around every interactive element in the picture; the labels are the snapshot's el_N ids, so label N in the image is row N of the text block from the same call, and they go straight to click/interact_element (valid until the next snapshot or annotated screenshot). Metadata then gains annotated:true, annotations (boxes that landed) and grid:{columns,rows} when a grid was asked for; grid captions are virtual-desktop coordinates, not image pixels. When 'window', 'hwnd' or 'element_id' picked the rect, metadata gains target ({kind:'window', title, hwnd, matchStrategy, score} or {kind:'element', elementId, name, controlType}) and targetClipped:true when part of the target lay outside the virtual screen and was left out; 'region' is always the rect actually captured." + TargetNote)]
     public async Task<CallToolResult> Screenshot(
         [Description(RegionDescription)] string? region = null,
         [Description(DisplayDescription)] string? display = null,
@@ -119,7 +205,10 @@ public sealed class ScreenTools
         [Description("Draw a labelled box around every interactive element in the picture and return the matching element list as a second text block (default: false). Costs one desktop UI walk (the same snapshot walk, so it evicts the previous snapshot's ids); the labels are the snapshot's el_N ids")] bool annotate = false,
         [Description("Overlay this many equal columns as vertical guide lines, each captioned with its virtual-desktop x coordinate; 0 = no vertical lines (default 0, max 64). Works without annotate")] int grid_columns = 0,
         [Description("Overlay this many equal rows as horizontal guide lines, each captioned with its virtual-desktop y coordinate; 0 = no horizontal lines (default 0, max 64). Works without annotate")] int grid_rows = 0,
-        [Description("Capture backend: auto (default) | gdi | wgc. wgc uses Windows.Graphics.Capture, the compositor's own frames, which show GPU-accelerated, hardware-overlay and DRM-protected surfaces that gdi's screen copy returns black for; gdi is the classic screen copy. auto prefers wgc and falls back to gdi silently, while backend 'wgc' fails with an error if the compositor cannot serve the rect. The metadata 'backend' field always says which one produced the image")] string backend = "auto")
+        [Description("Capture backend: auto (default) | gdi | wgc. wgc uses Windows.Graphics.Capture, the compositor's own frames, which show GPU-accelerated, hardware-overlay and DRM-protected surfaces that gdi's screen copy returns black for; gdi is the classic screen copy. auto prefers wgc and falls back to gdi silently, while backend 'wgc' fails with an error if the compositor cannot serve the rect. The metadata 'backend' field always says which one produced the image")] string backend = "auto",
+        [Description(WindowDescription)] string? window = null,
+        [Description(HwndDescription)] long? hwnd = null,
+        [Description(ElementIdWithAnnotateDescription)] string? element_id = null)
     {
         // Validate every argument before touching the screen: a bad call must not cost a capture.
         bool toFile = ParseOutput(output);
@@ -149,7 +238,8 @@ public sealed class ScreenTools
             mark = now;
         }
 
-        var (r, monitors, selected) = await ResolveRegionAsync(region, display);
+        // E-7: a window or element target is resolved here, before annotate's snapshot evicts its id.
+        var (r, monitors, selected, target) = await ResolveRegionAsync(region, display, window, hwnd, element_id);
         Stage("resolve");
         // Read before the capture so the reported position is at most one capture old, and so a
         // broken cursor read (a broken desktop) never costs a capture. It is not masked.
@@ -210,6 +300,11 @@ public sealed class ScreenTools
             meta["cursorDrawn"] = drawn;
         if (selected is not null)
             meta["selectedDisplays"] = selected;
+        if (target is not null)
+        {
+            meta["target"] = target.Json;
+            if (target.Clipped) meta["targetClipped"] = true;
+        }
         if (result.CoordinateScale != 1.0)
             meta["coordinateScale"] = result.CoordinateScale;
         // Absent when nothing needs translating: the model only sees the instruction when it applies.
@@ -275,12 +370,65 @@ public sealed class ScreenTools
         _ => throw new ArgumentException($"Unknown format '{format}'; expected png|jpeg|auto"),
     };
 
-    [McpServerTool(Title = "OCR the screen", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Run OCR on the screen and return the extracted text. Default: the primary display at full resolution; 'region' (virtual-desktop pixels) or 'display' narrow it exactly as for screenshot.")]
+    [McpServerTool(Title = "OCR the screen", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false), Description("Run OCR on the screen and return the extracted text. Default: the primary display at full resolution; 'region' (virtual-desktop pixels) or 'display' narrow it exactly as for screenshot. format:json returns where the text is, for applications with no UI tree (a remote-desktop session, a game, a canvas): {coordinateSpace:'virtual-desktop', region (the rect read), target?, targetClipped?, textAngle?, text, lines:[{text, x, y, width, height, words:[{text, x, y, width, height, centerX, centerY}]}]}, every rectangle in virtual-desktop pixels, so a word's centerX,centerY go straight to click. Nothing recognised is text:'' and lines:[], not an error. On a dense or full screen format:json can be very large, so narrow it with window, element_id or region. textAngle appears only for tilted text, and then each rectangle is the upright bounding box around its tilted word or line, so it is larger than the text and may reach past region. For tilted text centerX,centerY are still the centres of the words." + TargetNote)]
     public async Task<string> Ocr(
         [Description(RegionDescription)] string? region = null,
-        [Description(DisplayDescription)] string? display = null)
+        [Description(DisplayDescription)] string? display = null,
+        [Description(WindowDescription)] string? window = null,
+        [Description(HwndDescription)] long? hwnd = null,
+        [Description(ElementIdDescription)] string? element_id = null,
+        [Description("text (default): the recognised text only | json: the text plus every line and word with its rectangle and centre in virtual-desktop pixels")] string format = "text")
     {
-        var (r, _, _) = await ResolveRegionAsync(region, display);
-        return await _ocr.ExtractTextAsync(r);
+        // Validated before any lookup or capture: a bad call must not cost either.
+        bool json = format?.ToLowerInvariant() switch
+        {
+            "text" => false,
+            "json" => true,
+            _ => throw new ArgumentException($"Unknown format '{UiRefusals.Clip(format ?? "")}'; expected text|json", nameof(format)),
+        };
+
+        var (r, _, _, target) = await ResolveRegionAsync(region, display, window, hwnd, element_id);
+
+        // A-14: the glow of an earlier capture is a top-most frame around that capture's rect; it
+        // must not be read as text, or hide text, when this rect contains it. ocr shows none itself.
+        _flash.Hide();
+        if (!json) return await _ocr.ExtractTextAsync(r);
+
+        var read = await _ocr.RecognizeAsync(r);
+        var result = new Dictionary<string, object?>
+        {
+            ["coordinateSpace"] = "virtual-desktop",
+            ["region"] = new { x = read.Region.X, y = read.Region.Y, width = read.Region.Width, height = read.Region.Height },
+        };
+        if (target is not null)
+        {
+            result["target"] = target.Json;
+            if (target.Clipped) result["targetClipped"] = true;
+        }
+        // The engine reports -0 for straight text: only a real tilt is worth the caller's attention
+        // (and a value that is not a number cannot be written as JSON at all).
+        if (read.TextAngle is { } angle && double.IsFinite(angle) && angle != 0)
+            result["textAngle"] = angle;
+        result["text"] = read.Text;
+        result["lines"] = read.Lines.Select(l => new
+        {
+            text = l.Text,
+            x = l.Bounds.X,
+            y = l.Bounds.Y,
+            width = l.Bounds.Width,
+            height = l.Bounds.Height,
+            words = l.Words.Select(w => new
+            {
+                text = w.Text,
+                x = w.Bounds.X,
+                y = w.Bounds.Y,
+                width = w.Bounds.Width,
+                height = w.Bounds.Height,
+                // The point to click: integer division, as click takes whole pixels.
+                centerX = w.Bounds.X + w.Bounds.Width / 2,
+                centerY = w.Bounds.Y + w.Bounds.Height / 2,
+            }).ToArray(),
+        }).ToArray();
+        return JsonSerializer.Serialize(result);
     }
 }

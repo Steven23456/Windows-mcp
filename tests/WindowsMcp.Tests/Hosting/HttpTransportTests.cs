@@ -1166,9 +1166,10 @@ public class HttpTransportTests
             [
                 "region", "display", "format", "output", "max_width", "max_height",
                 "scale", "quality", "include_cursor", "annotate", "grid_columns", "grid_rows",
-                // A-10's 'backend' is the one argument added since; the flash and the profiling
-                // switches are still process options and still absent.
+                // A-10's 'backend' and E-7's three targets are the arguments added since; the flash
+                // and the profiling switches are still process options and still absent.
                 "backend",
+                "window", "hwnd", "element_id",
             ], "no flash or profiling argument belongs on the tool");
 
         var snapshot = tools.Single(t => t.Name == SnapshotToolName(tools));

@@ -12,7 +12,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 - **Interact with UI Elements**: Click, type, scroll, drag, and manipulate interface elements programmatically
 - **Control Windows**: Enumerate the open windows and the foreground one, then focus, minimize, maximize, restore, or close them
 - **Execute System Commands**: Run PowerShell commands for advanced system operations
-- **Capture Screens**: Take screenshots the model sees inline (any monitor or region, auto-downscaled, cursor drawn, GDI or Windows.Graphics.Capture frames) and perform OCR on screen regions
+- **Capture Screens**: Take screenshots the model sees inline (any monitor, region, window or element, auto-downscaled, cursor drawn, GDI or Windows.Graphics.Capture frames) and perform OCR on the same targets, with word positions a click can use
 - **Manage System Resources**: Control processes, registry, services, scheduled tasks, and event logs
 
 ## Key Features
@@ -166,8 +166,8 @@ the result, never an error.
 ### Screen Tools (`ScreenTools` — 2 tools)
 | Tool | Purpose |
 |------|---------|
-| `Screenshot` | Capture the primary display, other monitors (`display`) or a region; returns MCP image content plus metadata (captured rect, monitor inventory, cursor, coordinate scale, the `backend` that produced the frame, `flash` when the post-capture glow was shown, `stages` when profiling is on). `backend`: `auto` (default) / `gdi` / `wgc` — `wgc` reads the compositor's own frames, which show the GPU-accelerated and DRM surfaces `gdi` returns black. `annotate:true` also walks the desktop and returns labelled boxes on the picture with the matching `el_N` element list as a second text block; `grid_columns`/`grid_rows` overlay guide lines captioned with virtual-desktop coordinates |
-| `Ocr` | Extract text from a screen region via OCR (same `region`/`display` selection, always full resolution) |
+| `Screenshot` | Capture the primary display, other monitors (`display`), a region, or (E-7) the screen rectangle of a `window`/`hwnd`/`element_id`; returns MCP image content plus metadata (captured rect, monitor inventory, cursor, coordinate scale, the `backend` that produced the frame, `flash` when the post-capture glow was shown, `stages` when profiling is on). `backend`: `auto` (default) / `gdi` / `wgc` — `wgc` reads the compositor's own frames, which show the GPU-accelerated and DRM surfaces `gdi` returns black. `annotate:true` also walks the desktop and returns labelled boxes on the picture with the matching `el_N` element list as a second text block; `grid_columns`/`grid_rows` overlay guide lines captioned with virtual-desktop coordinates |
+| `Ocr` | Extract text from a screen region via OCR (same `region`/`display`/`window`/`hwnd`/`element_id` selection, always full resolution); `format:"json"` adds every line and word with its virtual-desktop rectangle and centre, so text in an app with no UI tree can be clicked |
 
 ### Process Tools (`ProcessTools` — 6 tools)
 | Tool | Purpose |

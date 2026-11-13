@@ -2,6 +2,66 @@
 
 ### Added
 
+- **`screenshot` and `ocr` capture a window or an element; `ocr` returns word positions** (E-7;
+  still 70 tools). Capturing one window no longer means `window(action:"list")`, reading its
+  bounds and passing them back as a `region`, and text read from an app with no UI tree (a
+  remote-desktop session, a game, a canvas) can now be clicked:
+  - Both tools take `window` (a title, matched as the window tool matches: exact, then substring,
+    then fuzzy ≥ 70), `hwnd` (from `window(action:"list")`; wins over `window`) and `element_id`
+    (an `el_N` snapshot id or a `find_element`/`get_state` id), appended after their existing
+    parameters. One kind of target per call — a rect (`region`/`display`), a window
+    (`window`/`hwnd`) or an element — and two kinds are an `ArgumentException` naming them,
+    before anything is looked up; a blank `window`/`element_id` counts as not given. Both tools
+    resolve through the one `ScreenTools.ResolveRegionAsync`, so they cannot drift.
+  - A title that matches nothing is the window tool's own error listing the open windows; a
+    **minimised window is refused** (restore it first), and so is an element with no rectangle on
+    screen (`interact_element` `scroll_into_view` is named). The target's own rect is **clipped**
+    to the virtual screen by the new pure `RegionMath.Clip` — unlike a typed `region`, which is
+    still rejected — because a maximised window overhangs its monitor by its frame (so one normally
+    reports `targetClipped:true`); a target with nothing on any monitor — wholly off the virtual
+    screen, or only in a gap between unequal monitors — is refused as off-screen, naming its bounds
+    and the virtual screen. Titles in refusals are clipped so the message stays under the cap.
+  - The capture is **the screen rectangle the target occupies, not its own surface**: whatever
+    covers it is in the picture, and the descriptions (a shared `TargetNote`) say to
+    `switch_to_window` first. Nothing is focused, raised, restored or scrolled. `screenshot`
+    metadata and `ocr`'s JSON gain `target` (`{kind:"window", title, hwnd, matchStrategy, score}`
+    or `{kind:"element", elementId, name, controlType}`) and `targetClipped:true` when clipping
+    removed part of it; `region` stays the rect actually captured. `screenshot` resolves the
+    target before `annotate`'s snapshot walk; an `el_N` id from an earlier snapshot is then
+    replaced by the new ids in the returned list, while an id from `find_element` or `get_state`
+    stays valid (the description says so).
+  - `ocr` gains `format`: `text` (default; the output is unchanged) | `json`, validated before any
+    lookup or capture. `json` is `{coordinateSpace:"virtual-desktop", region, target?,
+    targetClipped?, textAngle?, text, lines:[{text, x, y, width, height, words:[{text, x, y,
+    width, height, centerX, centerY}]}]}` with every rectangle in virtual-desktop pixels, so a
+    word's `centerX`/`centerY` go straight to `click`. Nothing recognised is `text:""` and
+    `lines:[]`, not an error. The description advises narrowing a dense screen with `window`,
+    `element_id` or `region`.
+  - **Tilted text.** Measured with the real engine, Windows.Media.Ocr reports a tilted word's
+    rectangle in its deskewed frame, not the image's axes (on a 1000×600 frame, about 25–30 px off
+    at ±5° and 76–85 px at ±15°). `OcrGeometry` rotates each word's corners back by `TextAngle`
+    about the image centre and reports their axis-aligned box; `textAngle` is in the JSON only when
+    non-zero (a non-finite angle counts as none), and the description says each rectangle is then
+    the upright bounding box around its tilted word or line — larger than the text, possibly past
+    `region` — while `centerX`/`centerY` are still the words' centres.
+  - `ocr` now hides the post-capture glow (A-14) before its capture, in both formats, as
+    `screenshot` does, so an earlier capture's glow is never read as text; it shows none itself.
+  New `IOcrService.RecognizeAsync(region)` → `OcrResult(Text, Lines, Region, TextAngle?)` with
+  `OcrLine(Text, Bounds, Words)` and `OcrWord(Text, Bounds)` (`Models/ScreenDtos.cs`): the same
+  full-resolution capture and engine pass as `ExtractTextAsync`, which now shares one private
+  path with it. The image-pixel → virtual-desktop mapping is the new pure `Services/OcrGeometry.cs`
+  (the four edges scaled and rounded from the capture origin, so touching words still touch; a
+  line's bounds the union of its words'; a word-less line dropped). No new service or tool;
+  annotations unchanged (both read-only). `skills/windows/SKILL.md` gains the targets and the
+  click-a-word playbook. Tests: `ScreenToolsTargetTests`, `ScreenToolsOcrJsonTests`,
+  `ScreenToolsTargetSurfaceTests`, `ScreenToolsTargetIntegrationTests`, `OcrGeometryTests` and
+  `OcrServiceRecognizeIntegrationTests` (including rendered rotated-text frames),
+  `ScreenToolsOcrJsonIntegrationTests` and `ScreenToolsTargetOwnedWindowIntegrationTests`, plus
+  additions to `RegionMathTests`, `OcrServiceTests`, `ScreenToolsTests`, `ToolInventoryTests` and
+  `HttpTransportTests`. Not verified live:
+  `OcrWordPositionDesktopTests` (a word centre from `ocr(format:"json")` double-clicked in
+  Notepad) and the new `OcrServiceLiveTests` row are written but were not run, nor was the
+  `UIAutomation` category. Gaps found and not fixed are parity D-54 … D-65.
 - **`sequence` — up to 20 UI steps in one call** (E-6; 69 → 70 tools). `sequence(steps_json,
   observe = "none", settle_ms = 250)` runs a menu path, a wizard page or a keyboard-driven dialog
   as one round trip instead of one per step:
