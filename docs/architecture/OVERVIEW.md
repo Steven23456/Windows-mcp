@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 69 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 70 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
 
 ## Purpose
 
@@ -28,8 +28,9 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 | **UTF-8 Stdio** | Output encoding forced to UTF-8 before host starts — prevents buffering bugs on Windows |
 | **Dual Transport** | stdio (default) or Streamable HTTP/HTTPS on a TCP port, gated by a bearer API key — opt-in via `--transport http` |
 | **Act and Observe** | `click`, `type`, `key`, `shortcut`, `scroll`, `drag` and `interact_element` take `observe` (`none` default \| `foreground` \| `window`) and `settle_ms`: after the action the tool waits, takes a snapshot — including the observed process's open menus, dropdowns and tooltips — and appends it to the same result, so one UI step is one call (E-5, `Tools/Observation.cs`) |
+| **Batched UI Steps** | `sequence` runs up to 20 allowlisted input, UI Automation and wait steps in one call, validated whole before the first runs and stopping at the first failure, unsatisfied `wait_for`, failed `assert_element` or takeover (E-6, `Tools/SequenceTools.cs`) |
 | **Server Instructions** | The `initialize` result carries a sub-2 000-character playbook (`Hosting/ServerInstructions.cs`) on both transports — the snapshot → act → confirm loop and the safety rails — so a client without the plugin skill still gets them |
-| **Visible Control** | While a tool drives the mouse or keyboard, a person at the machine sees a ring around the pointer and a banner naming the takeover hotkey (default Ctrl+Alt+Shift+Backspace); pressing it hides them and the agent's next result says so. Never in a capture, never refuses or blocks anything; `--control-indicator off` turns it off |
+| **Visible Control** | While a tool drives the mouse or keyboard, a person at the machine sees a ring around the pointer and a banner naming the takeover hotkey (default Ctrl+Alt+Shift+Backspace); pressing it hides them and the agent's next result says so. Never in a capture, never refuses or blocks anything — only a `sequence` batch stops before its next step; `--control-indicator off` turns it off |
 
 ## Platform Requirements
 
@@ -53,12 +54,12 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 │  │         ModelContextProtocol SDK (Stdio or Streamable-HTTP) ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │        MCP Tool Layer  (19 [McpServerToolType] classes)     ││
+│  │        MCP Tool Layer  (20 [McpServerToolType] classes)     ││
 │  │   InputTools · UIAutomationTools · FileTools · ShellTools   ││
 │  │   SystemTools · WindowTools · ProcessTools · ScreenTools    ││
 │  │   NetworkTools · RegistryTools · WebTools · DiskTools       ││
 │  │   StorageTools · StartupTools · SecurityTools · JobTools    ││
-│  │   IntegrityTools · UsnTools · WatchTools                    ││
+│  │   IntegrityTools · UsnTools · WatchTools · SequenceTools    ││
 │  └─────────────────────────────────────────────────────────────┘│
 │  ┌─────────────────────────────────────────────────────────────┐│
 │  │   Service Abstraction Layer  (WindowsMcp.Abstractions)      ││
@@ -82,7 +83,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 ## Available Tools
 
-Windows-MCP exposes **69 MCP tools** across 19 tool classes:
+Windows-MCP exposes **70 MCP tools** across 20 tool classes:
 
 ### Input Tools (`InputTools` — 11 tools)
 | Tool | Purpose |
@@ -236,6 +237,11 @@ the result, never an error.
 | Tool | Purpose |
 |------|---------|
 | `Watch` | Live directory watching via `FileSystemWatcher`: `start` (returns a session id), `poll` (drain buffered events), `stop`, `list`; events buffer in a bounded ring between polls |
+
+### Sequence Tool (`SequenceTools` — 1 tool)
+| Tool | Purpose |
+|------|---------|
+| `Sequence` | Run up to 20 UI steps in order in one call (E-6): `steps_json` is a JSON array of `{"tool", "args"}` steps drawn from `click`, `type`, `key`, `shortcut`, `scroll`, `drag`, `interact_element`, `wait`, `wait_for`, `assert_element` only, each run through that tool's own method. The whole array is validated before step 0; the batch stops at the first step that throws, a `wait_for` not satisfied, an `assert_element` not `PASS`, or a takeover between steps, returning `{count, completed, results, failedIndex, error, stoppedBy}`. `observe:foreground` appends one snapshot after the batch; `observe:window` is refused |
 
 ## Core NuGet Dependencies
 

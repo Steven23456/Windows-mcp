@@ -35,7 +35,7 @@ all four hints and a title on every tool.
   (moves the pointer) and `clipboard` (`set` replaces the text) are not.
 - Titles are short imperative or noun phrases in sentence case.
 - No behaviour changes; no service touched; the count stays at what it is when the item lands
-  (68 before C-2, 69 after).
+  (68 before C-2, 69 after; E-6's `sequence` made it 70 and has a row below).
 
 ## The table
 
@@ -110,6 +110,7 @@ all four hints and a title on every tool.
 | startup_report | Startup report | ✔ | ✘ | ✔ | ✘ | |
 | fs_changes | File system changes | ✔ | ✘ | ✔ | ✘ | |
 | watch | Watch directory | ✘ | ✘ | ✘ | ✘ | `start` creates a session |
+| sequence | Sequence | ✘ | ✘ | ✘ | ✘ | E-6; its steps are the input, UI Automation and wait tools above, none destructive or open-world |
 
 ## Changes
 

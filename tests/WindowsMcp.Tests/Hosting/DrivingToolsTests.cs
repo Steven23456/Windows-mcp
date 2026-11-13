@@ -18,11 +18,15 @@ namespace WindowsMcp.Tests.Hosting;
 [Trait("Category", "Unit")]
 public class DrivingToolsTests
 {
-    /// <summary>The design note's "Driving tools" list: the tools that inject input or move focus.</summary>
+    /// <summary>
+    /// The design note's "Driving tools" list: the tools that inject input or move focus - S-11's
+    /// thirteen, plus E-6's <c>sequence</c>, so the filter's BeginAction covers the whole batch and
+    /// the takeover hotkey is live between its steps (docs/design/E-6-sequence.md "Mechanism").
+    /// </summary>
     internal static readonly string[] DesignNoteNames =
     [
         "click", "drag", "hover", "type", "key", "shortcut", "scroll", "multi_select", "multi_edit",
-        "interact_element", "file_dialog", "focus", "switch_to_window",
+        "interact_element", "file_dialog", "focus", "switch_to_window", "sequence",
     ];
 
     /// <summary>
@@ -39,11 +43,19 @@ public class DrivingToolsTests
             .ToArray();
 
     [Fact]
-    public void Names_is_exactly_the_thirteen_tools_of_the_design_note()
+    public void Names_is_exactly_the_fourteen_tools_of_the_design_notes()
     {
         DrivingTools.Names.Should().BeEquivalentTo(DesignNoteNames,
-            "the set is the reviewed list in docs/design/S-11-control-indicator.md; a tool drifting in or out "
-            + "changes when a person at the machine is told the AI has the controls");
+            "the set is the reviewed list in docs/design/S-11-control-indicator.md plus E-6's sequence; a tool "
+            + "drifting in or out changes when a person at the machine is told the AI has the controls");
+    }
+
+    [Fact]
+    public void Sequence_is_a_driving_tool()
+    {
+        // E-6: without it the filter never begins an action for the batch, the hotkey is not
+        // registered between steps, and a takeover mid-sequence cannot happen at all.
+        DrivingTools.Names.Should().Contain("sequence");
     }
 
     [Fact]
@@ -51,7 +63,7 @@ public class DrivingToolsTests
     {
         var wire = WireNames();
 
-        DrivingTools.Names.Should().HaveCount(13, "an empty set would make the sweep below vacuous");
+        DrivingTools.Names.Should().HaveCount(14, "an empty set would make the sweep below vacuous");
         DrivingTools.Names.Where(n => !wire.Contains(n, StringComparer.Ordinal))
             .Should().BeEmpty("every driving name is matched against the wire name the client calls, case and underscores included");
     }
@@ -61,7 +73,7 @@ public class DrivingToolsTests
     {
         // Guards the helper: if the naming rule above were wrong, the sweep would compare against
         // names no client ever sends.
-        WireNames().Should().Contain(["click", "multi_select", "switch_to_window", "file_read", "wait"]);
+        WireNames().Should().Contain(["click", "multi_select", "switch_to_window", "file_read", "wait", "sequence"]);
     }
 
     [Theory]

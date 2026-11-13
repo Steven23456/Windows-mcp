@@ -741,7 +741,8 @@ this flow refuses, delays or cancels a call, and no physical input is blocked:
 call-tool filter (WindowsMcpHost.AddWindowsMcp)
         │
   name in DrivingTools.Names?  (click, drag, hover, type, key, shortcut, scroll, multi_select,
-        │                       multi_edit, interact_element, file_dialog, focus, switch_to_window)
+        │                       multi_edit, interact_element, file_dialog, focus, switch_to_window,
+        │                       sequence)
   ┌─────┴────────────────────────────┐
   │ yes                              │ no
   ▼                                  │
@@ -780,6 +781,42 @@ filter before `ConsumeTakeover` (the SDK masks it), so that takeover too waits f
 result. A response lost **after** the filter returns still spends the note — the cancellation
 check narrows that window but cannot close it. With `--control-indicator off`, every member is a
 no-op and nothing is created or registered.
+
+---
+
+## Sequence Data Flow (E-6: validate all → run in order → stop)
+
+```
+sequence(steps_json, observe, settle_ms)            ← inside the filter's BeginAction/EndAction
+  │
+  ▼
+SequenceSteps.Parse(steps_json)  — parse (or unwrap a JSON string), 1..20 steps, allowlist,
+  │                                bind each step's args to the tool method's parameters with
+  │                                its defaults; any refusal → ArgumentException, nothing run
+  ▼
+Observation.AroundAsync(observe, settle_ms, elementId: null)  — window refused, settle_ms 0..5000
+  │
+  ▼
+takeoversAtStart = indicator.TakeoverCount
+for each step:
+  ct cancelled?                         → OperationCanceledException (the call ends)
+  TakeoverPending or TakeoverCount moved → stoppedBy "takeover", failedIndex null, break
+  invoke InputTools.X / UIAutomationTools.X (the step's own method; ct where it takes one)
+    throws (not the caller's cancel)    → ok:false, error (masked), stoppedBy "error", break
+    wait_for not Satisfied:true          → ok:false, stoppedBy "wait_for", break
+    assert_element not "PASS"            → ok:false, stoppedBy "assert_element", break
+    otherwise                           → ok:true, completed++
+  │
+  ▼
+{count, completed, results, failedIndex, error, stoppedBy}
+  → observe:foreground: wait settle_ms, append one snapshot of the foreground window
+  → the filter appends the takeover note, if one is pending (the sequence never consumed it)
+```
+
+A takeover pressed *during* a step does not interrupt it (D-52); the batch stops before the next
+step. `TakeoverCount` exists because the pending record is one slot any concurrent call's filter
+may consume between two steps; a takeover consumed **before** the sequence arrived is not seen
+(D-53).
 
 ---
 

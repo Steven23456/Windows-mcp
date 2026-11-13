@@ -11,5 +11,7 @@ internal static class DrivingTools
     {
         "click", "drag", "hover", "type", "key", "shortcut", "scroll", "multi_select", "multi_edit",
         "interact_element", "file_dialog", "focus", "switch_to_window",
+        // E-6: the indicator stays up for the whole batch, so the takeover hotkey is live between steps.
+        "sequence",
     };
 }

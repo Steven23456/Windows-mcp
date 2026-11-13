@@ -39,12 +39,35 @@ public class ToolInventoryTests
     private static string Skill() => File.ReadAllText(Path.Combine(RepoRoot(), "skills", "windows", "SKILL.md"));
 
     [Fact]
-    public void The_assembly_advertises_sixty_nine_tools()
+    public void The_assembly_advertises_seventy_tools()
     {
         // B-5 took the count from 65 to 66; B-7's multi_select and multi_edit took it to 68;
-        // C-2's registry_delete is the sixty-ninth (roadmap R6: "68 -> 69"). Every number quoted
-        // in a document is checked against this one below.
-        ToolMethods().Should().HaveCount(69);
+        // C-2's registry_delete is the sixty-ninth (roadmap R6: "68 -> 69"); E-6's sequence is the
+        // seventieth. Every number quoted in a document is checked against this one below.
+        ToolMethods().Should().HaveCount(70);
+    }
+
+    /// <summary>E-6: the new tool is on the surface, by name and not just by count.</summary>
+    [Fact]
+    public void Sequence_is_the_seventieth()
+    {
+        ToolMethods().Select(m => m.Name).Should().Contain(nameof(SequenceTools.Sequence));
+    }
+
+    /// <summary>E-6 / C-7: the design note's annotation row for sequence, every argument written out.</summary>
+    [Fact]
+    public void Sequence_carries_the_design_notes_annotations()
+    {
+        var sequence = ToolMethods().Single(m => m.DeclaringType == typeof(SequenceTools) && m.Name == nameof(SequenceTools.Sequence));
+
+        NamedArguments(sequence).Should().BeEquivalentTo(new Dictionary<string, object?>
+        {
+            ["Title"] = "Sequence",
+            ["ReadOnly"] = false,       // it drives the desktop
+            ["Destructive"] = false,    // only allowlisted UI steps: nothing durable is ended or replaced by the tool itself
+            ["Idempotent"] = false,     // a second batch types the text again
+            ["OpenWorld"] = false,      // a local desktop app is closed-world
+        });
     }
 
     /// <summary>C-2 (R5): the new tool is on the surface, by name and not just by count.</summary>

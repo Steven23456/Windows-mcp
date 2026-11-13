@@ -34,4 +34,16 @@ public interface IControlIndicator
 
     /// <summary>The takeover the AI has not been told about yet, once; null when there is none.</summary>
     TakeoverRecord? ConsumeTakeover();
+
+    /// <summary>
+    /// E-6: true while a takeover is recorded that <see cref="ConsumeTakeover"/> has not handed out
+    /// yet. Reading it does not consume the record. False when the indicator is off or disposed.
+    /// </summary>
+    bool TakeoverPending { get; }
+
+    /// <summary>
+    /// E-6: how many takeovers have been recorded since the process started; only grows. Neither
+    /// reading it nor <see cref="ConsumeTakeover"/> changes the count. 0 when the indicator is off or disposed.
+    /// </summary>
+    long TakeoverCount { get; }
 }

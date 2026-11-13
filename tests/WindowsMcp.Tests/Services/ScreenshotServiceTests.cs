@@ -227,6 +227,8 @@ public class ScreenshotServiceControlIndicatorTests
         public bool IsVisible => true;
         public bool IsCaptureExcluded => false;
         public TakeoverRecord? ConsumeTakeover() => null;
+        public bool TakeoverPending => false;
+        public long TakeoverCount => 0;
 
         public IDisposable SuspendForCapture()
         {

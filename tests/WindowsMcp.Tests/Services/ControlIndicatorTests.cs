@@ -314,6 +314,120 @@ public class ControlIndicatorTests
     }
 
     [Fact]
+    public async Task TakeoverPending_follows_a_real_takeover_until_it_is_consumed()
+    {
+        // E-6: the sequence reads this flag before every step. The state core's rule is
+        // ControlIndicatorStateTests; this proves the real indicator exposes it - set by the banner's
+        // WM_HOTKEY, not consumed by reading, cleared by ConsumeTakeover, false once disposed.
+        var ci = new ControlIndicator(Options(lingerMs: 30_000));
+        try
+        {
+            await ShowAsync(ci);
+            ci.TakeoverPending.Should().BeFalse("nothing has been taken over yet");
+
+            PostTakeover(ci.BannerHandle).Should().BeTrue();
+            (await WithinAsync(2000, () => ci.TakeoverPending)).Should().BeTrue("the posted WM_HOTKEY recorded a takeover");
+            ci.TakeoverPending.Should().BeTrue("reading the flag does not consume the record");
+            ci.EndAction();
+            ci.BeginAction();   // the next driving call - a sequence - begins: the record is still there
+            ci.TakeoverPending.Should().BeTrue("a new BeginAction does not forget the takeover");
+
+            ci.ConsumeTakeover().Should().NotBeNull("the call-tool filter still gets its note");
+            ci.TakeoverPending.Should().BeFalse("consumed");
+
+            ci.EndAction();
+            ci.BeginAction();
+            (await WithinAsync(2000, () => ci.IsVisible)).Should().BeTrue();
+            PostTakeover(ci.BannerHandle).Should().BeTrue();
+            (await WithinAsync(2000, () => ci.TakeoverPending)).Should().BeTrue("precondition: a second takeover is pending");
+            ci.EndAction();
+        }
+        finally
+        {
+            ci.Dispose();
+        }
+
+        ci.TakeoverPending.Should().BeFalse("a disposed indicator reports nothing, even with a record left unconsumed");
+    }
+
+    [Fact]
+    public async Task TakeoverCount_counts_real_takeovers_and_is_not_reset_by_consuming()
+    {
+        // E-6: the epoch the sequence compares against. The rule is ControlIndicatorStateTests; this
+        // proves the real indicator exposes it - raised by the banner's WM_HOTKEY, untouched by
+        // reading and by ConsumeTakeover, 0 once disposed.
+        var ci = new ControlIndicator(Options(lingerMs: 30_000));
+        try
+        {
+            await ShowAsync(ci);
+            ci.TakeoverCount.Should().Be(0, "nothing has been taken over yet");
+
+            PostTakeover(ci.BannerHandle).Should().BeTrue();
+            (await WithinAsync(2000, () => ci.TakeoverCount == 1)).Should().BeTrue("the posted WM_HOTKEY recorded one takeover");
+            ci.TakeoverCount.Should().Be(1, "reading changes nothing");
+            ci.ConsumeTakeover().Should().NotBeNull();
+            ci.TakeoverCount.Should().Be(1, "consuming the record does not undo the takeover");
+
+            ci.EndAction();
+            ci.BeginAction();
+            (await WithinAsync(2000, () => ci.IsVisible)).Should().BeTrue();
+            PostTakeover(ci.BannerHandle).Should().BeTrue();
+            (await WithinAsync(2000, () => ci.TakeoverCount == 2)).Should().BeTrue("a second takeover counts again");
+            ci.EndAction();
+        }
+        finally
+        {
+            ci.Dispose();
+        }
+
+        ci.TakeoverCount.Should().Be(0, "a disposed indicator reports nothing");
+    }
+
+    [Fact]
+    public async Task A_sequence_stops_before_the_next_step_after_a_real_takeover_and_leaves_the_record()
+    {
+        // E-6 through the REAL indicator: SequenceToolsTests and the filter tests drive a mocked
+        // IControlIndicator, so they would stay green if the real flag never rose on WM_HOTKEY or
+        // were consumed by reading it. Input is a mock - nothing is injected; the takeover is a
+        // posted WM_HOTKEY, as everywhere in this class.
+        var ci = new ControlIndicator(Options(lingerMs: 30_000));
+        var sent = new ConcurrentQueue<string>();
+        var input = new Moq.Mock<WindowsMcp.Abstractions.IInputService>();
+        input.Setup(i => i.PressKeyAsync(Moq.It.IsAny<string>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns(async (string key, CancellationToken _) =>
+            {
+                sent.Enqueue(key);
+                if (key != "b") return;
+                // The user presses the combination while step 1 runs.
+                PostTakeover(ci.BannerHandle).Should().BeTrue();
+                (await WithinAsync(2000, () => ci.TakeoverPending)).Should().BeTrue("precondition: the banner recorded the takeover");
+            });
+        var sequence = new WindowsMcp.Tools.SequenceTools(input.Object,
+            new Moq.Mock<WindowsMcp.Abstractions.IClipboardService>().Object,
+            new Moq.Mock<WindowsMcp.Abstractions.IUIAutomationService>().Object, ci);
+        try
+        {
+            await ShowAsync(ci);   // what the call-tool filter's BeginAction does for a driving tool
+
+            var text = await sequence.Sequence("""
+                [{"tool":"key","args":{"key":"a"}},{"tool":"key","args":{"key":"b"}},{"tool":"key","args":{"key":"c"}}]
+                """);
+
+            sent.Should().Equal(["a", "b"], "step 2 is never sent once the real flag is up");
+            var root = System.Text.Json.JsonDocument.Parse(text).RootElement;
+            root.GetProperty("stoppedBy").GetString().Should().Be("takeover");
+            root.GetProperty("completed").GetInt32().Should().Be(2);
+            ci.TakeoverPending.Should().BeTrue("the sequence read the record and left it for the filter's note");
+            ci.ConsumeTakeover().Should().NotBeNull().And.Match<TakeoverRecord>(r => r.Hotkey == TestChord.Display);
+            ci.EndAction();
+        }
+        finally
+        {
+            ci.Dispose();
+        }
+    }
+
+    [Fact]
     public async Task After_a_takeover_the_next_action_shows_it_again()
     {
         using var ci = new ControlIndicator(Options(lingerMs: 30_000));

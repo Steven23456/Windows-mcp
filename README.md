@@ -2,7 +2,7 @@
 
 An MCP server for Windows desktop automation, written in C# on the official
 [`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol)
-SDK. See [Tool reference](#tool-reference) for the 69 tools.
+SDK. See [Tool reference](#tool-reference) for the 70 tools.
 
 ## Build
 
@@ -174,7 +174,7 @@ The host name in the URL must match the certificate's `-DnsName`.
 
 While a tool that moves the pointer, presses keys or changes focus is running (`click`, `drag`,
 `hover`, `type`, `key`, `shortcut`, `scroll`, `multi_select`, `multi_edit`, `interact_element`,
-`file_dialog`, `focus`, `switch_to_window`), a person at the machine sees a blue ring around the
+`file_dialog`, `focus`, `switch_to_window`, `sequence`), a person at the machine sees a blue ring around the
 pointer and a dark banner at the top of the pointer's monitor:
 
 > AI is controlling mouse & keyboard · Ctrl+Alt+Shift+Backspace to take over
@@ -188,7 +188,8 @@ one extra block, once:
 
 That is all a takeover does. **Nothing is ever refused, delayed or cancelled, and your own mouse
 and keyboard are never blocked**: the indicator informs, it does not gate the agent the way
-upstream's desktop-control layer does. Moving the mouse is not a takeover; only the combination
+upstream's desktop-control layer does. The one exception is a `sequence` batch, which the server
+itself steps through: a takeover stops it before its next step (the step in progress finishes). Moving the mouse is not a takeover; only the combination
 is. The combination is registered only while the indicator is showing, so other applications
 have it the rest of the time; if another application already holds it, the banner leaves the hint
 out and the server logs a warning.
@@ -216,11 +217,11 @@ gated by `confirm` (`Hosting/ServerInstructions.cs`, under 2 000 characters).
 
 ## Tool reference
 
-69 tools, grouped:
+70 tools, grouped:
 
 | Category | Tools |
 |---|---|
-| Input | `click`, `drag`, `hover`, `type`, `key`, `shortcut`, `scroll`, `wait`, `multi_select`, `multi_edit`, `clipboard` |
+| Input | `click`, `drag`, `hover`, `type`, `key`, `shortcut`, `scroll`, `wait`, `multi_select`, `multi_edit`, `clipboard`, `sequence` (up to 20 UI steps in one call) |
 | Screen | `screenshot`, `ocr` |
 | Window | `window`, `switch_to_window`, `launch`, `focus`, `multi_monitor` |
 | UI Automation | `snapshot`, `get_state`, `find_element`, `get_element`, `get_text`, `assert_element`, `interact_element`, `get_table`, `wait_for` |
@@ -279,6 +280,27 @@ Every target is resolved before any input is sent, so an off-screen element refu
 batch with nothing done, and `multi_select` holds Ctrl from before the first click until after the
 last and always releases it. Neither is atomic: they stop at the first failure and return
 `failedIndex` and `error` alongside the per-entry `results` produced so far.
+
+`sequence(steps_json, observe?, settle_ms?)` runs up to 20 UI steps in order in one call — a menu
+path, a wizard page, File → Save As → a name → Enter. `steps_json` is a JSON array (or a JSON
+string holding one) of `{"tool": name, "args": {...}}` steps; `tool` is one of `click`, `type`,
+`key`, `shortcut`, `scroll`, `drag`, `interact_element`, `wait`, `wait_for`, `assert_element`
+(exact, lower-case; nothing else can run in a sequence), and `args` are that tool's own arguments
+under their own names, with its defaults. A step may not carry `observe` or `settle_ms`: they
+belong to `sequence`. The whole array is validated before the first step runs — an unknown tool
+or argument, a missing required argument or a wrong JSON type (no coercion: `"5"` is not `5`) is
+refused naming `steps_json[i]`, with nothing done. Steps then run through the standalone tools'
+own code and stop at the first that throws (`stoppedBy: "error"`), a `wait_for` that is not
+`Satisfied` (`"wait_for"`) or an `assert_element` that is not `PASS` (`"assert_element"`); the
+steps before it were performed, so the batch is not atomic. If the person at the machine presses
+the takeover hotkey, the remaining steps are not run (`stoppedBy: "takeover"`, `failedIndex:
+null`) — the step in progress finishes first. The result is `{count, completed, results:[{index,
+tool, ok, result | error}], failedIndex, error, stoppedBy}`. No snapshot is taken between steps,
+so an `el_N` id only works for an element that survives the earlier steps — address later steps
+by coordinates or keyboard, with `wait_for` between them — and a `wait_for` with `text_exists` or
+`focused_element` takes a snapshot itself, which retires every earlier id. `observe: "foreground"`
+appends one fresh snapshot after the batch ends, complete or stopped early; `observe: "window"`
+is refused (a sequence has no single target element).
 
 Name a window by `Title` — matched exact, then substring, then fuzzy (score ≥ 70), so
 `switch_to_window("notepad")` finds `Untitled - Notepad` — or by the `Hwnd` from

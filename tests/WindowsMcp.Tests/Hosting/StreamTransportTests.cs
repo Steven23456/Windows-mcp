@@ -169,7 +169,7 @@ public class StreamTransportTests
 
         var tools = await harness.Client.ListToolsAsync();
 
-        tools.Should().HaveCount(69, "the same inventory ToolInventoryTests counts, discovered from the assembly");
+        tools.Should().HaveCount(70, "the same inventory ToolInventoryTests counts, discovered from the assembly (E-6: sequence is the seventieth)");
         var scrape = tools.Single(t => t.Name.Replace("_", "").Equals("scrape", StringComparison.OrdinalIgnoreCase));
         scrape.ProtocolTool.Annotations.Should().NotBeNull();
         scrape.ProtocolTool.Annotations!.ReadOnlyHint.Should().BeTrue("scrape only reads");

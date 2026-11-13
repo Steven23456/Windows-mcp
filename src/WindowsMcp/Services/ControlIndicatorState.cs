@@ -18,6 +18,7 @@ internal sealed class ControlIndicatorState
     private long? _fadeStart;   // monotonic timestamp of the last End
     private bool _dismissed;
     private TakeoverRecord? _pending;
+    private long _takeoverCount;   // E-6: takeovers recorded, ever; Consume does not touch it
 
     internal ControlIndicatorState(TimeSpan linger, TimeProvider? clock = null)
     {
@@ -72,6 +73,7 @@ internal sealed class ControlIndicatorState
             if (!Shows()) return null;
             _dismissed = true;
             _fadeStart = null;
+            _takeoverCount++;
             return _pending = new TakeoverRecord(_clock.GetUtcNow(), hotkeyDisplay);
         }
     }
@@ -85,6 +87,21 @@ internal sealed class ControlIndicatorState
             _pending = null;
             return pending;
         }
+    }
+
+    /// <summary>E-6: whether a takeover is recorded that <see cref="Consume"/> has not handed out yet. Reading changes nothing.</summary>
+    internal bool TakeoverPending
+    {
+        get { lock (_gate) return _pending is not null; }
+    }
+
+    /// <summary>
+    /// E-6: how many takeovers have been recorded, ever. It only grows: the pending record is one
+    /// slot any call may consume, so a batch that must stop on a takeover compares this instead.
+    /// </summary>
+    internal long TakeoverCount
+    {
+        get { lock (_gate) return _takeoverCount; }
     }
 
     private bool Shows() =>

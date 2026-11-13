@@ -125,6 +125,10 @@ public sealed class ControlIndicator : IControlIndicator, IDisposable
 
     public TakeoverRecord? ConsumeTakeover() => _options.Enabled && !_disposed ? _state.Consume() : null;
 
+    public bool TakeoverPending => _options.Enabled && !_disposed && _state.TakeoverPending;
+
+    public long TakeoverCount => _options.Enabled && !_disposed ? _state.TakeoverCount : 0;
+
     public void Dispose()
     {
         Thread? thread;
