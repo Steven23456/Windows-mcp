@@ -302,6 +302,19 @@ public sealed class UIAutomationService : IUIAutomationService
             if (await SessionStateAsync(ct) is { InputAvailable: false, Note: { Length: > 0 } why })
             {
                 _log.LogDebug(ex, "The snapshot failed while the user's desktop is unavailable; answering with the session note.");
+                // This empty snapshot IS the next snapshot: the ids of the one before it expire,
+                // as they do for any other. On the STA thread, so it is ordered with the walk and
+                // publication of every other snapshot and cannot cut into one that is minting ids.
+                try
+                {
+                    await OnStaAsync(() => { _cache.EvictSnapshot(); return true; }, CancellationToken.None);
+                }
+                catch (Exception evictFailure)
+                {
+                    // The STA thread is gone (disposal): the cache guards itself, so retire them here.
+                    _log.LogDebug(evictFailure, "Could not reach the UI Automation thread to retire snapshot ids; retiring them directly.");
+                    _cache.EvictSnapshot();
+                }
                 return new SnapshotResult(
                     Windows: [], ActiveWindow: null, Cursor: new CursorPosition(0, 0), CursorMonitorIndex: -1,
                     Interactive: [], Scrollable: [], Tree: null, Truncated: false,

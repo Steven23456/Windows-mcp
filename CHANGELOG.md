@@ -30,8 +30,9 @@
     note attached. One that **fails** — on a locked or secure desktop the cursor read is refused, so
     without this the warning could never arrive — while the session reports input unavailable
     returns an empty snapshot carrying the note and `Unavailable:true` (omitted from JSON when
-    false) instead of the error; an `ArgumentException` or the caller's cancellation still
-    propagates, and a fault in the probe never fails a snapshot. The renderer is shared, so the same
+    false) instead of the error — and, being the next snapshot, it expires the previous snapshot's
+    `el_N` ids like any other (`UIAutomationSnapshotUnavailableEvictionTests`); an
+    `ArgumentException` or the caller's cancellation still propagates, and a fault in the probe never fails a snapshot. The renderer is shared, so the same
     line opens an E-5 observation's snapshot (under its header) and an annotated screenshot's
     element list (though `screenshot(annotate:true)` reads the cursor itself first and still fails
     there, D-66). The `snapshot` description names every reason, says the lists are empty with

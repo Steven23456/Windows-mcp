@@ -136,6 +136,12 @@ the same line opens an E-5 observation's snapshot (under its header) and an anno
 screenshot's element list. (`screenshot(annotate:true)` reads the cursor itself before its
 snapshot, so on a locked desktop it still fails with that bare error — D-66.)
 
+An `Unavailable` snapshot is still **the next snapshot**: it retires the `el_N` ids of the snapshot
+before it, exactly as any other snapshot does (ids from `find_element` / `get_state` survive, as
+always). The eviction runs on the UI Automation thread so it is ordered with every other
+snapshot's walk and publication. A snapshot call that throws (input available, bad arguments, the
+caller's cancellation) returned no snapshot and retires nothing. (PR #46 review.)
+
 Two callers interpret a snapshot and act on `Unavailable`:
 
 - `wait_for` (`text_exists`, `focused_element`): a poll whose snapshot is `Unavailable` **ends the
