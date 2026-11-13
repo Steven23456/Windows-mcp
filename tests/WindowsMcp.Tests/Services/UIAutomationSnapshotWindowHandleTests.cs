@@ -48,7 +48,8 @@ internal sealed class FakeUiWindows : IDisposable
         (int X, int Y, int W, int H)? bounds = null, bool offscreen = false, int controlType = ButtonType,
         bool handleSupported = true, bool pidSupported = true, bool broken = false,
         AutomationElement[]? children = null, Exception? pidFailure = null, Exception? childrenFailure = null,
-        Exception? readFailure = null)
+        Exception? readFailure = null, Exception? cacheFetchFailure = null,
+        IReadOnlyDictionary<string, Exception>? propertyFailures = null, Exception? valuePatternFailure = null)
     {
         var lib = Automation.PropertyLibrary.Element;
         var b = bounds ?? (100, 100, 300, 200);
@@ -59,6 +60,10 @@ internal sealed class FakeUiWindows : IDisposable
             if (broken) throw new FlaUI.Core.Exceptions.ElementNotAvailableException();
             // PR #43 U2: every property read fails this way (the popup filter's first read is the handle).
             if (readFailure is not null) throw readFailure;
+            // PR #43 V2: one property's read fails, by its PropertyLibrary name ("Name", "BoundingRectangle", ...).
+            if (propertyFailures is not null)
+                foreach (var (property, failure) in propertyFailures)
+                    if (((FlaUI.Core.Identifiers.PropertyId)lib.GetType().GetProperty(property)!.GetValue(lib)!).Id == id) throw failure;
             if (id == lib.Name.Id) return name;
             if (id == lib.ControlType.Id) return controlType;
             if (id == lib.BoundingRectangle.Id) return new double[] { b.X, b.Y, b.W, b.H };
@@ -78,6 +83,15 @@ internal sealed class FakeUiWindows : IDisposable
                 Bump(ChildReads, name);
                 return childrenFailure is not null ? throw childrenFailure : children!;
             });
+        // PR #43 V1: the walk's subtree-cache fetch (FindFirst on the root, scope Element) fails this way;
+        // without the hook the strict mock refuses it, which is the readable-fallback case.
+        if (cacheFetchFailure is not null)
+            framework.Setup(f => f.FindFirst(It.IsAny<FlaUI.Core.Definitions.TreeScope>(), It.IsAny<FlaUI.Core.Conditions.ConditionBase>()))
+                .Throws(cacheFetchFailure);
+        // PR #43 V2: a pattern read (the walk's Value pattern) fails this way.
+        if (valuePatternFailure is not null)
+            framework.Protected().Setup<FlaUI.Core.IAutomationPattern<FlaUI.Core.Patterns.IValuePattern>>("InitializeValuePattern")
+                .Throws(valuePatternFailure);
         // PR #43 T2: a search is counted, then refused (as a strict mock refused it before).
         framework.Setup(f => f.FindAll(It.IsAny<FlaUI.Core.Definitions.TreeScope>(), It.IsAny<FlaUI.Core.Conditions.ConditionBase>()))
             .Returns((FlaUI.Core.Definitions.TreeScope scope, FlaUI.Core.Conditions.ConditionBase _) =>

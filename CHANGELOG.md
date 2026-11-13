@@ -29,7 +29,8 @@
     `popup`, right after its owner. Its elements are visited and charged to the element budget
     once, so with a short budget the owner's rows come first, then the owned window's. This holds
     for the foreground fallback too (an untitled or tool window in front that the inventory does
-    not flag active). So an owned dialog reaching outside its owner is observed whole and once.
+    not flag active; its root comes from the `UiRoots.FirstAvailable` ladder, which in an
+    observation stops at a timeout instead of falling to the next rung). So an owned dialog reaching outside its owner is observed whole and once.
     The plain `snapshot` tool includes neither popups nor this (parity D-39, D-43).
   - `observe:window` observes the top-level window the target element belongs to, resolved
     **before** the action from the nearest native handle via Win32 `GetAncestor(GA_ROOT)`, so an
@@ -50,10 +51,12 @@
     wait or the snapshot drops the result although the action was performed; the other five
     tools' wait and snapshot cannot be cancelled (parity D-40). A UI Automation **timeout** (a
     hung provider) from **any** step of an observation's snapshot — resolving the foreground,
-    title-matched or by-handle window, finding its owned windows, the walk's children reads, or
-    the popup pass (listing the desktop's windows, reading or walking a popup) — ends in that same
-    failure note rather than a snapshot missing rows; only individual property reads inside the
-    walk are still swallowed (D-5). Other failures there keep their behaviour (a popup that cannot
+    title-matched or by-handle window (the foreground-root ladder included: a hung foreground
+    window no longer falls through to the focused element or the desktop root), finding its owned
+    windows, any read in the walk (the subtree cache fetch, every node property and pattern read,
+    the children read), or the popup pass (listing the desktop's windows, reading or walking a
+    popup) — ends in that same failure note rather than a snapshot missing rows. Other failures
+    there keep their behaviour (a popup that cannot
     be read is skipped and logged; a desktop list that cannot be read costs the popups, not the
     snapshot), and the plain `snapshot` tool still logs and skips a window that times out.
   New `IUIAutomationService.GetElementWindowAsync(elementId, ct)` → the window handle;
@@ -76,7 +79,8 @@
   `ObservationToolsTests`, `ObservationSurfaceTests`, `UIAutomationServiceElementWindowTests`,
   `UIAutomationSnapshotWindowHandleTests`, `UIAutomationSnapshotPopupsTests`,
   `UIAutomationSnapshotOwnedWindowsTests`, `UIAutomationSnapshotOwnedWindowBudgetTests`,
-  `ObserveWindowTimeoutTests` and `UIAutomationSnapshotObservationTimeoutTests` (Unit), and
+  `ObserveWindowTimeoutTests`, `UIAutomationSnapshotObservationTimeoutTests`,
+  `UiTraverserTimeoutTests` and rows in `UiRootsTests` (Unit), and
   `UIAutomationServiceElementWindowIntegrationTests`,
   `UIAutomationServiceObserveWindowsIntegrationTests` (real owner/owned-dialog pairs, a window
   owned by an owned window, a hidden owned window, untitled, tool and popup windows in

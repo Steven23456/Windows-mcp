@@ -169,11 +169,13 @@ cursor, every interactive element with its centre coordinates, and the scrollabl
          then every on-screen, unlisted, not-yet-walked top-level window of a
          walked process — an open menu, a dropdown, a tooltip — same budget;
          with IncludePopups a TimeoutException from ANY step propagates
-         (resolving a foreground / title / by-handle target, discovery,
-         bookkeeping, Walk(..., timeoutsPropagate) children reads, the popup
-         pass: desktop list, popup filter read, popup walk) — only property
-         reads inside the traverser stay swallowed (D-5); without
-         IncludePopups a timeout is a logged skip, as before
+         (resolving a foreground / title / by-handle target; the foreground
+         fallback's UiRoots ladder, which stops at a timeout instead of
+         falling to the focused element or the desktop root; discovery;
+         bookkeeping; every read in Walk(..., timeoutsPropagate): cache
+         fetch, property/pattern reads, children; the popup pass: desktop
+         list, popup filter read, popup walk); without IncludePopups a
+         timeout is a logged skip and the walk swallows it, as before (D-5)
 
 3. Per walked node → el_N id (ids the previous snapshot issued are evicted
    first) → UiTree.Project:

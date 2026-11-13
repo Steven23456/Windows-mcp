@@ -2551,25 +2551,29 @@ labelled with its inventory title, else its UIA name, else `popup`, right after 
 before the desktop-level popups, nothing twice and charged to the element budget once (with a short
 budget the owner's rows come first) — so an owned dialog reaching outside its owner is observed
 whole, once, under its own title. The foreground fallback (an untitled or tool window in front,
-which the inventory does not flag active) goes through the same per-window walk (`WalkWindow`). (4) Order: observe and `settle_ms` are
+which the inventory does not flag active) goes through the same per-window walk (`WalkWindow`);
+in an observation its root ladder (`GetForegroundRoot(timeoutsPropagate: true)`) stops at a
+timeout instead of falling to the focused element or the desktop root. (4) Order: observe and `settle_ms` are
 validated, and the window looked up, before the tool's own argument checks and before any input;
 an action that throws observes nothing; a snapshot that fails afterwards (other than a
 cancellation) becomes one line after the result — `Observation failed: <why> The action above was
 performed, so do not repeat it; call snapshot to see the result.` — never an error. Only `click`
 and `key` pass the request's token (D-40). With `IncludePopups` a `TimeoutException` from **any**
 step of the STA walk propagates — resolving a target window (by handle, the active foreground
-window or a title match), owned-window discovery, the pid/handle bookkeeping, the walk's children
-reads (`UiTraverser.Walk`'s `timeoutsPropagate`), and the popup pass (listing the desktop's
-top-level windows, reading a popup in the filter, walking it) — so a hung provider gives the
-failure note, never a snapshot missing rows. Only individual property reads inside the walk are
-still swallowed (D-5); non-timeout failures keep their skip-and-log behaviour; the plain `snapshot`
-keeps D-5's skip throughout. The `snapshot` description, `ElementCache`'s expired-id
+window or a title match; the foreground fallback's `UiRoots.FirstAvailable` ladder, which no
+longer falls through a hung rung to the focused element or the desktop root), owned-window
+discovery, the pid/handle bookkeeping, every read in the walk (`UiTraverser.Walk`'s
+`timeoutsPropagate`: the subtree cache fetch, each node property and pattern read, the children
+read), and the popup pass (listing the desktop's top-level windows, reading a popup in the
+filter, walking it) — so a hung provider gives the failure note, never a snapshot missing rows.
+Non-timeout failures keep their skip-and-log behaviour; the plain `snapshot` keeps D-5's skip
+throughout. The `snapshot` description, `ElementCache`'s expired-id
 message and the server instructions (1 978 characters) now list "any action with observe" among
 the calls that replace snapshot ids. Tests: `ObservationToolsTests`, `ObservationSurfaceTests`,
 `UIAutomationServiceElementWindowTests`, `UIAutomationSnapshotWindowHandleTests` and
 `UIAutomationSnapshotPopupsTests`, `UIAutomationSnapshotOwnedWindowsTests`,
 `UIAutomationSnapshotOwnedWindowBudgetTests`, `ObserveWindowTimeoutTests` and
-`UIAutomationSnapshotObservationTimeoutTests` (Unit), and on real windows with the real `WindowService`
+`UIAutomationSnapshotObservationTimeoutTests`, `UiTraverserTimeoutTests` and rows in `UiRootsTests` (Unit), and on real windows with the real `WindowService`
 (Integration): `UIAutomationServiceElementWindowIntegrationTests`,
 `UIAutomationServiceObserveWindowsIntegrationTests` (`Fixtures/OwnedWindowFamily.cs`: two
 owner/owned-dialog pairs, a window owned by an owned window, a hidden owned window, untitled, tool

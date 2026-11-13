@@ -418,6 +418,20 @@ public sealed class ObserveWindowTimeoutTests : IDisposable
     }
 
     [Fact]
+    public async Task Observe_foreground_whose_windows_subtree_cache_fetch_times_out_returns_the_note()
+    {
+        // Round 5 V1 at the tool: the reviewer's regression - the fetch hangs while the fallback root
+        // would have been readable, and the observation used to come back "Observed".
+        _svc.ElementFromHandle = h => _fakes.Window("Some app", h, controlType: 50032, bounds: (100, 100, 400, 300),
+            cacheFetchFailure: new TimeoutException("subtree cache fetch timed out (wmcp-e5)"),
+            children: [_fakes.Window("Some app button", 0, bounds: (110, 110, 50, 20))]);
+
+        var text = await new Observation(_svc).AroundAsync("foreground", 0, null, CancellationToken.None, () => Task.FromResult("acted"));
+
+        ShouldBeTheTimeoutNote(text, "subtree cache fetch timed out (wmcp-e5)");
+    }
+
+    [Fact]
     public async Task Observe_window_whose_window_really_closed_still_falls_back_to_the_foreground()
     {
         // Guard: KeyNotFound (null / gone) keeps the fallback.
@@ -599,6 +613,49 @@ public sealed class UIAutomationSnapshotObservationTimeoutTests : IDisposable
         var snap = await svc.SnapshotAsync(Observation(SnapshotScope.Window));
 
         snap.Interactive.Select(e => e.Name).Should().Equal(["Host button", "Menu item A"]);
+    }
+
+    // ---- PR #43 round 5 V: the walk itself (UiTraverserTimeoutTests pins every read at the source) ----
+
+    private AutomationElement HostWindow(Exception? cacheFetch = null, IReadOnlyDictionary<string, Exception>? childFails = null) =>
+        _fakes.Window("Host", Host, controlType: 50032, bounds: (100, 100, 400, 300), cacheFetchFailure: cacheFetch,
+            children: [_fakes.Window("Host button", 0, bounds: (110, 110, 50, 20), propertyFailures: childFails)]);
+
+    [Theory]
+    [MemberData(nameof(ObservedScopes))]
+    public async Task V_a_target_whose_subtree_cache_fetch_times_out_propagates_in_an_observation(SnapshotScope scope)
+    {
+        var hung = new TimeoutException("subtree cache fetch timed out (wmcp-e5)");
+        using var svc = NewService(HostWindow(cacheFetch: hung));
+
+        Func<Task> act = () => svc.SnapshotAsync(Observation(scope));
+
+        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
+    }
+
+    [Theory]
+    [MemberData(nameof(ObservedScopes))]
+    public async Task V_a_target_whose_descendant_property_read_times_out_propagates_in_an_observation(SnapshotScope scope)
+    {
+        var hung = new TimeoutException("descendant Name read timed out (wmcp-e5)");
+        using var svc = NewService(HostWindow(childFails: new Dictionary<string, Exception> { ["Name"] = hung }));
+
+        Func<Task> act = () => svc.SnapshotAsync(Observation(scope));
+
+        (await act.Should().ThrowAsync<TimeoutException>()).Which.Should().BeSameAs(hung);
+    }
+
+    [Fact]
+    public async Task V_guard_without_popups_neither_timeout_fails_the_snapshot()
+    {
+        using var fetch = NewService(HostWindow(cacheFetch: new TimeoutException("timed out (wmcp-e5)")));
+        using var read = NewService(HostWindow(childFails: new Dictionary<string, Exception> { ["Name"] = new TimeoutException("timed out (wmcp-e5)") }));
+
+        var fetched = await fetch.SnapshotAsync(new SnapshotRequest(SnapshotScope.Foreground));
+        var readSnap = await read.SnapshotAsync(new SnapshotRequest(SnapshotScope.Foreground));
+
+        fetched.Interactive.Select(e => e.Name).Should().Equal(["Host button"], "the fetch falls back to the root, as D-5 always did");
+        readSnap.Interactive.Should().ContainSingle("the unreadable Name takes its default");
     }
 
     // The other non-timeout guards of this pass are UIAutomationSnapshotPopupsTests
