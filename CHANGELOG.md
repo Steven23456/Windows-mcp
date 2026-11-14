@@ -39,8 +39,11 @@
     deletes), `old_string` equal to `new_string`, an unknown encoding, a file that does not exist
     (use `file_write`), a directory, a symlink or junction (OneDrive and deduplicated files are
     edited normally), a file with more than one hard link (the swap would split it into two
-    files), a read-only file, a file over 16 MiB, and a file whose length or last-write time
-    changed between the read and the replace. Returns `{path, replacements, firstLine, encoding,
+    files), a read-only file, a file over 16 MiB, an edit whose result would exceed 16 MiB
+    (16,777,216 characters before encoding, or bytes after it, BOM included — computed in 64 bits,
+    so a huge `replace_all` is a refusal, not an overflow), and a file whose length or last-write
+    time changed between the read and the replace — checked again after each wait when a sharing
+    violation is retried, so another writer's content always wins. Returns `{path, replacements, firstLine, encoding,
     bom, lineEndings (crlf|lf|mixed|none), bytesBefore, bytesAfter}`.
   - `file_search` gains `content` (a .NET regex matched per line, `(?i)` for case-insensitive),
     `max_matches` (1-1000, default 100) and `context_lines` (0-5, default 0), appended after

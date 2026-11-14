@@ -106,7 +106,7 @@ Counts are recomputed from §3 by the sync script; only the Notes column is writ
 | WMI_QUERY | 9 | 9 | 6 | 3 | 0 | 0 |  |
 | OBSERVE | 10 | 0 | 0 | 0 | 0 | 0 |  |
 | SEQUENCE | 4 | 0 | 0 | 0 | 0 | 0 |  |
-| FILE_EDIT | 7 | 0 | 0 | 0 | 0 | 0 |  |
+| FILE_EDIT | 8 | 0 | 0 | 0 | 0 | 0 |  |
 
 ## 3. Test log
 
@@ -722,6 +722,7 @@ of the deciding field, or a path under the evidence folder.
 | FILE_EDIT-07 | T1 | L | NOT RUN | | |
 | FILE_SEARCH-12 | T0 | L | NOT RUN | | |
 | FILE_SEARCH-13 | T0 | L | NOT RUN | | |
+| FILE_EDIT-08 | T1 | L | NOT RUN | | |
 
 ## 4. Defects
 

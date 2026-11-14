@@ -238,7 +238,7 @@ public sealed class FileTools
                  "add surrounding lines to make it unique, or pass replace_all:true to replace every occurrence. The file's encoding, byte-order mark (BOM) and line endings are preserved: " +
                  "a \\n in the strings matches the file's own line ending and is written as it (in a file that mixes line endings, or has none, new_string is written as given), and every byte outside the replaced text is left as it was. " +
                  "The file's permissions, attributes, creation time and alternate data streams are kept where the file system supports it. " +
-                 "Refused with nothing written: a file that does not exist (use file_write), a directory, a symlink or junction (edit its target), a file with more than one hard link, a read-only file, a file over 16 MiB, " +
+                 "Refused with nothing written: a file that does not exist (use file_write), a directory, a symlink or junction (edit its target), a file with more than one hard link, a read-only file, a file over 16 MiB or an edit that would make it larger than 16 MiB, " +
                  "bytes that are not valid in the encoding (with no byte-order mark, auto also refuses text containing NUL characters: pass encoding:utf-16 if the file is UTF-16, or encoding:utf-8 if it really is UTF-8), " +
                  "a new_string the encoding cannot represent, and a file that changed while it was being edited. If the swap itself fails the original is left in place or put back; a file that was removed meanwhile is not recreated. " +
                  "Returns {path, replacements, firstLine, encoding, bom, lineEndings (crlf|lf|mixed|none), bytesBefore, bytesAfter}.")]

@@ -978,6 +978,255 @@ public class FileSystemServiceEditTests : IDisposable
         OnlyTheseEntries("locked.ini");
     }
 
+    // ==== PR #47 finding 1: every retry re-checks the target ==========================================
+
+    private static string ChangedMessage(string path) =>
+        $"File '{path}' changed while it was being edited; nothing was written. Read it again and retry the edit.";
+
+    private static IOException SharingViolation() =>
+        Win32Io(32, "The process cannot access the file because it is being used by another process.");
+
+    /// <summary>
+    /// R1/R2: the length + last-write check ran once, before the retry loop. A sharing violation on
+    /// attempt 1, another writer during the delay, and the retry replaced their newer content with
+    /// the stale edit. Now the target is re-checked before every attempt: a change is the existing
+    /// "changed while it was being edited" refusal, ReplaceFile is not called again, the other
+    /// writer's bytes stay, and no temp or backup is left. This row: the new content is LONGER.
+    /// </summary>
+    [Fact]
+    public async Task A_target_rewritten_during_the_retry_delay_is_not_overwritten_by_the_stale_edit()
+    {
+        var path = Write("r.ini", "a=1\n");
+        var theirs = "a=1\nb=2 written during the retry delay\n"u8.ToArray();
+        var calls = 0;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                if (++calls == 1)
+                {
+                    File.WriteAllBytes(destination, theirs);
+                    throw SharingViolation();
+                }
+                File.Replace(source, destination, backup, ignoreMetadataErrors: true);
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        await act.Should().ThrowExactlyAsync<IOException>().WithMessage(ChangedMessage(path));
+        calls.Should().Be(1, "a changed target is refused before ReplaceFile is called again");
+        File.ReadAllBytes(path).Should().Equal(theirs, "the other writer's content is kept byte for byte");
+        OnlyTheseEntries("r.ini");
+    }
+
+    /// <summary>R1/R2, the time half: the same LENGTH, a later last-write time.</summary>
+    [Fact]
+    public async Task A_same_length_rewrite_during_the_retry_delay_is_not_overwritten_by_the_stale_edit()
+    {
+        var path = Write("r.ini", "a=1\n");
+        var theirs = "z=9\n"u8.ToArray();
+        var calls = 0;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                if (++calls == 1)
+                {
+                    File.WriteAllBytes(destination, theirs);
+                    File.SetLastWriteTimeUtc(destination, DateTime.UtcNow.AddHours(1));
+                    throw SharingViolation();
+                }
+                File.Replace(source, destination, backup, ignoreMetadataErrors: true);
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        await act.Should().ThrowExactlyAsync<IOException>().WithMessage(ChangedMessage(path));
+        calls.Should().Be(1);
+        File.ReadAllBytes(path).Should().Equal(theirs);
+        OnlyTheseEntries("r.ini");
+    }
+
+    /// <summary>
+    /// R3: the re-check runs before EVERY retry: attempt 1 fails with the target untouched, attempt
+    /// 2 fails and the target changes - refused, no third call.
+    /// </summary>
+    [Fact]
+    public async Task A_target_rewritten_before_the_second_retry_is_refused_without_a_third_call()
+    {
+        var path = Write("r.ini", "a=1\n");
+        var theirs = "a=1\nb=2 written before the second retry\n"u8.ToArray();
+        var calls = 0;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                calls++;
+                if (calls == 1) throw SharingViolation();
+                if (calls == 2)
+                {
+                    File.WriteAllBytes(destination, theirs);
+                    throw SharingViolation();
+                }
+                File.Replace(source, destination, backup, ignoreMetadataErrors: true);
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        await act.Should().ThrowExactlyAsync<IOException>().WithMessage(ChangedMessage(path));
+        calls.Should().Be(2, "the change after attempt 2 is caught before attempt 3");
+        File.ReadAllBytes(path).Should().Equal(theirs);
+        OnlyTheseEntries("r.ini");
+    }
+
+    /// <summary>
+    /// R1, the length half on its own: during the delay the target grows but its last-write time is
+    /// put back, so only the length says it changed. (Every other "rewrite" row also moves the time,
+    /// so without this row the re-check could drop its length test and stay green.)
+    /// </summary>
+    [Fact]
+    public async Task A_longer_rewrite_with_the_write_time_put_back_during_the_retry_delay_is_refused()
+    {
+        var path = Write("r.ini", "a=1\n");
+        var stamp = File.GetLastWriteTimeUtc(path);
+        var theirs = "a=1\nmore\n"u8.ToArray();
+        var calls = 0;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                if (++calls == 1)
+                {
+                    File.WriteAllBytes(destination, theirs);
+                    File.SetLastWriteTimeUtc(destination, stamp);
+                    throw SharingViolation();
+                }
+                File.Replace(source, destination, backup, ignoreMetadataErrors: true);
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        await act.Should().ThrowExactlyAsync<IOException>().WithMessage(ChangedMessage(path));
+        calls.Should().Be(1);
+        File.ReadAllBytes(path).Should().Equal(theirs);
+        OnlyTheseEntries("r.ini");
+    }
+
+    /// <summary>R4 (unchanged): three sharing violations with the target untouched still surface the IOException, original intact.</summary>
+    [Fact]
+    public async Task Three_sharing_violations_with_the_target_untouched_still_surface_the_ioexception()
+    {
+        var path = Write("r.ini", "a=1\n");
+        var calls = 0;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                calls++;
+                throw SharingViolation();
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        (await act.Should().ThrowExactlyAsync<IOException>()).Which.Message.Should().Contain("being used by another process");
+        calls.Should().Be(3, "the first attempt and two retries");
+        File.ReadAllText(path).Should().Be("a=1\n");
+        OnlyTheseEntries("r.ini");
+    }
+
+    /// <summary>
+    /// R4 (unchanged): a target that vanishes DURING the retry delay is not retried and not recreated
+    /// (decision A). The deletion comes from another thread 5 ms into the 50 ms delay - the catch
+    /// filter has already seen the file - so only a re-check after the delay can notice it. The call
+    /// fails naming the temp, which keeps the edited content; path stays absent.
+    /// </summary>
+    [Fact]
+    public async Task A_target_that_vanishes_during_the_retry_delay_is_not_retried_or_recreated()
+    {
+        var path = Write("r.ini", "a=1\n");
+        var calls = 0;
+        string? temp = null;
+        Thread? deleter = null;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                calls++;
+                temp = source;
+                if (calls == 1)
+                {
+                    deleter = new Thread(() => { Thread.Sleep(5); File.Delete(destination); }) { IsBackground = true };
+                    deleter.Start();
+                    throw SharingViolation();
+                }
+                File.Replace(source, destination, backup, ignoreMetadataErrors: true);
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        var message = (await act.Should().ThrowAsync<IOException>()).Which.Message;
+        deleter!.Join(TimeSpan.FromSeconds(10)).Should().BeTrue();
+        calls.Should().Be(1, "a target that is gone after the delay is not replaced again");
+        File.Exists(path).Should().BeFalse("the recovery never recreates a file someone else deleted");
+        message.Should().Contain(temp!, "the caller is told where the edited content is");
+        File.ReadAllText(temp!).Should().Be("a=2\n");
+    }
+
+    // ==== PR #47 finding 2: the edited size is bounded, in 64 bits ======================================
+
+    /// <summary>
+    /// R7: the cap is also on the ENCODED result. A UTF-16 file of about 2 MiB whose edit makes
+    /// 9,437,185 characters - under the 16 MiB character cap - encodes to 18,874,372 bytes (BOM
+    /// included): refused naming the path, the byte count and the limit; file unchanged, no litter.
+    /// </summary>
+    [Fact]
+    public async Task An_edit_whose_encoded_result_exceeds_16_MiB_is_refused_and_nothing_is_written()
+    {
+        var enc = new UnicodeEncoding(false, true);
+        var original = enc.GetPreamble().Concat(enc.GetBytes("n" + new string('a', 1 << 20))).ToArray();
+        var path = Write("big16.txt", original);
+        var before = Sha(path);
+
+        var act = () => Svc().EditTextAsync(path, "a", new string('a', 9), replaceAll: true, "auto");
+
+        var message = (await act.Should().ThrowExactlyAsync<InvalidOperationException>()).Which.Message;
+        message.Should().Contain(path);
+        var compact = System.Text.RegularExpressions.Regex.Replace(message, @"(?<=\d)[,.\u00a0\u202f ](?=\d{3}\b)", "");
+        (compact.Contains("18874372") || compact.Contains("18874370")).Should().BeTrue($"the refusal names the encoded size; it said: {message}");
+        (compact.Contains("16777216") || message.Contains("16 MiB", StringComparison.OrdinalIgnoreCase)).Should().BeTrue($"and the limit; it said: {message}");
+        Sha(path).Should().Be(before);
+        OnlyTheseEntries("big16.txt");
+    }
+
+    /// <summary>
+    /// R7 at the byte boundary. A file of exactly 16 MiB of ASCII where the edit swaps one ASCII
+    /// character for "é" (two bytes in UTF-8): the character count stays at the cap, so only the
+    /// encoded-size check can refuse it - one byte over, refused, file unchanged. (The exactly-16-MiB
+    /// edit row is the other side of the boundary: allowed.)
+    /// </summary>
+    [Fact]
+    public async Task An_edit_that_encodes_one_byte_over_16_MiB_is_refused()
+    {
+        var bytes = new byte[TextEdit.MaxFileBytes];
+        Array.Fill(bytes, (byte)'x');
+        "needle\n"u8.CopyTo(bytes);
+        var path = Write("edge.log", bytes);
+        var before = Sha(path);
+
+        var act = () => Svc().EditTextAsync(path, "needle", "needl\u00e9", false, "auto");
+
+        var message = (await act.Should().ThrowExactlyAsync<InvalidOperationException>()).Which.Message;
+        message.Should().Contain(path).And.Contain((TextEdit.MaxFileBytes + 1).ToString());
+        Sha(path).Should().Be(before);
+        OnlyTheseEntries("edge.log");
+    }
+
     // ==== R2 decision 2: no stray \r on disk ===========================================================
 
     [Fact]

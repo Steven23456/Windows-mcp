@@ -248,6 +248,23 @@ Logged, not fixed: the owner (and possibly the integrity label) of an edited fil
 (D-82); a backup whose delete fails is left unreported (D-83); the two search modes walk and
 match differently (D-74).
 
+## Decisions from the PR #47 review
+
+**1. Every retry gets the first attempt's check.** When the swap hits a sharing violation it is
+retried (twice, after 50 ms and 100 ms) only while the target exists, and after each wait the
+target is checked again exactly as before the first attempt — exists, length, last-write time.
+Whoever held the file may have written it meanwhile: if it **changed**, the call fails with
+"File '<path>' changed while it was being edited; nothing was written. Read it again and retry
+the edit." and the other writer's content stays. If it is **gone**, there is no second replace
+attempt and the file is not recreated (the recovery above reports it, naming the temp).
+
+**2. The result is capped too, not only the input.** An edit whose result would exceed 16 MiB is
+refused with `InvalidOperationException` before anything is written: `TextEdit.Apply` refuses a
+result longer than 16,777,216 characters (the length is computed in 64 bits — a `replace_all`
+that multiplied the text used to overflow an `int` and surface as an
+`ArgumentOutOfRangeException`), and `FileSystemService.EditTextAsync` refuses an encoded result
+longer than 16,777,216 bytes, BOM included (a UTF-16 file doubles the characters).
+
 ## Not in scope
 
 - Multi-line regex matches; replacing by regex in `file_edit` (D-77).

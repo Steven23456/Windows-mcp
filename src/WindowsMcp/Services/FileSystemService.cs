@@ -870,6 +870,11 @@ public sealed class FileSystemService : IFileSystemService
         var text = TextEdit.Decode(bytes, detected);
         var outcome = TextEdit.Apply(text, oldString, newString, replaceAll, path);
         var edited = TextEdit.Encode(outcome.Text, detected);
+        // The same limit on the way out as on the way in: a file this call wrote can be edited again.
+        if (edited.Length > TextEdit.MaxFileBytes)
+            throw new InvalidOperationException(
+                $"The edit would make '{path}' {edited.Length} bytes; file_edit writes files of up to {TextEdit.MaxFileBytes} bytes (16 MiB), " +
+                "so nothing was changed. Make a smaller replacement, or rewrite the file with file_write.");
 
         StageHook?.Invoke(Stage.EditRead, path);
         ct.ThrowIfCancellationRequested();
@@ -889,10 +894,10 @@ public sealed class FileSystemService : IFileSystemService
 
             // Someone else wrote the file since it was read: their content wins. The check and
             // the replace are two steps, so this narrows the window; it cannot close it.
+            string changed = $"File '{path}' changed while it was being edited; nothing was written. Read it again and retry the edit.";
             var now = new FileInfo(path);
             if (!now.Exists || now.Length != bytes.Length || now.LastWriteTimeUtc != lastWrite)
-                throw new IOException(
-                    $"File '{path}' changed while it was being edited; nothing was written. Read it again and retry the edit.");
+                throw new IOException(changed);
 
             replaceStarted = true;
             for (int i = 0; ; i++)
@@ -907,6 +912,14 @@ public sealed class FileSystemService : IFileSystemService
                 catch (IOException) when (i < 2 && File.Exists(path))
                 {
                     await Task.Delay(50 * (i + 1), ct);
+
+                    // Whoever held the file may have written it, or removed it, during the wait:
+                    // every attempt gets the same check the first one had. A file that is gone
+                    // is not retried (the recovery below reports it); one that changed is theirs.
+                    var again = new FileInfo(path);
+                    if (!again.Exists) throw;
+                    if (again.Length != bytes.Length || again.LastWriteTimeUtc != lastWrite)
+                        throw new IOException(changed);
                 }
             }
             try { File.Delete(backup); } catch { /* best-effort: the edit has landed */ }

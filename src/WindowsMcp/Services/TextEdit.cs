@@ -170,7 +170,14 @@ internal static class TextEdit
             : endings == "lf" && !hasCr ? ToLf(newString)
             : newString;
 
-        var result = new StringBuilder(text.Length + (replacement.Length - search.Length) * positions.Count);
+        // In 64 bits: a short old_string replaced many times by a long new_string overflows an int.
+        long resultLength = text.Length + ((long)replacement.Length - search.Length) * positions.Count;
+        if (resultLength > MaxFileBytes)
+            throw new InvalidOperationException(
+                $"The edit would make {where} {resultLength} characters; file_edit writes files of up to {MaxFileBytes} bytes (16 MiB), " +
+                "so nothing was changed. Make a smaller replacement, or rewrite the file with file_write.");
+
+        var result = new StringBuilder((int)resultLength);
         int from = 0;
         foreach (int at in positions)
         {

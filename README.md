@@ -451,8 +451,9 @@ recreated. `encoding` (`auto` = UTF-8, `utf-8`,
 `utf-16`, `ascii`, `latin1`) only matters for a file with no BOM (`auto` refuses one containing
 NULs: pass `utf-16`). Refused with nothing written: a missing file (`file_write` creates one), a
 directory, a symlink or junction, a file with more than one hard link, a read-only file, a file
-over 16 MiB, bytes not valid in the encoding, a `new_string` the encoding cannot hold, and
-a file that changed while it was being edited. The reply is `{path, replacements, firstLine,
+over 16 MiB or an edit that would make it larger than 16 MiB, bytes not valid in the encoding, a
+`new_string` the encoding cannot hold, and a file that changed while it was being edited
+(checked again after each retry of a sharing violation). The reply is `{path, replacements, firstLine,
 encoding, bom, lineEndings, bytesBefore, bytesAfter}`.
 
 `file_search(root, pattern?, min_size?, modified_since?, find_duplicates?, content?,

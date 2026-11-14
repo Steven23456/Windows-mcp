@@ -677,6 +677,7 @@ probe that and record it.
 | FILE_EDIT-05 | T1 | H | E-9 "done when" on channel H: the FILE_EDIT-01 edit over HTTP (`tools/call` `file_edit`) | The same result; the response body is the result JSON only — the file's other lines (`a=1`, `b=2`) appear nowhere in it. Then the same against a real remote host when one is available — record SKIPPED otherwise. | delete |
 | FILE_EDIT-06 | T1 | L | Hard link refused: `powershell` `New-Item -ItemType HardLink -Path <scratch>\\h2.txt -Target <scratch>\\h1.txt`; `file_edit` on `h1.txt` | Refused naming the link count (2), nothing written; `h1.txt` and `h2.txt` still identical. | delete both |
 | FILE_EDIT-07 | T1 | L | `"\n"`-led delete on a CRLF file: `a`, `foo`, `b` joined by `\r\n`; `{"old_string":"\nfoo","new_string":"","confirm":true}` | `replacements:1`; the bytes are exactly `a\r\nb` — no stray `\r` (`powershell` `Format-Hex`). Also `new_string` omitted / null is refused, not a delete. | delete |
+| FILE_EDIT-08 | T1 | L | Result size: a 9 MiB scratch file that is one line of `x` (`powershell` `Set-Content -NoNewline`); `file_edit {"old_string":"x","new_string":"xx","replace_all":true,"confirm":true}` | Refused before anything is written (18 Mi characters): `The edit would make '<path>' … characters`; file_edit writes files of up to 16777216 bytes (16 MiB)…; the file's hash is unchanged and no `<path>.tmp.*` / `<path>.bak.*` is left. | delete |
 
 #### file_manage (Destructive)
 
@@ -1467,7 +1468,7 @@ Rewritten between the markers by `node scripts/e2e/sync-results.mjs`; not mainta
 
 <!-- INDEX-START -->
 
-606 test ids, 74 features (generated; do not edit by hand).
+607 test ids, 74 features (generated; do not edit by hand).
 
 | Feature | Tests | Ids |
 |---|---|---|
@@ -1484,7 +1485,7 @@ Rewritten between the markers by `node scripts/e2e/sync-results.mjs`; not mainta
 | ENV | 10 | ENV-01, ENV-02, ENV-03, ENV-04, ENV-05, ENV-06, ENV-07, ENV-08, ENV-09, ENV-10 |
 | EVENT_LOG | 10 | EVENT_LOG-01, EVENT_LOG-02, EVENT_LOG-03, EVENT_LOG-04, EVENT_LOG-05, EVENT_LOG-06, EVENT_LOG-07, EVENT_LOG-08, EVENT_LOG-09, EVENT_LOG-10 |
 | FILE_DIALOG | 6 | FILE_DIALOG-01, FILE_DIALOG-02, FILE_DIALOG-03, FILE_DIALOG-04, FILE_DIALOG-05, FILE_DIALOG-06 |
-| FILE_EDIT | 7 | FILE_EDIT-01, FILE_EDIT-02, FILE_EDIT-03, FILE_EDIT-04, FILE_EDIT-05, FILE_EDIT-06, FILE_EDIT-07 |
+| FILE_EDIT | 8 | FILE_EDIT-01, FILE_EDIT-02, FILE_EDIT-03, FILE_EDIT-04, FILE_EDIT-05, FILE_EDIT-06, FILE_EDIT-07, FILE_EDIT-08 |
 | FILE_HASH | 2 | FILE_HASH-01, FILE_HASH-02 |
 | FILE_INFO | 3 | FILE_INFO-01, FILE_INFO-02, FILE_INFO-03 |
 | FILE_MANAGE | 18 | FILE_MANAGE-01, FILE_MANAGE-02, FILE_MANAGE-03, FILE_MANAGE-04, FILE_MANAGE-05, FILE_MANAGE-06, FILE_MANAGE-07, FILE_MANAGE-08, FILE_MANAGE-09, FILE_MANAGE-10, FILE_MANAGE-11, FILE_MANAGE-12, FILE_MANAGE-13, FILE_MANAGE-14, FILE_MANAGE-15, FILE_MANAGE-16, FILE_MANAGE-17, FILE_MANAGE-18 |

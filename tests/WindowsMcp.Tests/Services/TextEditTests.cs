@@ -592,6 +592,72 @@ public class TextEditTests
         TextEdit.Apply("abc", "b", "B", replaceAll: false).Text.Should().Be("aBc");
     }
 
+    // ---- PR #47 finding 2: the result length is computed in 64 bits and capped ------------------------
+
+    /// <summary>Digits of a message with thousands separators removed, so "2,147,483,648" and "2147483648" both match.</summary>
+    private static string Compact(string message) =>
+        System.Text.RegularExpressions.Regex.Replace(message, @"(?<=\d)[,.\u00a0\u202f ](?=\d{3}\b)", "");
+
+    /// <summary>
+    /// R5: 2 MiB of 'a', old "a", a 1,024-character new_string, replace_all: the result is
+    /// 2,147,483,648 characters. text.Length + delta * count overflowed int, so StringBuilder got a
+    /// negative capacity and the caller saw ArgumentOutOfRangeException. Now: InvalidOperationException
+    /// before allocating, naming the file, the size the edit would make, the 16 MiB limit, and that
+    /// nothing was changed.
+    /// </summary>
+    [Fact]
+    public void Apply_refuses_a_result_whose_length_overflows_int_with_a_deliberate_refusal()
+    {
+        var text = new string('a', 2 * 1024 * 1024);
+
+        var act = () => TextEdit.Apply(text, "a", new string('b', 1024), replaceAll: true);
+
+        var message = act.Should().ThrowExactly<InvalidOperationException>().Which.Message;
+        message.Should().Contain("the file", "with no path given the refusal says 'the file'");
+        Compact(message).Should().Contain("2147483648", "it says how many characters the edit would make");
+        message.Should().MatchRegex(@"16\s?MiB", "and states the limit");
+        message.Should().ContainEquivalentOf("nothing was changed");
+    }
+
+    [Fact]
+    public void Apply_names_the_path_in_the_size_refusal_when_it_is_given()
+    {
+        var act = () => TextEdit.Apply(new string('a', 2 * 1024 * 1024), "a", new string('b', 1024), replaceAll: true, path: "C:/cfg/app.ini");
+
+        act.Should().ThrowExactly<InvalidOperationException>().Which.Message.Should().Contain("C:/cfg/app.ini");
+    }
+
+    /// <summary>R6: exactly MaxFileBytes characters is allowed (2^20 occurrences x 16 characters = 2^24).</summary>
+    [Fact]
+    public void Apply_allows_a_result_of_exactly_the_cap()
+    {
+        var outcome = TextEdit.Apply(new string('a', 1 << 20), "a", new string('b', 16), replaceAll: true);
+
+        outcome.Text.Length.Should().Be((int)TextEdit.MaxFileBytes);
+        outcome.Replacements.Should().Be(1 << 20);
+    }
+
+    /// <summary>R6: one character more than the cap is refused - no overflow involved, just the cap.</summary>
+    [Fact]
+    public void Apply_refuses_a_result_one_character_over_the_cap()
+    {
+        var act = () => TextEdit.Apply("c" + new string('a', 1 << 20), "a", new string('b', 16), replaceAll: true);
+
+        var message = act.Should().ThrowExactly<InvalidOperationException>().Which.Message;
+        Compact(message).Should().Contain((TextEdit.MaxFileBytes + 1).ToString());
+        message.Should().ContainEquivalentOf("nothing was changed");
+    }
+
+    /// <summary>R6: a shrinking replace_all (a large negative delta) still works.</summary>
+    [Fact]
+    public void Apply_with_a_shrinking_replace_all_still_works()
+    {
+        var outcome = TextEdit.Apply(new string('a', 4 * 1024 * 1024) + "end", "aaaa", "", replaceAll: true);
+
+        outcome.Text.Should().Be("end");
+        outcome.Replacements.Should().Be(1024 * 1024);
+    }
+
     // ==== Line endings ===============================================================================
 
     /// <summary>
