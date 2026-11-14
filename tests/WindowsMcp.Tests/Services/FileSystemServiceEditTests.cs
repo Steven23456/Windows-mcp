@@ -1551,6 +1551,128 @@ public class FileSystemServiceEditTests : IDisposable
     }
 
     /// <summary>
+    /// PR #47 finding H, H1: a DIFFERENT file with the original's length AND last-write time (a
+    /// timestamp-preserving copy) at the path. Length + last-write time said "this is the original"
+    /// and the backup - the only copy of the original - was deleted. The backup is deleted only when
+    /// the file at the path has exactly the original bytes. (Attempt 1 moves the original aside and
+    /// fails; the other writer's file passes the re-check, so attempts 2 and 3 run and fail too.)
+    /// </summary>
+    [Fact]
+    public async Task A_same_length_same_time_different_file_at_the_path_keeps_the_backup()
+    {
+        var path = Write("r.ini", "a=1\n");
+        var stamp = File.GetLastWriteTimeUtc(path);
+        var theirs = "z=9\n"u8.ToArray();
+        string? backupSeen = null, temp = null;
+        var calls = 0;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                temp = source;
+                if (++calls == 1)
+                {
+                    backupSeen = backup;
+                    File.Move(destination, backup!);
+                    File.WriteAllBytes(destination, theirs);
+                    File.SetLastWriteTimeUtc(destination, stamp);
+                    throw Win32Io(1177, "Unable to move the replacement file to the file to be replaced.");
+                }
+                throw SharingViolation();
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        var message = (await act.Should().ThrowExactlyAsync<IOException>()).Which.Message;
+        message.Should().Contain(backupSeen!).And.MatchRegex("(?i)original");
+        File.ReadAllText(backupSeen!).Should().Be("a=1\n", "same length and same time is not the same file");
+        File.ReadAllBytes(path).Should().Equal(theirs);
+        File.Exists(temp!).Should().BeFalse();
+        OnlyTheseEntries("r.ini", Path.GetFileName(backupSeen!));
+    }
+
+    /// <summary>
+    /// H2: the content rule in the other direction - the original never left the path, only its
+    /// last-write time moved (the seam touches it and leaves a stray backup COPY). Content identical,
+    /// so the copy is litter and is deleted; the surfaced error is the re-check's "changed while it
+    /// was being edited". Red under the metadata rule, which keeps the copy and reports it.
+    /// </summary>
+    [Fact]
+    public async Task A_stray_backup_copy_beside_the_original_with_a_moved_write_time_is_deleted()
+    {
+        var path = Write("r.ini", "a=1\n");
+        string? backupSeen = null;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                backupSeen = backup;
+                File.Copy(destination, backup!, overwrite: true);
+                File.SetLastWriteTimeUtc(destination, DateTime.UtcNow.AddHours(1));
+                throw SharingViolation();
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        await act.Should().ThrowExactlyAsync<IOException>().WithMessage(ChangedMessage(path));
+        File.ReadAllText(path).Should().Be("a=1\n");
+        File.Exists(backupSeen!).Should().BeFalse("the file at the path has exactly the original bytes, so the copy is litter");
+        OnlyTheseEntries("r.ini");
+    }
+
+    /// <summary>
+    /// H3: the file at the path cannot be read during the recovery (another process holds it with no
+    /// sharing until after the call): "any failure to read the file at the path -> the backup is kept
+    /// and reported". Deterministic: the handle is held by the test for the whole call. The other
+    /// file has the original's length and time, so the metadata rule deletes the backup today.
+    /// </summary>
+    [Fact]
+    public async Task An_unreadable_file_at_the_path_keeps_the_backup()
+    {
+        var path = Write("r.ini", "a=1\n");
+        var stamp = File.GetLastWriteTimeUtc(path);
+        var theirs = "z=9\n"u8.ToArray();
+        string? backupSeen = null, temp = null;
+        FileStream? held = null;
+        var calls = 0;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                temp = source;
+                if (++calls == 1)
+                {
+                    backupSeen = backup;
+                    File.Move(destination, backup!);
+                    File.WriteAllBytes(destination, theirs);
+                    File.SetLastWriteTimeUtc(destination, stamp);
+                    held = new FileStream(destination, FileMode.Open, FileAccess.Read, FileShare.None);
+                    throw Win32Io(1177, "Unable to move the replacement file to the file to be replaced.");
+                }
+                throw SharingViolation();
+            },
+        };
+        string message;
+        try
+        {
+            var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+            message = (await act.Should().ThrowExactlyAsync<IOException>()).Which.Message;
+        }
+        finally
+        {
+            held?.Dispose();
+        }
+        message.Should().Contain(backupSeen!, "a file that cannot be compared is not assumed to be the original");
+        File.ReadAllText(backupSeen!).Should().Be("a=1\n");
+        File.ReadAllBytes(path).Should().Equal(theirs);
+        File.Exists(temp!).Should().BeFalse();
+        OnlyTheseEntries("r.ini", Path.GetFileName(backupSeen!));
+    }
+
+    /// <summary>
     /// E3 (guard): a stray backup COPY while the original never left the path (same length, same
     /// last-write time) is just litter: three sharing violations surface the IOException, the
     /// original is intact, and the copy is deleted.

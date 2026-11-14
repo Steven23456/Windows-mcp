@@ -938,7 +938,7 @@ public sealed class FileSystemService : IFileSystemService
         }
         catch (Exception failure)
         {
-            RecoverFromFailedEdit(path, tmp, backup, replaceStarted, bytes.Length, lastWrite, failure);
+            RecoverFromFailedEdit(path, tmp, backup, replaceStarted, bytes, failure);
             throw;
         }
 
@@ -953,7 +953,7 @@ public sealed class FileSystemService : IFileSystemService
     /// leaves the target or the backup, so "neither" means someone else deleted the target while
     /// it was being edited - their deletion wins, and the caller is told where the edited content is.
     /// </summary>
-    private static void RecoverFromFailedEdit(string path, string tmp, string backup, bool replaceStarted, long originalLength, DateTime originalWrite, Exception failure)
+    private static void RecoverFromFailedEdit(string path, string tmp, string backup, bool replaceStarted, byte[] original, Exception failure)
     {
         if (!replaceStarted)
         {
@@ -994,7 +994,7 @@ public sealed class FileSystemService : IFileSystemService
 
         try { File.Delete(tmp); } catch { /* best-effort cleanup */ }
         if (!File.Exists(backup)) return;
-        if (at.Length == originalLength && at.LastWriteTimeUtc == originalWrite)
+        if (HoldsExactly(path, original))
         {
             try { File.Delete(backup); } catch { /* best-effort cleanup */ }
             return;
@@ -1003,6 +1003,26 @@ public sealed class FileSystemService : IFileSystemService
         throw new IOException(
             $"The edit of '{path}' failed part-way, and a different file was at that path before the original could be put back. " +
             $"The original is in '{backup}'; nothing was deleted. ({failure.Message})", failure);
+    }
+
+    /// <summary>
+    /// E-9: true only when the file at <paramref name="path"/> has exactly these bytes. Size and
+    /// write time can both be copied; the content is what must not be lost. Unreadable is "no".
+    /// </summary>
+    private static bool HoldsExactly(string path, byte[] expected)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length != expected.Length) return false;
+            var actual = new byte[expected.Length];
+            stream.ReadExactly(actual);
+            return actual.AsSpan().SequenceEqual(expected);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

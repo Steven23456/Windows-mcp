@@ -289,7 +289,8 @@ the file was being edited is the same hard-link refusal (`InvalidOperationExcept
 count), with nothing written.
 
 **7. The recovery deletes the backup only when the file at the path is still the original** —
-the same length and last-write time as when it was read. If the swap moved the original aside
+byte for byte the content read at the start of the edit (`HoldsExactly`; a file it cannot read
+counts as different). Length and last-write time are not enough to tell. If the swap moved the original aside
 and someone else then put a different file at the path, the backup is kept and the
 `IOException` names it ("The original is in '<backup>'; nothing was deleted.").
 

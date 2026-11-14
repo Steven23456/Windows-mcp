@@ -39,7 +39,8 @@
     back (or, if that fails, the error names it); a swap that never started just deletes its
     temp; and **a file removed by someone else meanwhile is not recreated** — the edit is not
     applied and the error names the temp file holding the edited content. The backup is deleted
-    only while the file at the path is still the original; if someone else put a different file
+    only while the file at the path holds exactly the original bytes (one it cannot read counts as
+    different); if someone else put a different file
     there, the backup is kept and the error names it.
   - Refused with nothing written: an empty `old_string`, a null `new_string` (an empty string
     deletes), `old_string` equal to `new_string`, an unknown encoding, a file that does not exist
