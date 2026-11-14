@@ -2,7 +2,7 @@
 
 An MCP server for Windows desktop automation, written in C# on the official
 [`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol)
-SDK. See [Tool reference](#tool-reference) for the 70 tools.
+SDK. See [Tool reference](#tool-reference) for the 71 tools.
 
 ## Build
 
@@ -217,7 +217,7 @@ gated by `confirm` (`Hosting/ServerInstructions.cs`, under 2 000 characters).
 
 ## Tool reference
 
-70 tools, grouped:
+71 tools, grouped:
 
 | Category | Tools |
 |---|---|
@@ -226,7 +226,7 @@ gated by `confirm` (`Hosting/ServerInstructions.cs`, under 2 000 characters).
 | Window | `window`, `switch_to_window`, `launch`, `focus`, `multi_monitor` |
 | UI Automation | `snapshot`, `get_state`, `find_element`, `get_element`, `get_text`, `assert_element`, `interact_element`, `get_table`, `wait_for` |
 | Process / Shell | `process`, `process_inspect`, `start_process`, `powershell` (with `background: true` for jobs, `timeout_seconds` to bound one call), `job`, `service`, `scheduled_task`, `event_log` |
-| File | `file_search`, `file_manage`, `file_dialog`, `file_read`, `file_write`, `file_info`, `file_hash`, `file_streams`, `archive` |
+| File | `file_search` (by name, or inside files with `content`), `file_edit`, `file_manage`, `file_dialog`, `file_read`, `file_write`, `file_info`, `file_hash`, `file_streams`, `archive` |
 | Disk | `disk_inspect`, `storage_health` |
 | System | `system_info` (incl. `category: "session"`), `audio`, `notification`, `security_audit`, `reliability`, `driver_list`, `wmi_query`, `env`, `power_action` |
 | Security | `verify_signature`, `defender_status`, `cert_store` |
@@ -408,7 +408,7 @@ process asked to close but not killed. Kills by
 pid or name return `{killed:[{pid, name, graceful, exitedGracefully, forced, waitedMs}]}` (the
 tree kill keeps its text count).
 
-Every file tool takes **plain absolute** paths — `file_read`, `file_write`, `file_manage`'s `src`
+Every file tool takes **plain absolute** paths — `file_read`, `file_write`, `file_edit`, `file_manage`'s `src`
 and `dst`, `file_search`'s `root`, `file_hash`, `file_info`, `file_streams` and `archive` refuse
 a relative one naming the parameter, since the server's working directory is not the caller's,
 and refuse the `\\?\` / `\\.\` device forms in every spelling, since they bypass the
@@ -435,6 +435,39 @@ MaxEntries}` — `pattern` is a case-insensitive name glob (a path separator in 
 `recursive` descends but never into a junction or symlink, hidden or system entries are skipped
 unless `include_hidden: true`, and the walk stops at `max_entries` (default 1000, range
 1–100000) with `Truncated: true`.
+
+`file_edit(path, old_string, new_string, replace_all?, encoding?, confirm)` changes part of an
+existing text file without sending it: only the two strings cross the wire, which is what makes
+a one-line config change on a remote host one small call. It needs `confirm: true`.
+`old_string` must occur exactly once (copy it from `file_read`); zero matches, or several without
+`replace_all: true`, is refused saying how many, with nothing written; an empty `new_string`
+deletes. A `\n` in the strings matches a CRLF file's `\r\n` (never half of a pair) and is written
+in the file's own convention. The file's encoding, byte-order mark and line endings are kept,
+every byte outside the replaced text is left as it was, and the new content — in a temp file with
+the target's access rules — is swapped in with `File.Replace` and a backup, which keeps the file's
+ACL, attributes, creation time and alternate data streams where the file system supports it; if
+the swap fails the original is left in place or put back, and a file removed meanwhile is not
+recreated. `encoding` (`auto` = UTF-8, `utf-8`,
+`utf-16`, `ascii`, `latin1`) only matters for a file with no BOM (`auto` refuses one containing
+NULs: pass `utf-16`). Refused with nothing written: a missing file (`file_write` creates one), a
+directory, a symlink or junction, a file with more than one hard link, a read-only file, a file
+over 16 MiB, bytes not valid in the encoding, a `new_string` the encoding cannot hold, and
+a file that changed while it was being edited. The reply is `{path, replacements, firstLine,
+encoding, bom, lineEndings, bytesBefore, bytesAfter}`.
+
+`file_search(root, pattern?, min_size?, modified_since?, find_duplicates?, content?,
+max_matches?, context_lines?)` searches by name, size and date, or — with `content`, a .NET
+regex matched per line (`(?i)` for case-insensitive) — inside the files those filters choose,
+instead of `powershell`'s `Select-String`. The content reply is `{matches:[{path, line, text,
+before?, after?}], filesSearched, filesSkipped, truncated, maxMatches}`: `max_matches` (1–1000,
+default 100) stops the search with `truncated: true`, `context_lines` (0–5) adds the lines
+around each match, lines are clipped at 400 characters, and the search also stops with
+`truncated: true` once the returned lines total 60,000 characters. Hidden and system files are
+read. Binary files, files over 16 MiB, files that cannot be opened, file symlinks and cloud-only
+files (never downloaded) are skipped and counted; unreadable folders are passed over and
+junctions are not entered (other folders, OneDrive's included, are); with `content`, `pattern`
+is a file-name glob and a folder in it is refused. A pattern that takes over 2 s on one line stops the search with an
+error. `content` cannot be combined with `find_duplicates`.
 
 `registry_get(hive, path)` without `value_name` returns the whole key —
 `{Path, Values: [{Path, Name, Data, Kind}], SubKeys: [...]}`, an empty path listing the hive
@@ -483,7 +516,7 @@ destructive ones without a per-tool allowlist.
 Destructive tools require `confirm: true` as an argument and throw
 `ArgumentException` otherwise:
 
-- `file_write`, `file_manage(action="delete")`
+- `file_write`, `file_edit`, `file_manage(action="delete")`
 - `process(action="kill")`, `service(action="stop"|"restart")`,
   `scheduled_task(action="delete")`
 - `registry_set`, `registry_delete`

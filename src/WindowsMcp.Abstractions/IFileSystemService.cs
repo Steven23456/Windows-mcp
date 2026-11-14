@@ -32,6 +32,12 @@ public interface IFileSystemService
     /// <paramref name="ct"/> per entry and stops at <paramref name="maxEntries"/>, reporting
     /// <c>Truncated</c>.</summary>
     Task<FileListing> ListAsync(string path, string? pattern, bool recursive, bool includeHidden, int maxEntries, CancellationToken ct = default);
+    /// <summary>E-9: replaces <paramref name="oldString"/> with <paramref name="newString"/> in one
+    /// existing text file, preserving its encoding, BOM and line endings (docs/design/E-9-*.md).</summary>
+    Task<FileEditResult> EditTextAsync(string path, string oldString, string newString, bool replaceAll, string encoding, CancellationToken ct = default);
+    /// <summary>E-9: <c>file_search</c>'s content mode - a per-line regex over the files the
+    /// request's name/size/date filters choose.</summary>
+    Task<ContentSearchResult> SearchContentAsync(ContentSearchRequest request, CancellationToken ct = default);
     Task ZipAsync(string srcDir, string dstZip, CancellationToken ct = default);
     Task UnzipAsync(string srcZip, string dstDir, CancellationToken ct = default);
 }

@@ -51,7 +51,7 @@ Counts are recomputed from §3 by the sync script; only the Notes column is writ
 | FILE_INFO | 3 | 3 | 3 | 0 | 0 | 0 |  |
 | FILE_MANAGE | 18 | 17 | 17 | 0 | 0 | 1 |  |
 | FILE_READ | 11 | 11 | 10 | 1 | 0 | 0 |  |
-| FILE_SEARCH | 6 | 6 | 5 | 1 | 0 | 0 |  |
+| FILE_SEARCH | 13 | 6 | 5 | 1 | 0 | 0 |  |
 | FILE_STREAMS | 2 | 2 | 1 | 1 | 0 | 0 |  |
 | FILE_WRITE | 8 | 8 | 8 | 0 | 0 | 0 |  |
 | FIND_ELEMENT | 12 | 8 | 8 | 0 | 0 | 0 |  |
@@ -106,6 +106,7 @@ Counts are recomputed from §3 by the sync script; only the Notes column is writ
 | WMI_QUERY | 9 | 9 | 6 | 3 | 0 | 0 |  |
 | OBSERVE | 10 | 0 | 0 | 0 | 0 | 0 |  |
 | SEQUENCE | 4 | 0 | 0 | 0 | 0 | 0 |  |
+| FILE_EDIT | 7 | 0 | 0 | 0 | 0 | 0 |  |
 
 ## 3. Test log
 
@@ -707,6 +708,20 @@ of the deciding field, or a path under the evidence folder.
 | SNAPSHOT-09 | T2 | L | NOT RUN | | |
 | SNAPSHOT-10 | T3 | L | NOT RUN | | |
 | SYSTEM_INFO-03 | T0 | L | NOT RUN | | |
+| FILE_EDIT-01 | T1 | L | NOT RUN | | |
+| FILE_EDIT-02 | T1 | L | NOT RUN | | |
+| FILE_EDIT-03 | T1 | L | NOT RUN | | |
+| FILE_EDIT-04 | T1 | L | NOT RUN | | |
+| FILE_EDIT-05 | T1 | H | NOT RUN | | |
+| FILE_SEARCH-07 | T0 | L | NOT RUN | | |
+| FILE_SEARCH-08 | T0 | L | NOT RUN | | |
+| FILE_SEARCH-09 | T0 | L | NOT RUN | | |
+| FILE_SEARCH-10 | T0 | L | NOT RUN | | |
+| FILE_SEARCH-11 | T0 | L | NOT RUN | | |
+| FILE_EDIT-06 | T1 | L | NOT RUN | | |
+| FILE_EDIT-07 | T1 | L | NOT RUN | | |
+| FILE_SEARCH-12 | T0 | L | NOT RUN | | |
+| FILE_SEARCH-13 | T0 | L | NOT RUN | | |
 
 ## 4. Defects
 

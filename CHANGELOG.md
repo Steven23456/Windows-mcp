@@ -2,6 +2,75 @@
 
 ### Added
 
+- **`file_edit` — change part of a file without sending the file; `file_search` searches inside
+  files** (E-9; 70 → 71 tools, no new service). On a remote host over HTTP the client's own edit
+  and search tools cannot reach the disk, so changing one line of a config file meant `file_read`
+  then a `file_write` of the whole file, and finding which file mentions a setting meant
+  `powershell`:
+  - `file_edit(path, old_string, new_string, replace_all = false, encoding = "auto", confirm =
+    false)` replaces `old_string` with `new_string` in one existing text file; only the two
+    strings cross the wire. Annotations: title `Edit file`, destructive, not read-only, not
+    idempotent (a second identical call no longer finds `old_string`), closed-world. **Requires
+    `confirm: true`**, like `file_write`; `path` must be a plain absolute path (C-1).
+  - `old_string` must match exactly once: zero matches, or several without `replace_all:true`, is
+    refused saying how many, with nothing written. Matching is ordinal, first as given, then — only
+    if that found nothing — with `old_string`'s line endings converted to the file's, so a model
+    that sends `\n` still matches a CRLF file; a match never splits a `\r\n` pair, so no stray `\r`
+    is left. `new_string` is written in the file's convention (as given in a file with mixed or no
+    line endings, unless the conversion was what matched); `firstLine` counts a lone `\r` as a
+    break.
+  - **The file's encoding, byte-order mark and line endings are preserved.** A BOM decides
+    (UTF-8, UTF-16 LE/BE, UTF-32 LE), else `encoding`: `auto`/`utf-8`, `utf-16`, `ascii` or
+    `latin1` (any single-byte legacy file, without loss). Decoding and encoding are strict: bytes
+    not valid in the encoding, or a `new_string` it cannot represent, are refused, and `auto`
+    without a BOM refuses text containing NUL characters (BOM-less UTF-16 is valid UTF-8 and would
+    be corrupted; `encoding:"utf-16"` edits it). Bytes outside the replaced text are never touched.
+  - **The swap.** The edited bytes go to a temp file beside the target, created with the target's
+    access rules where they can be read and applied (so a protected file's content is never
+    briefly readable through the folder's ACL), and `File.Replace` swaps them in with a backup name
+    (`<path>.bak.<guid>`) — which, unlike the move `file_write` uses, keeps the target's ACL,
+    attributes, creation time and alternate data streams where the file system supports it. **A
+    failed swap never loses the file:** a retry happens only while the target exists, and the
+    cleanup restores before it deletes: when the original had been moved aside the backup is put
+    back (or, if that fails, the error names it); a swap that never started just deletes its
+    temp; and **a file removed by someone else meanwhile is not recreated** — the edit is not
+    applied and the error names the temp file holding the edited content.
+  - Refused with nothing written: an empty `old_string`, a null `new_string` (an empty string
+    deletes), `old_string` equal to `new_string`, an unknown encoding, a file that does not exist
+    (use `file_write`), a directory, a symlink or junction (OneDrive and deduplicated files are
+    edited normally), a file with more than one hard link (the swap would split it into two
+    files), a read-only file, a file over 16 MiB, and a file whose length or last-write time
+    changed between the read and the replace. Returns `{path, replacements, firstLine, encoding,
+    bom, lineEndings (crlf|lf|mixed|none), bytesBefore, bytesAfter}`.
+  - `file_search` gains `content` (a .NET regex matched per line, `(?i)` for case-insensitive),
+    `max_matches` (1-1000, default 100) and `context_lines` (0-5, default 0), appended after
+    `find_duplicates`. With `content` the existing `pattern`, `min_size` and `modified_since`
+    choose the files and the result is `{matches:[{path, line, text, before?, after?}],
+    filesSearched, filesSkipped, truncated, maxMatches}`; lines are clipped at 400 characters and
+    the search also stops, `truncated:true`, once the returned lines total 60,000 characters.
+    Hidden and system files are read. Skipped and counted: binary files (a NUL byte in the first
+    8 KiB and no BOM), files over 16 MiB, files that cannot be opened, file symlinks, and
+    cloud-only (offline) files, which are never downloaded. Unreadable folders are passed over and
+    junctions and symlinked folders are not entered (every other folder is, OneDrive's included);
+    in a content search `pattern` is a file-name glob, and one containing `\` or `/` is refused
+    (put the folder in `root`). A pattern that takes over 2 s on one line
+    stops the search with an error naming the file. Scan cost does not grow with the matches found.
+    An invalid regex, `content` with `find_duplicates`, or `max_matches` / `context_lines` out of
+    range (checked even without `content`) is refused before anything is enumerated. Without
+    `content` the search is unchanged.
+  New `IFileSystemService.EditTextAsync(path, oldString, newString, replaceAll, encoding)` →
+  `FileEditResult` and `SearchContentAsync(ContentSearchRequest)` → `ContentSearchResult` (with
+  `ContentMatch`, all in `Models/FileSystemDtos.cs`); the pure `Services/TextEdit.cs` (detect,
+  strict decode/encode, the match-and-replace rules) and `Services/ContentSearch.cs` (the binary
+  probe and the per-line scan with context and both caps). `file_edit` joins README's Safety rails
+  list and C-7's annotation table. Tests: `TextEditTests`, `ContentSearchTests`,
+  `FileSystemServiceEditTests`, `FileSystemServiceContentSearchTests`, `FileToolsEditTests`,
+  `FileToolsContentSearchTests` and `FileEditHttpTransportTests` (one line of a CRLF file changed
+  over the real HTTP transport, in-process, with the file's content absent from the reply), plus
+  additions to `ToolInventoryTests`, `StreamTransportTests`, `DrivingToolsTests`,
+  `SequenceStepsTests` and `ServerInstructionsTests`. Not verified: no run against a real remote
+  host, no network-share, FAT or OneDrive target, and ACL preservation is not tested. Gaps found
+  and not fixed are parity D-74 … D-83.
 - **Session state: is the desktop reachable, and is the server elevated?** (E-8; still 70 tools,
   one new service). When the workstation is locked, the session is disconnected or a UAC prompt is
   up on the secure desktop, `snapshot` used to fail on its cursor read or return an empty or stale

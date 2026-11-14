@@ -5,7 +5,7 @@ against the upstream Python server, plus the agent-efficiency backlog in its sec
 prioritized items with implementation sketches), is
 `docs/upstream-parity-checklist.md` — new capability work starts there, not here.
 
-## 🧪 Live e2e coverage sweep — ACTIVE (20/70 tools ever exercised against a live server)
+## 🧪 Live e2e coverage sweep — ACTIVE (20/71 tools ever exercised against a live server)
 
 **Why this exists:** all prior e2e testing was ad-hoc and unrecorded. A transcript audit
 (2026-07-12) found **no checklist ever existed** — 20 of the tools have been invoked against a
@@ -92,11 +92,11 @@ stdio without touching the registered server — spawn the exe, `initialize` →
 `system_info` · `start_process` · `file_search` · `wmi_query` · `file_streams` · `defender_status` ·
 `scheduled_task` · `file_manage` · `event_log` · `verify_signature` · `cert_store` · `driver_list`
 
-### 🔴 Never invoked live (50)
+### 🔴 Never invoked live (51)
 - **Safe / read-only — sweep these first (15):** `file_hash` · `reliability` · `env` · `network` ·
   `firewall` · `disk_inspect` · `security_audit` · `registry_get` · `http_request` · `scrape` ·
   `multi_monitor` · `fs_changes` (needs elevation) · `watch` · `job` · `wait`
-- **Write / destructive — throwaway targets only (10):** `file_write` · `registry_set` ·
+- **Write / destructive — throwaway targets only (11):** `file_write` · `file_edit` (E-9; plan rows FILE_EDIT-01…05, its done-when bar over HTTP is FILE_EDIT-05) · `registry_set` ·
   `registry_delete` · `archive` · `service` · `power_action` · `notification` · `audio` ·
   `clipboard` · `integrity` (writes a baseline under `%LOCALAPPDATA%\windows-mcp\integrity`)
 - **UI-automation / input — needs interactive foreground desktop (25):** `click` · `type` · `key` ·

@@ -224,6 +224,8 @@ public sealed class SequenceStepsTests
     [InlineData("screenshot")]
     [InlineData("file_read")]
     [InlineData("file_write")]
+    [InlineData("file_edit")]         // E-9: a file tool, never a sequence step
+    [InlineData("file_search")]
     [InlineData("registry_set")]
     [InlineData("process")]
     [InlineData("start_process")]

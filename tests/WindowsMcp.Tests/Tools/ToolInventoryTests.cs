@@ -39,12 +39,39 @@ public class ToolInventoryTests
     private static string Skill() => File.ReadAllText(Path.Combine(RepoRoot(), "skills", "windows", "SKILL.md"));
 
     [Fact]
-    public void The_assembly_advertises_seventy_tools()
+    public void The_assembly_advertises_seventy_one_tools()
     {
         // B-5 took the count from 65 to 66; B-7's multi_select and multi_edit took it to 68;
         // C-2's registry_delete is the sixty-ninth (roadmap R6: "68 -> 69"); E-6's sequence is the
-        // seventieth. Every number quoted in a document is checked against this one below.
-        ToolMethods().Should().HaveCount(70);
+        // seventieth; E-9's file_edit is the seventy-first ("the count goes 70 -> 71"). Every number
+        // quoted in a document is checked against this one below.
+        ToolMethods().Should().HaveCount(71);
+    }
+
+    /// <summary>E-9: the new tool is on the surface, by name and not just by count.</summary>
+    [Fact]
+    public void File_edit_is_the_seventy_first()
+    {
+        ToolMethods().Select(m => m.Name).Should().Contain(nameof(FileTools.FileEdit));
+    }
+
+    /// <summary>
+    /// E-9 / C-7: the design note's annotation row for file_edit, every argument written out.
+    /// Idempotent is false because a second identical call no longer finds old_string.
+    /// </summary>
+    [Fact]
+    public void File_edit_carries_the_design_notes_annotations()
+    {
+        var edit = ToolMethods().Single(m => m.DeclaringType == typeof(FileTools) && m.Name == nameof(FileTools.FileEdit));
+
+        NamedArguments(edit).Should().BeEquivalentTo(new Dictionary<string, object?>
+        {
+            ["Title"] = "Edit file",
+            ["ReadOnly"] = false,
+            ["Destructive"] = true,     // it rewrites a file's content
+            ["Idempotent"] = false,     // the second identical call no longer finds old_string
+            ["OpenWorld"] = false,
+        });
     }
 
     /// <summary>E-6: the new tool is on the surface, by name and not just by count.</summary>
@@ -213,7 +240,7 @@ public class ToolInventoryTests
     [
         nameof(WindowTools.Window), nameof(ProcessTools.Process), nameof(ShellTools.Powershell),
         nameof(JobTools.Job), nameof(SystemTools.Env), nameof(SystemTools.PowerAction),
-        nameof(FileTools.FileWrite), nameof(FileTools.FileManage), nameof(FileTools.Archive),
+        nameof(FileTools.FileWrite), nameof(FileTools.FileEdit), nameof(FileTools.FileManage), nameof(FileTools.Archive),
         nameof(ProcessTools.Service), nameof(ProcessTools.ScheduledTask),
         nameof(RegistryTools.RegistrySet), nameof(RegistryTools.RegistryDelete),
         nameof(NetworkTools.Firewall), nameof(WebTools.HttpRequest),
@@ -402,6 +429,21 @@ public class ToolInventoryTests
             "registry_delete removes keys behind confirm: true - run docs-agent");
         Skill().Should().Contain("registry_delete",
             "the skill playbook lists the registry verbs and the confirm-gated tools - run docs-agent");
+    }
+
+    /// <summary>
+    /// E-9: file_edit is confirm-gated and destructive, so it joins README's Safety rails list (the
+    /// confirm-gated tools) and the skill playbook names it next to file_write - a remote edit tool
+    /// the playbook never mentions is one the model replaces with file_read + file_write. docs-agent
+    /// owns the edit; this is what tells it to.
+    /// </summary>
+    [Fact]
+    public void The_documents_name_file_edit_among_the_destructive_tools()
+    {
+        SafetyRailToolNames().Should().Contain("file_edit",
+            "file_edit rewrites a file behind confirm: true - run docs-agent");
+        Skill().Should().Contain("file_edit",
+            "the skill playbook lists the file tools - run docs-agent");
     }
 
     /// <summary>

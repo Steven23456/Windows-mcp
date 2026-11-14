@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 70 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
+Windows-MCP is a lightweight, open-source Model Context Protocol (MCP) server that enables AI agents to interact directly with the Windows operating system. Built on .NET 10 and C#, it exposes 71 MCP tools covering UI automation, file operations, process management, system monitoring, persistence/startup reporting, and more — over the standard MCP stdio transport by default, or Streamable HTTP/HTTPS (`--transport http`) for clients on other machines.
 
 ## Purpose
 
@@ -83,7 +83,7 @@ The primary goal of Windows-MCP is to provide AI agents with the ability to:
 
 ## Available Tools
 
-Windows-MCP exposes **70 MCP tools** across 20 tool classes:
+Windows-MCP exposes **71 MCP tools** across 20 tool classes:
 
 ### Input Tools (`InputTools` — 11 tools)
 | Tool | Purpose |
@@ -130,14 +130,15 @@ the result, never an error.
 | `Launch` | Launch an app by its Start Menu name, a packaged app's display name, or a path: a path or an existing executable name starts outright, anything else resolves against the in-process app catalog (exact → prefix → fuzzy 70+). `wait_for_window` (default true) polls the window inventory up to `timeout_ms` for the app's window. Returns `{MatchedName, Kind, Score, Pid, Hwnd, Title, WindowDetected, Strategy}` |
 | `MultiMonitor` | Enumerate monitors: geometry, primary flag, and per-monitor `WorkArea`, `Orientation` (0/90/180/270), `EffectiveDpi` and `Scale` |
 
-### File Tools (`FileTools` — 9 tools)
+### File Tools (`FileTools` — 10 tools)
 | Tool | Purpose |
 |------|---------|
 | `FileRead` | Read a file as text (`max_bytes`, `encoding`); `offset_lines`/`limit_lines` return a JSON line window instead (C-1) |
 | `FileWrite` | Write text to a file (`confirm:true`), `append` to it, and create the parent directory unless `create_parents:false` |
 | `FileManage` | Copy, move (`overwrite:true` replaces an existing destination — set aside first, removed only once the copy or move has landed, put back on any failure or cancel), delete (`confirm:true`, plus `recursive:true` for a non-empty directory; a junction is unlinked, a missing path says so), or list `{Entries:[{Path, Name, IsDirectory, Size, Modified, Hidden, IsLink}], Truncated, MaxEntries}` (`pattern`, `recursive`, `include_hidden`, `max_entries`). Volume roots, device paths and a destination inside its own source are refused before anything is touched |
 | `FileInfo` | Get file/directory metadata |
-| `FileSearch` | Search for files by pattern |
+| `FileSearch` | Search for files by pattern, size and date; with `content` (E-9), search inside them by regex, line by line, with context and a match cap |
+| `FileEdit` | Replace one exact string in an existing text file (`confirm:true`), keeping its encoding, BOM and line endings — only the two strings cross the wire (E-9) |
 | `FileHash` | Compute SHA256/SHA1/MD5 hex digest |
 | `FileStreams` | NTFS alternate data streams + reparse target |
 | `FileDialog` | Interact with open/save dialogs |
