@@ -9,7 +9,7 @@
 
 ## 1. Purpose
 
-Exercise every one of the 70 MCP tools, the hosting layer (command line, environment repair,
+Exercise every one of the 71 MCP tools, the hosting layer (command line, environment repair,
 stdio and HTTP transports, bearer gate, error filter) and the cross-cutting contracts the
 server promises, **end to end against the real server process**, including the failure modes
 each tool documents and the ones its inputs imply. The run must leave the PC exactly as it
@@ -25,7 +25,7 @@ boundaries, real windows, real monitors, real files and the real registry.
 
 **In scope**
 
-- Every tool in `tools/list` (70 on 0.7.3 since E-6 added `sequence`), each with: its happy path, every refusal its
+- Every tool in `tools/list` (71 on 0.7.3 since E-9 added `file_edit`), each with: its happy path, every refusal its
   `[Description]` or source names, boundary values of every ranged parameter, a wrong or
   missing target, partial failure where the tool can half-succeed, and the caps it promises.
 - The hosting layer: every command-line flag and environment variable of `ServerOptions`,
@@ -666,6 +666,19 @@ probe that and record it.
 | FILE_WRITE-07 | T1 | L | `<scratch>\\emoji-🎉\\note.txt` `create_parents:true`; the > 260-char path | Unicode directory created and file written; long path: success or a `PathTooLongException` message — record. | delete |
 | FILE_WRITE-08 | T1 | L | Write `w.txt` twice with different content, `confirm:true`, no other flag | Second call **replaces silently** (there is no `overwrite` gate on `file_write`; `confirm` is the gate). Documented, not a defect. | delete |
 
+#### file_edit (Destructive; E-9)
+
+| ID | Tier | Ch | Call | Expected | Cleanup |
+|---|---|---|---|---|---|
+| FILE_EDIT-01 | T1 | L | Unique edit on a CRLF file: `file_write` `<scratch>\\cfg.ini` (`confirm:true`) with lines `a=1`, `port=8080`, `b=2` joined by `\r\n`; then `file_edit {"path":"<scratch>\\cfg.ini","old_string":"port=8080\nb=2","new_string":"port=9090\nb=2","confirm":true}` | `{replacements:1, firstLine:2, encoding:"utf-8", bom:false, lineEndings:"crlf", bytesBefore, bytesAfter}` with no file content in the reply; `file_read` shows `port=9090`, and `file_hash` / a byte check shows every line still ends `\r\n`. Without `confirm`: `'confirm: true' is required for file edits`, file unchanged. | delete `cfg.ini` |
+| FILE_EDIT-02 | T1 | L | Ambiguous and missing: a file with `x=1` on two lines; `old_string:"x=1"`; then `replace_all:true`; then `old_string:"nope"` | `old_string matches 2 times in '<path>'; nothing was changed. …replace_all:true…` with the bytes unchanged; then `replacements:2`; then `old_string was not found in '<path>'; nothing was changed. …` | delete the file |
+| FILE_EDIT-03 | T1 | L | Read-only: set a scratch file read-only (`powershell` `Set-ItemProperty … IsReadOnly $true`), then a valid `file_edit` | Refused (an access-denied message naming the path), no `~wmcp-*.tmp` left in the folder, content unchanged. Also: a directory path and a missing file are refused (`file_write creates one`). | clear the flag; delete |
+| FILE_EDIT-04 | T1 | L | BOM kept: write a UTF-8-with-BOM file (`powershell` `Set-Content -Encoding utf8BOM`), and a UTF-16 one; edit one word in each | `bom:true` and `encoding:"utf-8"` / `"utf-16"`; the first three (or two) bytes are still the BOM (`file_hash` before/after differ only by the edit; `powershell` `Format-Hex` the head). `encoding:"ascii"` on a file with a non-ASCII character in the edit is refused, nothing written. | delete both |
+| FILE_EDIT-05 | T1 | H | E-9 "done when" on channel H: the FILE_EDIT-01 edit over HTTP (`tools/call` `file_edit`) | The same result; the response body is the result JSON only — the file's other lines (`a=1`, `b=2`) appear nowhere in it. Then the same against a real remote host when one is available — record SKIPPED otherwise. | delete |
+| FILE_EDIT-06 | T1 | L | Hard link refused: `powershell` `New-Item -ItemType HardLink -Path <scratch>\\h2.txt -Target <scratch>\\h1.txt`; `file_edit` on `h1.txt` | Refused naming the link count (2), nothing written; `h1.txt` and `h2.txt` still identical. | delete both |
+| FILE_EDIT-07 | T1 | L | `"\n"`-led delete on a CRLF file: `a`, `foo`, `b` joined by `\r\n`; `{"old_string":"\nfoo","new_string":"","confirm":true}` | `replacements:1`; the bytes are exactly `a\r\nb` — no stray `\r` (`powershell` `Format-Hex`). Also `new_string` omitted / null is refused, not a delete. | delete |
+| FILE_EDIT-08 | T1 | L | Result size: a 9 MiB scratch file that is one line of `x` (`powershell` `Set-Content -NoNewline`); `file_edit {"old_string":"x","new_string":"xx","replace_all":true,"confirm":true}` | Refused before anything is written (18 Mi characters): `The edit would make '<path>' … characters`; file_edit writes files of up to 16777216 bytes (16 MiB)…; the file's hash is unchanged and no `~wmcp-*.tmp` / `~wmcp-*.bak` is left in the folder. | delete |
+
 #### file_manage (Destructive)
 
 `subst` gives a safe way to probe the volume-root guards: `subst X: <scratch>` (T1, removed with
@@ -703,6 +716,13 @@ so a failed guard could touch nothing else. Never probe a root guard against a r
 | FILE_SEARCH-04 | T0 | L | `find_duplicates:true`; again with `dup1.txt` locked | `dup1.txt` and `dup2.txt` grouped, nothing else; with the lock the search still returns (the locked file silently omitted — record). | — |
 | FILE_SEARCH-05 | T0 | L | `root:"relative"`; `root:"<scratch>\\missing"` | Absolute-path refusal; `DirectoryNotFoundException` text naming the path. | — |
 | FILE_SEARCH-06 | T0 | L | `root:"C:\\Windows\\System32\\drivers\\etc"` | Every file, no cap, no `Truncated` field: **`file_search` is the one uncapped enumerator in the family** — record as S3 candidate against XC-05 (a search of `C:\` would return the whole volume in one response). | — |
+| FILE_SEARCH-07 | T0 | L | E-9 content, basic: `{"root":"<scratch>","pattern":"*.txt","content":"needle"}`; `content:"(?i)NEEDLE"` | `{matches:[{path, line, text}], filesSearched, filesSkipped, truncated:false, maxMatches:100}` with 1-based lines and no `before`/`after` keys; the `(?i)` form finds the same lines. | — |
+| FILE_SEARCH-08 | T0 | L | Context: `content:"needle", context_lines:2`; `context_lines:6` | `before`/`after` with up to two lines each; `'context_lines' must be between 0 and 5, got 6` (also without `content`). | — |
+| FILE_SEARCH-09 | T0 | L | Cap: a file with 5 matching lines; `content:"needle", max_matches:3`; `max_matches:0` | 3 matches, `truncated:true`; `'max_matches' must be between 1 and 1000, got 0`. | — |
+| FILE_SEARCH-10 | T0 | L | Binary skipped: a scratch `.bin` containing a NUL and the word `needle`; `pattern:"*"`, `content:"needle"` | The `.bin` is not in `matches` and `filesSkipped` counts it; a UTF-16 text file containing `needle` (with BOM) is matched. | — |
+| FILE_SEARCH-11 | T0 | L | Invalid and conflicting: `content:"("`; `content:"x", find_duplicates:true`; `content:"x", pattern:"deep\\*.txt"` | `'content' is not a valid regular expression: …`; `'content' and 'find_duplicates' are two different searches; pass one of them`; a refusal naming `pattern` and saying to put the folder in `root` — all before anything is enumerated. (The same `pattern` without `content` is accepted — D-74.) | — |
+| FILE_SEARCH-12 | T0 | L | Links and cloud files: a file symlink in scratch (`New-Item -ItemType SymbolicLink`, needs Developer Mode or elevation — SKIPPED otherwise) pointing at a file containing `needle`; and, if OneDrive is configured, an online-only file containing `needle` under a `root` there | Neither is in `matches`; `filesSkipped` counts both; the online-only file is still online-only afterwards (not downloaded — check its attribute). Hidden and system files under `root` are searched. | delete the link |
+| FILE_SEARCH-13 | T0 | L | Output cap: a file of 1,000 lines of 400 `x` characters each; `content:"x", max_matches:1000` | Stops well before 1,000 matches with `truncated:true`: the returned `text` values total about 60,000 characters. | — |
 
 #### file_info, file_hash, file_streams (ReadOnly)
 
@@ -1192,7 +1212,7 @@ server with `Stop-Process` on the PID the run spawned. Verbatim messages come fr
 
 | ID | Tier | Ch | Call | Expected | Cleanup |
 |---|---|---|---|---|---|
-| HOST-20 | T0 | S | `--list` | `initialize.result.serverInfo == {name:"Windows-mcp", version:"0.7.3"}`; version equals `<Version>` in `Directory.Build.props` **and** `.claude-plugin/plugin.json`; `tools/list` length **70**; every tool has a non-blank `description`, an `annotations.title` ≤ 40 chars and all four hints present; the harness prints **no** `nonJsonStdout` line. | none |
+| HOST-20 | T0 | S | `--list` | `initialize.result.serverInfo == {name:"Windows-mcp", version:"0.7.3"}`; version equals `<Version>` in `Directory.Build.props` **and** `.claude-plugin/plugin.json`; `tools/list` length **71**; every tool has a non-blank `description`, an `annotations.title` ≤ 40 chars and all four hints present; the harness prints **no** `nonJsonStdout` line. | none |
 | HOST-21 | T0 | S | `--request '{"method":"initialize","params":{"protocolVersion":"2025-03-26",…}}'` and again with `2024-11-05`, `2025-06-18`, `2026-07-28`, `9999-01-01` (edit the harness's version or send raw) | Record which versions the server accepts and what `result.protocolVersion` it echoes for each; nothing in the repo pins this, so the answer is the baseline. A crash or hang on an unknown version is S1. | none |
 | HOST-22 | T0 | S | Send `tools/call` **before** `initialize` (raw `--request`, harness modified to skip the handshake, or a second harness mode) | A JSON-RPC error (record its code and message), not a hang; the server still answers a subsequent proper `initialize`. | none |
 | HOST-23 | T0 | S | `--stderr --env "Path=C:\nothing" --env "PATHEXT=.CPL" --call powershell '{"command":"(Get-Command where.exe).Source"}'` | stderr's first line `Windows-mcp: repaired environment (…)` names both `PATHEXT` and `Path`; the result resolves `where.exe` under `C:\Windows\System32`; `$env:Path` inside the child still **starts with** `C:\nothing` (host entries first, never reordered). | none |
@@ -1221,7 +1241,7 @@ Start once for the block: `--transport http --bind 127.0.0.1 --port 18765 --api-
 | HOST-41 | T0 | H | `POST /mcp` with no `Authorization`; `POST /`; `GET /anything-else`; `GET /mcp` | **401** each; header `WWW-Authenticate: Bearer`; body exactly `Unauthorized: send 'Authorization: Bearer <api-key>'.` (the gate covers every path). | — |
 | HOST-42 | T0 | H | `Authorization: Bearer windows-mcp-e2e-key-0123x`; `bearer windows-mcp-e2e-key-0123` (lower-case scheme); `Basic …`; the bare key with no scheme; `Bearer ` alone | 401 each. | — |
 | HOST-43 | T0 | H | `Authorization: Bearer   windows-mcp-e2e-key-0123  ` (padded) with an `initialize` body | 200 (the remainder is trimmed, compared in constant time). | — |
-| HOST-44 | T0 | H | Correct bearer: `initialize` then `tools/list` (Streamable HTTP; `Accept: application/json, text/event-stream`) | `serverInfo` identical to HOST-20's; **70** tools; `screenshot.annotations.readOnlyHint == true`, `file_manage.annotations.destructiveHint == true`, `scrape.annotations.openWorldHint == true`. (The in-repo HTTP test only asserts ≥ 60; this row pins 70 over HTTP.) | — |
+| HOST-44 | T0 | H | Correct bearer: `initialize` then `tools/list` (Streamable HTTP; `Accept: application/json, text/event-stream`) | `serverInfo` identical to HOST-20's; **71** tools; `screenshot.annotations.readOnlyHint == true`, `file_manage.annotations.destructiveHint == true`, `scrape.annotations.openWorldHint == true`. (The in-repo HTTP test only asserts ≥ 60; this row pins 70 over HTTP.) | — |
 | HOST-45 | T0 | H | `tools/call system_info {"category":"os"}` twice **without** any `Mcp-Session-Id` header, then once with a made-up `Mcp-Session-Id: zzz` | All three succeed (stateless: no session is required or validated). | — |
 | HOST-46 | T0 | H | `tools/call file_write` without `confirm` | `isError:true` with `'confirm: true' is required for file writes` — the same filter runs on HTTP. | — |
 | HOST-47 | T0 | H | `tools/call scrape {"url":"https://example.com","summarize":true}` | `Summarized:false`, `Model:null`, `Content` present, `Note` containing `stateless`, `HTTP` and `stdio` and **not** `capability`; elapsed < 5 s (no 120 s wait). | — |
@@ -1282,7 +1302,7 @@ for any test id in this plan that the results document lacks, and never edits an
 1. **Run header** — run id, date, operator, server version, commit, exe path, SHA-256 of the
    deployed and built exe, server PID at start and end, monitor table as found, client
    sampling capability (from `SCRAPE-08`), T3 opt-ins, xUnit gate totals.
-2. **Feature coverage** — one row per tool (70) plus `HOST` and `XC`: planned, run, pass,
+2. **Feature coverage** — one row per tool (71) plus `HOST` and `XC`: planned, run, pass,
    fail, blocked, skipped, and a one-line note.
 3. **Test log** — one row per test id: `ID | Tier | Ch | Status | Evidence | Notes`. Evidence is
    the excerpt or the evidence-folder path.
@@ -1448,7 +1468,7 @@ Rewritten between the markers by `node scripts/e2e/sync-results.mjs`; not mainta
 
 <!-- INDEX-START -->
 
-592 test ids, 73 features (generated; do not edit by hand).
+607 test ids, 74 features (generated; do not edit by hand).
 
 | Feature | Tests | Ids |
 |---|---|---|
@@ -1465,11 +1485,12 @@ Rewritten between the markers by `node scripts/e2e/sync-results.mjs`; not mainta
 | ENV | 10 | ENV-01, ENV-02, ENV-03, ENV-04, ENV-05, ENV-06, ENV-07, ENV-08, ENV-09, ENV-10 |
 | EVENT_LOG | 10 | EVENT_LOG-01, EVENT_LOG-02, EVENT_LOG-03, EVENT_LOG-04, EVENT_LOG-05, EVENT_LOG-06, EVENT_LOG-07, EVENT_LOG-08, EVENT_LOG-09, EVENT_LOG-10 |
 | FILE_DIALOG | 6 | FILE_DIALOG-01, FILE_DIALOG-02, FILE_DIALOG-03, FILE_DIALOG-04, FILE_DIALOG-05, FILE_DIALOG-06 |
+| FILE_EDIT | 8 | FILE_EDIT-01, FILE_EDIT-02, FILE_EDIT-03, FILE_EDIT-04, FILE_EDIT-05, FILE_EDIT-06, FILE_EDIT-07, FILE_EDIT-08 |
 | FILE_HASH | 2 | FILE_HASH-01, FILE_HASH-02 |
 | FILE_INFO | 3 | FILE_INFO-01, FILE_INFO-02, FILE_INFO-03 |
 | FILE_MANAGE | 18 | FILE_MANAGE-01, FILE_MANAGE-02, FILE_MANAGE-03, FILE_MANAGE-04, FILE_MANAGE-05, FILE_MANAGE-06, FILE_MANAGE-07, FILE_MANAGE-08, FILE_MANAGE-09, FILE_MANAGE-10, FILE_MANAGE-11, FILE_MANAGE-12, FILE_MANAGE-13, FILE_MANAGE-14, FILE_MANAGE-15, FILE_MANAGE-16, FILE_MANAGE-17, FILE_MANAGE-18 |
 | FILE_READ | 11 | FILE_READ-01, FILE_READ-02, FILE_READ-03, FILE_READ-04, FILE_READ-05, FILE_READ-06, FILE_READ-07, FILE_READ-08, FILE_READ-09, FILE_READ-10, FILE_READ-11 |
-| FILE_SEARCH | 6 | FILE_SEARCH-01, FILE_SEARCH-02, FILE_SEARCH-03, FILE_SEARCH-04, FILE_SEARCH-05, FILE_SEARCH-06 |
+| FILE_SEARCH | 13 | FILE_SEARCH-01, FILE_SEARCH-02, FILE_SEARCH-03, FILE_SEARCH-04, FILE_SEARCH-05, FILE_SEARCH-06, FILE_SEARCH-07, FILE_SEARCH-08, FILE_SEARCH-09, FILE_SEARCH-10, FILE_SEARCH-11, FILE_SEARCH-12, FILE_SEARCH-13 |
 | FILE_STREAMS | 2 | FILE_STREAMS-01, FILE_STREAMS-02 |
 | FILE_WRITE | 8 | FILE_WRITE-01, FILE_WRITE-02, FILE_WRITE-03, FILE_WRITE-04, FILE_WRITE-05, FILE_WRITE-06, FILE_WRITE-07, FILE_WRITE-08 |
 | FIND_ELEMENT | 12 | FIND_ELEMENT-01, FIND_ELEMENT-02, FIND_ELEMENT-03, FIND_ELEMENT-04, FIND_ELEMENT-05, FIND_ELEMENT-06, FIND_ELEMENT-07, FIND_ELEMENT-08, FIND_ELEMENT-09, FIND_ELEMENT-10, FIND_ELEMENT-11, FIND_ELEMENT-12 |

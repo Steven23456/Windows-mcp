@@ -75,3 +75,42 @@ public record FileListing(FileEntry[] Entries, bool Truncated, int MaxEntries);
 /// and <see cref="Truncated"/> says lines remain past the window.
 /// </summary>
 public record TextWindow(int TotalLines, int Offset, int Returned, bool Truncated, string Content);
+
+/// <summary>
+/// E-9: the outcome of <c>file_edit</c>. <see cref="FirstLine"/> is the 1-based line of the first
+/// replacement; <see cref="Encoding"/> is utf-8|utf-16|utf-16-be|utf-32|ascii|latin1;
+/// <see cref="LineEndings"/> is crlf|lf|mixed|none as found before the edit.
+/// </summary>
+public record FileEditResult(
+    string Path,
+    int Replacements,
+    int FirstLine,
+    string Encoding,
+    bool Bom,
+    string LineEndings,
+    long BytesBefore,
+    long BytesAfter);
+
+/// <summary>E-9: <c>file_search</c> with <c>content</c>. <see cref="Content"/> is a .NET regex matched per line.</summary>
+public record ContentSearchRequest(
+    string Root,
+    string Content,
+    string? Pattern = null,
+    long? MinSize = null,
+    DateTime? ModifiedSince = null,
+    int MaxMatches = 100,
+    int ContextLines = 0);
+
+/// <summary>
+/// E-9: one matching line. <see cref="Line"/> is 1-based; <see cref="Before"/> / <see cref="After"/>
+/// are null when <c>context_lines</c> is 0.
+/// </summary>
+public record ContentMatch(string Path, int Line, string Text, string[]? Before = null, string[]? After = null);
+
+/// <summary>E-9: a content search's matches and its counters.</summary>
+public record ContentSearchResult(
+    ContentMatch[] Matches,
+    int FilesSearched,
+    int FilesSkipped,
+    bool Truncated,
+    int MaxMatches);

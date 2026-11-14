@@ -85,6 +85,8 @@ public class DrivingToolsTests
     [InlineData("screenshot")]
     [InlineData("snapshot")]
     [InlineData("wait_for")]
+    [InlineData("file_edit")]        // E-9: edits a file on disk, injects no input and moves no focus
+    [InlineData("file_search")]
     public void Tools_that_inject_nothing_are_not_driving_tools(string name)
     {
         DrivingTools.Names.Should().NotContain(name);

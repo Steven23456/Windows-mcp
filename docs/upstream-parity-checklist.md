@@ -3,26 +3,26 @@
 **Baseline:** 2026-09-04
 **Upstream:** [CursorTouch/Windows-MCP](https://github.com/CursorTouch/Windows-MCP) `main` = **v0.8.5**
 (released 2026-08-01; Python ≥ 3.14, FastMCP 3, 20 tools).
-**Ours:** `main` @ `8cb40b6` + the phase-2/3/4/5 branches, 70 tools, plugin `0.7.3`, `CHANGELOG.md
+**Ours:** `main` @ `8cb40b6` + the phase-2/3/4/5 branches, 71 tools, plugin `0.7.3`, `CHANGELOG.md
 [Unreleased]` carries the section-A phase-1 work (A-7, A-8, A-9, A-11, A-13), phase 2's A-1,
 phase 3's A-2/A-3/A-4, phase 4's A-6 and phase 5's A-14, A-12 (phase 1), A-10 and A-5 (phase 1),
 then all of section B and all of section C (C-7, C-4, C-2, C-3, C-1, C-6, C-5), D-10/D-11, S-11,
-E-1, E-2, E-3, E-4 (with D-20), E-5, E-6, E-7 and E-8.
+E-1, E-2, E-3, E-4 (with D-20), E-5, E-6, E-7, E-8 and E-9.
 SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
-This is the working list of everything upstream can do that this server cannot (plus seventy-three
+This is the working list of everything upstream can do that this server cannot (plus eighty-five
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 and D-10/D-11
 logged 2026-11-10 — **all eleven are now fixed** — then D-12…D-18, logged 2026-11-11 by the
 D-10/D-11 review, D-19…D-22, logged 2026-11-12 during E-1, D-23…D-27, logged 2026-11-12
 during E-2, D-28…D-32, logged 2026-11-12 by the E-3 review, D-33…D-38, logged 2026-11-12
 during E-4, D-39…D-48, logged 2026-11-12 during E-5 and its review, D-49…D-53, logged
-2026-11-13 by the E-6 review, D-54…D-65, logged 2026-11-13 during E-7 and its review, and D-66…D-73, logged 2026-11-13 during E-8 and its review, all still open except D-31, which E-3's
+2026-11-13 by the E-6 review, D-54…D-65, logged 2026-11-13 during E-7 and its review, D-66…D-73, logged 2026-11-13 during E-8 and its review, and D-74…D-85, logged 2026-11-13/14 during E-9 and its review, all still open except D-31, which E-3's
 review round fixed, D-20, which E-4 fixed, and D-67, which E-8's review fixed; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
 phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and phase 5 shipped A-14,
 A-12 phase 1, A-10 and A-5 phase 1 — so every section-A row is ticked, with only A-5's Firefox
 phase left open and A-12's phase 2 deliberately not planned; section B is ticked too, and
-C-5/C-6 close section C — section S, D-12…D-73 (less D-20, D-31 and D-67) and section E are the work that is left; section E
+C-5/C-6 close section C — section S, D-12…D-85 (less D-20, D-31 and D-67) and section E are the work that is left; section E
 is not upstream parity but an agent-efficiency backlog from a review of this server's own tools).
 Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
@@ -184,6 +184,18 @@ function names are the stable anchor.
 | D-71 | The session probe runs synchronously on every snapshot and every `wait_for` text/focus poll, with no cache and no timeout | P3 | S | E-8 | ☐ |
 | D-72 | Secure-desktop detection rests on `OpenInputDesktop` failing with `ERROR_ACCESS_DENIED`, not verified on a live UAC prompt or lock screen (the raw error is now reported as `InputDesktopError`) | P3 | S | E-8 | ☐ |
 | D-73 | Every caller that interprets a snapshot needs its own policy for an `Unavailable` one; a caller without one reads "empty" | P3 | S | E-8 | ☐ |
+| D-74 | `file_search`'s two modes walk and match differently: without `content` it aborts on the first folder it cannot list, descends into junctions and takes a folder in `pattern` | P3 | S | E-9 | ☐ |
+| D-75 | A content search has no time or file-count budget, only cancellation and the match cap | P3 | S | E-9 | ☐ |
+| D-76 | `file_write` replaces a file by move, dropping its ACL, attributes, creation time and streams, exposing it through the folder's ACL meanwhile, and splitting hard links (`file_edit` avoids all of these) | P3 | S | E-9 | ☐ |
+| D-77 | `file_edit` has no regex replace and content search no multi-line match | P3 | S | E-9 | ☐ |
+| D-78 | `modified_since` with an offset is compared off by the server's UTC offset, in both `file_search` modes | P3 | S | — | ☐ |
+| D-79 | `RequireAbsolute` accepts alternate-data-stream paths and legacy device names for every file tool | P3 | S | C-1 | ☐ |
+| D-80 | `file_edit` silently falls back to a temp file with the folder's inherited ACL when the target's cannot be read or applied | P3 | S | E-9 | ☐ |
+| D-81 | UTF-32 BE and BOM-less UTF-16 files are skipped as binary by content search; UTF-32 BE is not editable | P3 | S | E-9 | ☐ |
+| D-82 | An edited file's owner, and possibly its integrity label, can change: the temp is the server's and metadata errors are ignored | P3 | S | E-9, D-80 | ☐ |
+| D-83 | A backup (the original content) whose delete fails after a successful edit is left beside the file, unreported | P3 | S | E-9 | ☐ |
+| D-84 | A content search's attribute re-check before opening a file is two steps: an entry swapped for a link in between is still followed | P3 | S | E-9 | ☐ |
+| D-85 | `file_write` and `archive` cannot write a file whose name is near the 255-character limit (`<path>.tmp.<guid>`) | P3 | S | E-9 | ☐ |
 | E-1 | Server instructions in the MCP handshake | P1 | S | — | ☑ |
 | E-2 | `interact_element`: expand, collapse, set_value, scroll_into_view | P1 | S | D-10 | ☑ |
 | E-3 | `click` modifiers; `key` repeat and hold | P2 | S | — | ☑ |
@@ -192,7 +204,7 @@ function names are the stable anchor.
 | E-6 | `sequence`: an ordered batch of UI steps in one call | P2 | M | E-5, S-11 · [E-6](design/E-6-sequence.md) | ☑ |
 | E-7 | Capture by window / element; OCR word positions | P2 | M | — · [E-7](design/E-7-capture-targets-ocr-words.md) | ☑ |
 | E-8 | Session state: elevation, lock, secure desktop | P2 | S–M | — · [E-8](design/E-8-session-state.md) | ☑ |
-| E-9 | `file_edit` and content search for remote hosts | P2 | M | — | ☐ |
+| E-9 | `file_edit` and content search for remote hosts | P2 | M | — · [E-9](design/E-9-file-edit-content-search.md) | ☑ |
 | E-10 | Named toolsets on top of S-1 | P3 | S | S-1 | ☐ |
 | E-11 | Stable element ids and a snapshot diff | P3 | L | E-5, D-11 | ☐ |
 
@@ -200,7 +212,7 @@ function names are the stable anchor.
 D-10/D-11 review, D-19 … D-22, logged 2026-11-12 during E-1, D-23 … D-27, logged 2026-11-12
 during E-2, D-28 … D-32, logged 2026-11-12 by the E-3 review, D-33 … D-38, logged 2026-11-12
 during E-4, D-39 … D-48, logged 2026-11-12 during E-5 and its review, and D-49 … D-53, logged
-2026-11-13 by the E-6 review, D-54 … D-65, logged 2026-11-13 during E-7 and its review, and D-66 … D-73, logged 2026-11-13 during E-8 and its review, are open — except D-31, fixed in E-3's
+2026-11-13 by the E-6 review, D-54 … D-65, logged 2026-11-13 during E-7 and its review, D-66 … D-73, logged 2026-11-13 during E-8 and its review, and D-74 … D-85, logged 2026-11-13/14 during E-9 and its review, are open — except D-31, fixed in E-3's
 review round, D-20, fixed by E-4, and D-67, fixed in E-8's review round), and
 **so are sections
 A, B and C** (A-5's Firefox phase and
@@ -217,8 +229,8 @@ opt-in sampling and the annotation table, per-item test seeds) is in
 **Section E (added 2026-11-10) is not upstream parity.** It comes from a review of this server's
 own tool surface for how many round trips and tokens an AI client spends driving it, and the same
 review logged D-10 and D-11 (both done 2026-11-11, so E-2 and E-5 are unblocked). E-1, E-2,
-E-3, E-4 and E-5 are done (2026-11-12), and E-6, E-7 and E-8 (2026-11-13). Order for the rest:
-E-9, E-10. E-11 is last and conditional: measure the snapshot
+E-3, E-4 and E-5 are done (2026-11-12), and E-6, E-7, E-8 and E-9 (2026-11-13). Order for the rest:
+E-10, which waits on S-1 (tool allow/deny lists, not started). E-11 is last and conditional: measure the snapshot
 cost after E-5 (now possible) before committing to it. `todo.md` still records every UI-automation tool as never
 verified live — that sweep outranks any E item that builds on those tools.
 
@@ -2118,6 +2130,283 @@ empty result.
 
 **Done when.** No code path can read an `Unavailable` snapshot's empty lists as a real answer.
 
+### D-74 — `file_search` without `content` aborts on the first unlistable folder and follows links  `P3 · S`
+- [ ] Not started
+
+**Found during E-9 (2026-11-13), read from the source; recorded as not in scope in
+[E-9](design/E-9-file-edit-content-search.md).**
+
+**Ours today.** The name/size/date search (`FileSystemService.SearchAsync`) enumerates with
+`Directory.EnumerateFiles(root, pattern, SearchOption.AllDirectories)`, whose options do not ignore
+inaccessible directories and do not skip reparse points. The enumeration runs outside the per-file
+`try`, so the first folder it cannot list (`System Volume Information`, another user's profile)
+throws out of the whole search with nothing returned, and a junction or symlink is descended into
+(the enumerator's default; not observed live here) — a loop or a link to a large tree makes the
+search long or endless. E-9's content mode uses
+`IgnoreInaccessible = true` and enters no link; the two modes of one tool now disagree. It is
+also uncapped (e2e FILE_SEARCH-06). **Found by E-9's second review pass:** they also match
+differently — the name mode passes `pattern` to the enumerator, which accepts a folder in it
+(`sub\*.txt`), while the content mode refuses a `\` or `/` in `pattern` (a file-name glob only)
+and enters every non-link folder, OneDrive's included.
+
+**Sketch.** Give `SearchAsync` the same `EnumerationOptions` as the content mode (and C-1's `list`),
+and add `max_results` with `Truncated`.
+
+**Touches.** `Services/FileSystemService.cs` (`SearchAsync`), `Tools/FileTools.cs` (the description).
+
+**Tests.** A tree with an unreadable folder and a junction loop: the search returns the readable
+files and terminates.
+
+**Done when.** A name search over a tree with an unreadable folder or a junction returns what it can.
+
+### D-75 — A content search has no time or file-count budget  `P3 · S`
+- [ ] Not started
+
+**Found during E-9 (2026-11-13), read from the source; recorded as not in scope in
+[E-9](design/E-9-file-edit-content-search.md).**
+
+**Ours today.** `SearchContentAsync` walks the whole tree under `root` until `max_matches` lines
+match or the caller cancels. A rare pattern over `C:\` reads every text file under 16 MiB; the
+2-second regex timeout bounds one line, not the search. Nothing reports how far it got if the
+client gives up.
+
+**Sketch.** A `max_files` (or a time budget) that stops the walk with `truncated:true` and says
+why, so a broad search returns partial results instead of running until cancelled.
+
+**Touches.** `Services/FileSystemService.cs`, `Abstractions/Models/FileSystemDtos.cs`,
+`Tools/FileTools.cs`.
+
+**Tests.** A tree with more files than the budget and no match: the search stops at the budget and
+reports it.
+
+**Done when.** A content search over a huge tree ends on its own with partial results.
+
+### D-76 — `file_write` replaces a file by move, dropping its ACL, attributes and streams  `P3 · S`
+- [ ] Not started
+
+**Found during E-9 (2026-11-13), read from the source.**
+
+**Ours today.** `FileSystemService.WriteTextAsync` (no `append`) writes a temp file and
+`File.Move(tmp, path, overwrite: true)`. The temp file gets its folder's inherited ACL and default
+attributes, so replacing an existing file this way drops the target's explicit ACL, its
+attributes (hidden, system), its creation time and its alternate data streams. E-9's
+`file_edit` swaps in with `File.Replace`, which keeps them; the two write paths now treat an
+existing file differently. **Found by the E-9 review:** the temp file's folder-inherited ACL is
+also an exposure — the new content of a protected file is readable through it until the move —
+which `file_edit` avoids by creating its temp with the target's access rules; and the move splits
+a hard-linked file the same way a replace would (the other names keep the old content), which
+`file_edit` refuses.
+
+**Sketch.** When the target exists, do what `file_edit` does — a temp created with the target's
+access rules, `File.Replace` with a backup, restore-before-delete, a hard-linked target refused —
+and keep the move for a new file.
+
+**Touches.** `Services/FileSystemService.cs` (`WriteTextAsync`).
+
+**Tests.** Overwrite a file with an explicit ACL entry, the hidden attribute and an alternate
+stream: all three survive.
+
+**Done when.** Rewriting an existing file with `file_write` keeps its identity.
+
+### D-77 — `file_edit` has no multi-line regex or regex replace  `P3 · S`
+- [ ] Not started
+
+**Found during E-9 (2026-11-13); recorded as not in scope in
+[E-9](design/E-9-file-edit-content-search.md).**
+
+**Ours today.** `file_edit` matches `old_string` literally (ordinal), and `file_search`'s
+`content` matches one line at a time. A change that depends on a pattern (every `Version="…"`
+attribute, a block whose middle varies) needs one `file_edit` per distinct text, or `file_read` +
+`file_write`, and a search cannot match across lines.
+
+**Sketch.** An opt-in `regex:true` on `file_edit` (with `$1` substitutions, the same 2 s timeout
+and the same unique-match rule) and a multi-line mode for content search.
+
+**Touches.** `Services/TextEdit.cs`, `Services/ContentSearch.cs`, `Tools/FileTools.cs`.
+
+**Tests.** A regex edit with a capture group; a multi-line content match.
+
+**Done when.** A patterned edit is one call.
+
+### D-78 — `modified_since` with an offset is compared off by the server's UTC offset  `P3 · S`
+- [ ] Not started
+
+**Found by the E-9 review (2026-11-13), read from the source.**
+
+**Ours today.** `FileTools.FileSearch` parses `modified_since` with
+`DateTime.TryParse(…, DateTimeStyles.RoundtripKind)`. A value ending `Z` becomes `Kind=Utc` and
+compares correctly with `LastWriteTimeUtc`; a value with an offset (`2026-11-13T09:00:00+02:00`)
+becomes `Kind=Local`, converted to the server's local time, and one with no zone stays
+`Unspecified`. Both search modes then compare it raw against `LastWriteTimeUtc` (`SearchAsync` and
+`SearchContent`); `DateTime` comparison ignores `Kind`, so the cut-off is off by the server's UTC
+offset (a no-zone value is read as UTC).
+
+**Sketch.** Parse with `DateTimeOffset` (or `AdjustToUniversal | AssumeUniversal`) and compare in
+UTC; say in the description that a value without a zone is UTC.
+
+**Touches.** `Tools/FileTools.cs` (`FileSearch`).
+
+**Tests.** The same instant given as `Z` and as `+02:00` selects the same files.
+
+**Done when.** `modified_since` means the same instant however it is written.
+
+### D-79 — `RequireAbsolute` accepts stream paths and legacy device names  `P3 · S`
+- [ ] Not started
+
+**Found by the E-9 review (2026-11-13), read from the source; what each tool then does is not
+verified.**
+
+**Ours today.** `FileTools.RequireAbsolute` refuses a path that is not fully qualified and the
+`\\?\` / `\\.\` device forms, nothing else. `Path.IsPathFullyQualified` accepts an alternate data
+stream path (`C:\x\file.txt:stream`) and a path ending in a legacy device name (`C:\x\CON`,
+`C:\x\NUL.txt`), so every file tool passes them to its service. What each then does — read or
+write the named stream, open the console or `NUL` device, or fail — has not been traced or run;
+`file_streams` is the tool meant for streams.
+
+**Sketch.** Refuse a `:` after the drive designator and a final segment that is a reserved device
+name, naming the parameter, as the device forms are refused; or allow streams explicitly where a
+tool means to.
+
+**Touches.** `Tools/FileTools.cs` (`RequireAbsolute`).
+
+**Tests.** `file.txt:stream` and `C:\x\CON` refused by every file tool before its service is
+called.
+
+**Done when.** A file tool's path names a file, never a stream or a device, unless it says so.
+
+### D-80 — `file_edit` silently falls back to the folder's ACL for its temp file  `P3 · S`
+- [ ] Not started
+
+**Found by the E-9 review (2026-11-13), read from the source.**
+
+**Ours today.** `FileSystemService.CreateTempLike` creates the temp file with the target's access
+rules; when they cannot be read or applied (no `READ_CONTROL`, a file system without ACLs, a
+privilege not held) it catches the failure and creates an ordinary file, which gets the folder's
+inherited ACL — so the edited content of a protected file can be readable through that ACL until
+the swap. `File.Replace` then copies the target's ACL onto the result where it can, with
+`ignoreMetadataErrors: true`. Nothing in `FileEditResult` says either step fell back.
+
+**Sketch.** Report it (`aclPreserved: false`, or a note), or refuse to edit a file whose ACL
+cannot be read unless the caller opts in.
+
+**Touches.** `Services/FileSystemService.cs`, `Abstractions/Models/FileSystemDtos.cs`,
+`Tools/FileTools.cs`.
+
+**Tests.** A target whose ACL read is denied: the result says the ACL was not carried.
+
+**Done when.** A caller can tell when an edit did not keep the file's permissions.
+
+### D-81 — UTF-32 BE and BOM-less UTF-16 files are not searchable; UTF-32 BE is not editable  `P3 · S`
+- [ ] Not started
+
+**Found by the E-9 review (2026-11-13), read from the source.**
+
+**Ours today.** `ContentSearch.LooksBinary` treats a file as text only when it has a UTF-8 or
+UTF-16 (LE/BE) BOM or no NUL in its first 8 KiB. A UTF-32 BE file (BOM `00 00 FE FF`) and a
+BOM-less UTF-16 file are full of NUL bytes and are skipped as binary (counted in `filesSkipped`,
+not searched). `TextEdit.Detect` has no UTF-32 BE branch, so such a file decodes as UTF-8, where
+`auto` refuses it for its NULs and an explicit `utf-8` would edit it as UTF-8. BOM-less UTF-16 *is*
+editable with `encoding:"utf-16"`.
+
+**Sketch.** Add the UTF-32 BE BOM to both; for search, try UTF-16 when the NUL pattern looks like
+it (every other byte) before calling a file binary.
+
+**Touches.** `Services/ContentSearch.cs`, `Services/TextEdit.cs`.
+
+**Tests.** A UTF-32 BE file and a BOM-less UTF-16 file each searched and (UTF-32 BE) edited.
+
+**Done when.** Every Unicode text encoding Windows writes is searchable and editable.
+
+### D-82 — An edited file's owner, and possibly its integrity label, can change  `P3 · S`
+- [ ] Not started
+
+**Found by the E-9 second review pass (2026-11-13), read from the source and `ReplaceFile`'s
+documented behaviour; not observed.**
+
+**Ours today.** `file_edit`'s temp file is created by the server, so the server's account owns
+it; `CreateTempLike` copies only the access section (the DACL) of the target's descriptor, not
+its owner or its mandatory label. `File.Replace` is then called with
+`ignoreMetadataErrors: true`: `ReplaceFile` tries to carry the replaced file's attributes and
+security over, and when it cannot (setting another account as owner needs a privilege the server
+normally lacks) the error is ignored. So an edited file can end up owned by the server's account,
+and a file with an explicit integrity label can lose it, with nothing in the result saying so —
+the same family as D-80.
+
+**Sketch.** Compare owner and label before and after the swap and report a change (or refuse
+when the owner cannot be kept, unless the caller opts in).
+
+**Touches.** `Services/FileSystemService.cs`, `Abstractions/Models/FileSystemDtos.cs`.
+
+**Tests.** A target owned by another account: the result reports the owner change.
+
+**Done when.** A caller can tell when an edit changed who owns the file.
+
+### D-83 — A backup left behind after a successful edit is not reported  `P3 · S`
+- [ ] Not started
+
+**Found by the E-9 second review pass (2026-11-13), read from the source.**
+
+**Ours today.** `file_edit` swaps with a backup name (`~wmcp-<16 hex>.bak` in the target's folder), which holds the
+original content after a successful replace, and deletes it best-effort (`catch { }`). If the
+delete fails (the backup is open in another process, a scanner holds it), the original content is
+left beside the file under a random name, and the result is the ordinary success with no mention
+of it — a stray copy of possibly sensitive content, and clutter a later edit adds to.
+
+**Sketch.** Report it in the result (`backupLeft: "<path>"`) or retry the delete, so the caller
+knows to remove it.
+
+**Touches.** `Services/FileSystemService.cs`, `Abstractions/Models/FileSystemDtos.cs`,
+`Tools/FileTools.cs`.
+
+**Tests.** A backup whose delete is made to fail: the result names it.
+
+**Done when.** No edit leaves a copy of the original behind without saying where.
+
+### D-84 — A content search's link check before opening a file can still race  `P3 · S`
+- [ ] Not started
+
+**Found by the PR #47 review of E-9 (2026-11-14), read from the source.**
+
+**Ours today.** `FileSystemService.SearchContent` re-reads an entry's attributes from the path
+right before opening it, and skips one that has become a link, a cloud-only file or a directory
+since the walk saw it (or is gone). The check and the open are two steps on a path: an entry
+replaced by a symlink (or a cloud placeholder) between them is still opened through the path, so
+the search can follow a link it meant to skip, or recall a cloud file. The window is narrow; it is
+not closed.
+
+**Sketch.** Open the entry itself without following it: `CreateFile` with
+`FILE_FLAG_OPEN_REPARSE_POINT`, then check the reparse tag on that handle — a symlink or mount
+point is skipped; a non-link reparse file (OneDrive, deduplication) is reopened normally and the
+second handle verified to be the same file by its file id before it is read.
+
+**Touches.** `Services/FileSystemService.cs` (`SearchContent`).
+
+**Tests.** A seam that swaps the entry for a symlink between the attribute check and the open: the
+link is not followed and the entry is skipped and counted.
+
+**Done when.** A content search never reads through a link or recalls a cloud file, whatever
+changes during the walk.
+
+### D-85 — `file_write` and `archive` cannot write a file whose name is near the 255-character limit  `P3 · S`
+- [ ] Not started
+
+**Found by the PR #47 review of E-9 (2026-11-14), read from the source.**
+
+**Ours today.** `file_write` (no `append`) writes `<path>.tmp.<guid>` and moves it into place, and
+`archive(zip)` writes `<dst>.tmp.<guid>`; the temp name is the target's name plus 37 characters.
+A target whose file name is within 37 characters of the 255-character component limit therefore
+cannot be written — the temp file's name is too long — though the target name itself is valid.
+`file_edit` names its temp and backup `~wmcp-<16 hex>.tmp` / `.bak` in the target's folder,
+independent of the target's name, and has no such limit.
+
+**Sketch.** Use the same short sibling name (`~wmcp-<hex>.tmp`) for `file_write` and `archive`.
+
+**Touches.** `Services/FileSystemService.cs` (`WriteTextAsync`, `ZipAsync`).
+
+**Tests.** `file_write` and `archive(zip)` to a target whose name is 250 characters long.
+
+**Done when.** Any target name the file system accepts can be written.
+
 ---
 
 ## A — Desktop state and screenshots
@@ -2791,7 +3080,7 @@ every listed tool has explicit annotations.
 `__main__.py` `_apply_tool_filter()`; unknown names error at startup. Lets an operator run a
 screenshot-only or no-PowerShell server.
 
-**Ours.** All 70 tools always.
+**Ours.** All 71 tools always.
 
 **Sketch.** `ServerOptions` gains `Tools`/`ExcludeTools` (flags + `WINDOWSMCP_TOOLS`/
 `WINDOWSMCP_EXCLUDE_TOOLS`, valid for both transports); in `WindowsMcpHost.AddWindowsMcp` filter
@@ -2918,7 +3207,7 @@ cleanup, VM/Sandbox recommendation for destructive tools.
 
 **Ours.** `skills/windows/SKILL.md` is a usage playbook, not a tester.
 
-**Sketch.** `skills/windows-tool-tester/SKILL.md` adapted to our 70 tools and `confirm:true`
+**Sketch.** `skills/windows-tool-tester/SKILL.md` adapted to our 71 tools and `confirm:true`
 gates; wire into the plugin manifest.
 
 ### S-11 — AI-control indicator and takeover hotkey  `P2 · M`
@@ -3500,7 +3789,7 @@ secure-desktop states were exercised only through the fake probe (the real probe
 run. Neighbour gaps logged: D-66 and D-68 … D-73.
 
 ### E-9 — `file_edit` and content search for remote hosts  `P2 · M`
-- [ ] Not started
+- [x] Done 2026-11-13 — [design note](design/E-9-file-edit-content-search.md); in `CHANGELOG.md [Unreleased]`, ships with the next release (not verified on a real remote host)
 
 **Ours today.** `file_write` replaces or appends a whole file; `file_search` matches name, size and
 date. On a local machine the client's own edit and search tools cover this. On a remote host over
@@ -3523,10 +3812,49 @@ invalid regex is refused by name.
 
 **Done when.** One line of a remote config file is changed without the file crossing the wire.
 
+**As landed:** `file_edit(path, old_string, new_string, replace_all = false, encoding = "auto",
+confirm = false)` in `Tools/FileTools.cs` (title `Edit file`, destructive, not idempotent,
+closed-world; tool count 70 → 71; `FileTools` 9 → 10), behind `IFileSystemService.EditTextAsync` →
+`FileEditResult(Path, Replacements, FirstLine, Encoding, Bom, LineEndings, BytesBefore,
+BytesAfter)` and the pure `Services/TextEdit.cs`. Departures from the sketch: **`confirm:true` is
+required**, as for every file write; **`latin1` was added** to the encodings (`auto`/`utf-8`,
+`utf-16`, `ascii`, `latin1`) so any single-byte legacy file can be edited without loss; the write
+is not `file_write`'s temp-and-rename but a temp created with the target's access rules plus
+`File.Replace` **with a backup name**, so the ACL, attributes, creation time and streams are kept
+where the file system supports it and **a failed swap restores the original and never recreates a
+file** (the backup put back when the original had been moved aside; a target someone else
+deleted meanwhile is not recreated — the error names the temp holding the edited content); and **a hard-linked file is refused** (the swap would split it into two
+files). A BOM always decides (UTF-8, UTF-16 LE/BE, UTF-32 LE); `auto` without one refuses text
+containing NUL (BOM-less UTF-16). `old_string` must match exactly once unless `replace_all`,
+ordinal, first as given and then with its line endings converted to the file's, never splitting a
+`\r\n` pair; zero or several matches is refused saying how many. Decoding and encoding are strict,
+and bytes outside the replaced text are never touched. Refused with nothing written: an empty
+`old_string`, a null `new_string`, unchanged strings, an unknown encoding, a missing file, a
+directory, a symlink or junction (other reparse files such as OneDrive's are edited), more than one
+hard link, a read-only file, over 16 MiB, undecodable bytes, an unrepresentable `new_string`, and a
+file whose length or last-write time changed before the replace. `file_search` gains `content` (a
+per-line .NET regex, 2 s match timeout), `max_matches` (1-1000, default 100) and `context_lines`
+(0-5), behind `IFileSystemService.SearchContentAsync(ContentSearchRequest)` →
+`ContentSearchResult(Matches, FilesSearched, FilesSkipped, Truncated, MaxMatches)` with
+`ContentMatch(Path, Line, Text, Before?, After?)` and the pure `Services/ContentSearch.cs`; the
+returned lines are capped at 60,000 characters in all (`truncated`); hidden and system files are
+read; binary (NUL in the first 8 KiB, no BOM), over-16-MiB, unopenable, file-symlink and
+cloud-only files are skipped and counted (never downloaded), unreadable folders passed over,
+junctions and directory symlinks not entered (OneDrive and other non-link folders are), `pattern`
+a file-name glob (a `\` or `/` in it refused), lines clipped at 400 characters. The no-`content` path is
+unchanged. Tests: `TextEditTests`, `ContentSearchTests`, `FileSystemServiceEditTests`,
+`FileSystemServiceContentSearchTests`, `FileToolsEditTests`, `FileToolsContentSearchTests` and
+`FileEditHttpTransportTests`, plus additions to `ToolInventoryTests`, `StreamTransportTests`,
+`DrivingToolsTests`, `SequenceStepsTests` and `ServerInstructionsTests`. **The "done when" bar was
+met in-process, not on a remote host:** `FileEditHttpTransportTests` changes one line of a CRLF
+config file over the real HTTP transport (in-process, ephemeral port) and checks the reply does
+not carry the file's content. Not verified: no run against a real remote host, no network share,
+FAT or OneDrive target, and ACL preservation is not tested. Neighbour gaps logged: D-74 … D-85.
+
 ### E-10 — Named toolsets on top of S-1  `P3 · S`
 - [ ] Not started
 
-**Ours today.** All 70 tool descriptions are sent to every client (`screenshot`'s alone is about
+**Ours today.** All 71 tool descriptions are sent to every client (`screenshot`'s alone is about
 2 500 characters). S-1 will let an operator list tools to keep or drop by name.
 
 **Sketch.** After S-1: `--toolset ui|admin|forensics|files` (repeatable; `WINDOWSMCP_TOOLSET`)
@@ -3570,7 +3898,7 @@ small, close this item unbuilt.
 
 ## Appendix A — Tool name map (upstream → ours)
 
-| Upstream (20) | Ours (70) | Gap items |
+| Upstream (20) | Ours (71) | Gap items |
 |---|---|---|
 | `Snapshot` | `snapshot`, `get_state`, `find_element`, `get_element`, `get_text`, `window` (list/active) | A-1..A-6, A-11..A-13 |
 | `Screenshot` | `screenshot`, `ocr` | A-7..A-11 |
@@ -3585,7 +3913,7 @@ small, close this item unbuilt.
 | `MultiSelect`, `MultiEdit` | `multi_select`, `multi_edit` | B-7 |
 | `App` | `launch`, `switch_to_window`, `focus`, `window`, `start_process` | B-8..B-11 |
 | `PowerShell` | `powershell`, `job` | C-6 |
-| `FileSystem` | `file_read/write/manage/search/info/hash/streams`, `archive` | C-1 |
+| `FileSystem` | `file_read/write/edit/manage/search/info/hash/streams`, `archive` | C-1, E-9 |
 | `Scrape` | `scrape`, `http_request` | C-5 |
 | `Clipboard` | `clipboard` | — |
 | `Process` | `process`, `process_inspect` | C-3 |

@@ -1,6 +1,9 @@
 using System.IO.Enumeration;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
+using System.Security.AccessControl;
 using System.Text;
+using System.Text.RegularExpressions;
 using WindowsMcp.Abstractions;
 using WindowsMcp.Abstractions.Models;
 
@@ -14,6 +17,35 @@ public sealed class FileSystemService : IFileSystemService
 
     /// <summary>C-1 round 4d: the volume seam behind the containment check's canonical paths.</summary>
     internal FileSystemService(IFinalPathNative finalPath) => _finalPath = finalPath;
+
+    /// <summary>E-9 test seam: the points <see cref="StageHook"/> is called at.</summary>
+    internal enum Stage
+    {
+        /// <summary>file_edit: the file has been read and the edit computed; nothing written yet. Argument: the target path.</summary>
+        EditRead,
+        /// <summary>file_edit: the temp file is complete; the change check and the replace come next. Argument: the temp path.</summary>
+        EditTempWritten,
+        /// <summary>content search: a file that passed the name/size/date filters is about to be opened. Argument: its path.</summary>
+        SearchFile,
+        /// <summary>file_edit: the refusals have passed and the file is about to be opened and read. Argument: its path.</summary>
+        EditOpen,
+        /// <summary>content search: the walk is looking at an entry (a file or a folder, matching the name or not). Argument: its path.</summary>
+        SearchEntry,
+    }
+
+    /// <summary>E-9 test seam: called at each <see cref="Stage"/>; null in production.</summary>
+    internal Action<Stage, string>? StageHook { get; init; }
+
+    /// <summary>E-9 test seam: the content search's per-line regex timeout (2 s in production).</summary>
+    internal TimeSpan ContentMatchTimeout { get; init; } = ContentSearch.MatchTimeout;
+
+    /// <summary>
+    /// E-9 R2 test seam: the replace step of <c>file_edit</c> as (source = the temp file,
+    /// destination = the target, backup = <c>~wmcp-&lt;16 hex&gt;.bak</c> beside it). Production is
+    /// <c>File.Replace</c>; a test swaps in a replace that fails part-way (error 1176 / 1177 shapes).
+    /// </summary>
+    internal Action<string, string, string?> ReplaceFile { get; init; } =
+        static (source, destination, backup) => File.Replace(source, destination, backup, ignoreMetadataErrors: true);
 
     public async Task<string> ReadTextAsync(string path, long maxBytes, string encoding, CancellationToken ct = default)
     {
@@ -789,6 +821,451 @@ public sealed class FileSystemService : IFileSystemService
             entries.Add(entry);
         }
         return Task.FromResult(new FileListing(entries.ToArray(), truncated, maxEntries));
+    }
+
+    /// <summary>
+    /// E-9: one replacement in one existing text file. The file's bytes are read once, decoded
+    /// strictly, edited by the pure <see cref="TextEdit"/>, and swapped back in with
+    /// <c>File.Replace</c> - which, unlike a move, keeps the target's ACL, attributes, creation
+    /// time and alternate data streams. Any refusal, failure or cancel leaves the file in place:
+    /// the replace is given a backup name, and the cleanup restores before it deletes.
+    /// </summary>
+    public async Task<FileEditResult> EditTextAsync(string path, string oldString, string newString, bool replaceAll, string encoding, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        FileAttributes attributes;
+        try
+        {
+            attributes = File.GetAttributes(path);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            throw new FileNotFoundException(
+                $"File '{path}' does not exist; file_edit changes an existing file (file_write creates one).", path);
+        }
+        // "Reparse point" is not "link": OneDrive and deduplicated files are reparse points too,
+        // and are edited like any file. A link is refused: replacing it would replace the link,
+        // not what it points at.
+        bool directory = attributes.HasFlag(FileAttributes.Directory);
+        if (attributes.HasFlag(FileAttributes.ReparsePoint)
+            && (directory ? new DirectoryInfo(path).LinkTarget : new FileInfo(path).LinkTarget) is not null)
+            throw new InvalidOperationException(
+                $"'{path}' is a symbolic link or junction; file_edit does not write through links. Edit its target instead.");
+        if (directory)
+            throw new InvalidOperationException($"'{path}' is a directory, not a file.");
+
+        RefuseHardLinks(path);
+
+        // One handle for the size, the bytes and the write time: a size checked on the path and
+        // a read that reopens it are two different moments, and the file can grow in between.
+        // No writer can have the file open while this handle is (FileShare.Read).
+        StageHook?.Invoke(Stage.EditOpen, path);
+        byte[] bytes;
+        DateTime lastWrite;
+        await using (var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096,
+                         FileOptions.Asynchronous | FileOptions.SequentialScan))
+        {
+            long length = source.Length;
+            if (length > TextEdit.MaxFileBytes)
+                throw new InvalidOperationException(
+                    $"File '{path}' is {length} bytes; file_edit edits files of up to {TextEdit.MaxFileBytes} bytes (16 MiB).");
+            bytes = new byte[length];
+            await source.ReadExactlyAsync(bytes, ct);
+            lastWrite = File.GetLastWriteTimeUtc(source.SafeFileHandle);
+        }
+        var detected = TextEdit.Detect(bytes, encoding);
+        var text = TextEdit.Decode(bytes, detected);
+        var outcome = TextEdit.Apply(text, oldString, newString, replaceAll, path);
+        var edited = TextEdit.Encode(outcome.Text, detected);
+        // The same limit on the way out as on the way in: a file this call wrote can be edited again.
+        if (edited.Length > TextEdit.MaxFileBytes)
+            throw new InvalidOperationException(
+                $"The edit would make '{path}' {edited.Length} bytes; file_edit writes files of up to {TextEdit.MaxFileBytes} bytes (16 MiB), " +
+                "so nothing was changed. Make a smaller replacement, or rewrite the file with file_write.");
+
+        StageHook?.Invoke(Stage.EditRead, path);
+        ct.ThrowIfCancellationRequested();
+
+        // Beside the target (the replace needs the same volume), but not built from its name: a
+        // 250-character file name is valid, and the same name plus a suffix is not.
+        var sibling = Path.Combine(Path.GetDirectoryName(path)!, "~wmcp-" + Guid.NewGuid().ToString("N")[..16]);
+        var tmp = sibling + ".tmp";
+        var backup = sibling + ".bak";
+        bool replaceStarted = false;
+        try
+        {
+            await using (var stream = CreateTempLike(path, tmp))
+            {
+                await stream.WriteAsync(edited, ct);
+            }
+            StageHook?.Invoke(Stage.EditTempWritten, tmp);
+            ct.ThrowIfCancellationRequested();
+
+            // Someone else wrote the file since it was read: their content wins. The check and
+            // the replace are two steps, so this narrows the window; it cannot close it.
+            string changed = $"File '{path}' changed while it was being edited; nothing was written. Read it again and retry the edit.";
+            var now = new FileInfo(path);
+            if (!now.Exists || now.Length != bytes.Length || now.LastWriteTimeUtc != lastWrite)
+                throw new IOException(changed);
+            RefuseHardLinks(path);   // a second name added since the read would keep the old content
+
+            replaceStarted = true;
+            for (int i = 0; ; i++)
+            {
+                try
+                {
+                    ReplaceFile(tmp, path, backup);
+                    break;
+                }
+                // A sharing violation: someone has the file open. The same patience file_write
+                // has - but only while the target is still there to be replaced.
+                catch (IOException) when (i < 2 && File.Exists(path))
+                {
+                    await Task.Delay(50 * (i + 1), ct);
+
+                    // Whoever held the file may have written it, or removed it, during the wait:
+                    // every attempt gets the same check the first one had. A file that is gone
+                    // is not retried (the recovery below reports it); one that changed is theirs.
+                    var again = new FileInfo(path);
+                    if (!again.Exists) throw;
+                    if (again.Length != bytes.Length || again.LastWriteTimeUtc != lastWrite)
+                        throw new IOException(changed);
+                    RefuseHardLinks(path);
+                }
+            }
+            try { File.Delete(backup); } catch { /* best-effort: the edit has landed */ }
+        }
+        catch (Exception failure)
+        {
+            RecoverFromFailedEdit(path, tmp, backup, replaceStarted, bytes, failure);
+            throw;
+        }
+
+        return new FileEditResult(path, outcome.Replacements, outcome.FirstLine, detected.Name,
+            detected.BomLength > 0, outcome.LineEndings, bytes.Length, edited.Length);
+    }
+
+    /// <summary>
+    /// E-9: the cleanup after a failed edit. A replace can fail after it has already moved the
+    /// original to the backup name (ReplaceFile error 1177): then the backup is put back before
+    /// anything is deleted. It never RECREATES a file: with a backup name every documented failure
+    /// leaves the target or the backup, so "neither" means someone else deleted the target while
+    /// it was being edited - their deletion wins, and the caller is told where the edited content is.
+    /// </summary>
+    private static void RecoverFromFailedEdit(string path, string tmp, string backup, bool replaceStarted, byte[] original, Exception failure)
+    {
+        if (!replaceStarted)
+        {
+            // Nothing of the target was touched (a changed file, a cancel, a failed temp write):
+            // the temp is ours alone and goes, whatever became of the target meanwhile.
+            try { File.Delete(tmp); } catch { /* best-effort cleanup */ }
+            return;
+        }
+
+        if (!File.Exists(path))
+        {
+            if (File.Exists(backup))
+            {
+                try
+                {
+                    File.Move(backup, path);
+                }
+                catch (Exception restore) when (restore is IOException or UnauthorizedAccessException)
+                {
+                    throw new IOException(
+                        $"The edit of '{path}' failed part-way and the original could not be put back: it is in '{backup}'. " +
+                        $"Rename that file to '{Path.GetFileName(path)}'. ({failure.Message})", failure);
+                }
+            }
+            else if (File.Exists(tmp))
+            {
+                throw new IOException(
+                    $"File '{path}' was removed while it was being edited, so the edit was not applied and the file was not recreated. " +
+                    $"The edited content is in '{tmp}'. ({failure.Message})", failure);
+            }
+        }
+
+        // Nothing is deleted unless a file is at the path - and the backup only when that file
+        // is the original. A replace can move the original aside and fail, and someone else can
+        // put a new file at the path before this runs: then the backup is the only copy left.
+        var at = new FileInfo(path);
+        if (!at.Exists) return;
+
+        try { File.Delete(tmp); } catch { /* best-effort cleanup */ }
+        if (!File.Exists(backup)) return;
+        if (HoldsExactly(path, original))
+        {
+            try { File.Delete(backup); } catch { /* best-effort cleanup */ }
+            return;
+        }
+
+        throw new IOException(
+            $"The edit of '{path}' failed part-way, and a different file was at that path before the original could be put back. " +
+            $"The original is in '{backup}'; nothing was deleted. ({failure.Message})", failure);
+    }
+
+    /// <summary>
+    /// E-9: true only when the file at <paramref name="path"/> has exactly these bytes. Size and
+    /// write time can both be copied; the content is what must not be lost. Unreadable is "no".
+    /// </summary>
+    private static bool HoldsExactly(string path, byte[] expected)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length != expected.Length) return false;
+            var actual = new byte[expected.Length];
+            stream.ReadExactly(actual);
+            return actual.AsSpan().SequenceEqual(expected);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// E-9: the replace gives the path a new file record, so a file's other names would keep the
+    /// old content - one file would silently become two.
+    /// </summary>
+    private static void RefuseHardLinks(string path)
+    {
+        if (HardLinkCount(path) is > 1 and var links)
+            throw new InvalidOperationException(
+                $"File '{path}' has {links} hard links (other names for the same file); an edit through this name would leave " +
+                "the other names with the old content, so it was not edited. Rewrite it with file_write, or remove the extra links first.");
+    }
+
+    /// <summary>
+    /// E-9: the temp file, created with the target's own access rules where they can be read and
+    /// applied - so the edited content of a file with a restrictive ACL is never briefly readable
+    /// through the folder's inherited one. Otherwise an ordinary file: the edit still works.
+    /// </summary>
+    private static FileStream CreateTempLike(string path, string tmp)
+    {
+        try
+        {
+            var rules = new FileInfo(path).GetAccessControl(AccessControlSections.Access)
+                .GetSecurityDescriptorSddlForm(AccessControlSections.Access);
+            var security = new FileSecurity();
+            security.SetSecurityDescriptorSddlForm(rules, AccessControlSections.Access);
+            return new FileInfo(tmp).Create(FileMode.CreateNew, FileSystemRights.Write, FileShare.None, 4096, FileOptions.Asynchronous, security);
+        }
+        // Best effort by design: whatever stops the ACL being read or applied (no READ_CONTROL, a
+        // file system without ACLs, a privilege not held) must not stop the edit.
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or InvalidOperationException
+                                       or ArgumentException or NotSupportedException)
+        {
+            try { File.Delete(tmp); } catch { /* nothing was created, or it will be overwritten */ }
+            return new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous);
+        }
+    }
+
+    /// <summary>How many names the file has, or null when Windows will not say.</summary>
+    private static int? HardLinkCount(string path)
+    {
+        try
+        {
+            using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return GetFileInformationByHandle(handle, out var info) ? (int)info.NumberOfLinks : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        public uint FileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle file, out ByHandleFileInformation information);
+
+    /// <summary>
+    /// E-9: <c>file_search</c>'s content mode. The name/size/date filters choose the files; each
+    /// is read a line at a time by the pure <see cref="ContentSearch"/>. Inaccessible directories
+    /// are skipped and reparse points are not followed (a junction loop must not hang a search).
+    /// </summary>
+    public Task<ContentSearchResult> SearchContentAsync(ContentSearchRequest request, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        // The walk matches each file's NAME: a folder in the pattern would silently match nothing.
+        if (request.Pattern is { } glob && glob.AsSpan().IndexOfAny('\\', '/') >= 0)
+            throw new ArgumentException(
+                $"'pattern' is a file-name glob in a content search and cannot contain a folder (got '{glob}'); put the folder in root.", "pattern");
+        if (!Directory.Exists(request.Root))
+            throw new DirectoryNotFoundException($"Directory '{request.Root}' does not exist");
+
+        Regex regex;
+        try
+        {
+            regex = new Regex(request.Content, RegexOptions.CultureInvariant, ContentMatchTimeout);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new ArgumentException($"'content' is not a valid regular expression: {ex.Message}", "content");
+        }
+
+        // The walk and the reads are synchronous I/O: keep them off the caller's thread.
+        return Task.Run(() => SearchContent(request, regex, ct), ct);
+    }
+
+    /// <summary>Files whose data is not on disk: opening one would make the sync provider download it.</summary>
+    private const FileAttributes NotOnDisk = FileAttributes.Offline | (FileAttributes)0x00040000 /* RecallOnOpen */ | (FileAttributes)0x00400000 /* RecallOnDataAccess */;
+
+    private ContentSearchResult SearchContent(ContentSearchRequest request, Regex regex, CancellationToken ct)
+    {
+        var name = FileSystemName.TranslateWin32Expression(request.Pattern ?? "*");
+        var walk = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            AttributesToSkip = 0,   // hidden and system files are read; what is skipped is decided below, and counted
+            ReturnSpecialDirectories = false,
+        };
+        var files = new FileSystemEnumerable<(string Path, FileAttributes Attributes, long Length, DateTime Modified)>(
+            request.Root,
+            (ref FileSystemEntry entry) => (entry.ToFullPath(), entry.Attributes, entry.Length, entry.LastWriteTimeUtc.UtcDateTime),
+            walk)
+        {
+            ShouldIncludePredicate = (ref FileSystemEntry entry) =>
+            {
+                StageHook?.Invoke(Stage.SearchEntry, entry.ToFullPath());
+                // Every entry, not only the files the name matches: a walk that finds nothing
+                // to open must still stop when the caller cancels.
+                ct.ThrowIfCancellationRequested();
+                return !entry.IsDirectory && FileSystemName.MatchesWin32Expression(name, entry.FileName, ignoreCase: true);
+            },
+            // A junction or directory symlink is not followed: a loop must not hang a search. A
+            // reparse directory that is not a link (a OneDrive folder) is an ordinary folder here.
+            ShouldRecursePredicate = (ref FileSystemEntry entry) =>
+                (entry.Attributes & FileAttributes.ReparsePoint) == 0 || !IsDirectoryLink(entry.ToFullPath()),
+        };
+
+        var matches = new List<ContentMatch>();
+        int searched = 0, skipped = 0;
+        long chars = 0;
+        bool truncated = false;
+        var head = new byte[ContentSearch.BinaryProbeBytes];
+
+        foreach (var (file, attributes, length, modified) in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (request.MinSize is { } min && length < min) continue;
+            if (request.ModifiedSince is { } since && modified < since) continue;
+
+            // A file symlink is not followed, and a cloud file that is not on disk is not
+            // downloaded: both are skipped where the caller can see it.
+            if ((attributes & NotOnDisk) != 0 || ((attributes & FileAttributes.ReparsePoint) != 0 && IsLink(file)))
+            {
+                skipped++;
+                continue;
+            }
+
+            StageHook?.Invoke(Stage.SearchFile, file);
+            ct.ThrowIfCancellationRequested();
+
+            // The attributes above are the walk's, and the walk can be well ahead of the reads:
+            // the entry is looked at again right before it is opened, so one that has become a
+            // link or a cloud-only file since is not followed or downloaded. Two steps, so this
+            // narrows the window; it cannot close it.
+            try
+            {
+                var current = File.GetAttributes(file);
+                if ((current & NotOnDisk) != 0 || (current & FileAttributes.Directory) != 0
+                    || ((current & FileAttributes.ReparsePoint) != 0 && IsLink(file)))
+                {
+                    skipped++;
+                    continue;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                skipped++;   // gone or denied since the walk saw it
+                continue;
+            }
+
+            if (length > ContentSearch.MaxFileBytes)
+            {
+                skipped++;
+                continue;
+            }
+
+            ContentScan scan;
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                // The walk's length is from the directory entry, some time ago: a log can have
+                // grown past the cap since. Writers are not shut out, so the read is bounded too.
+                if (stream.Length > ContentSearch.MaxFileBytes)
+                {
+                    skipped++;
+                    continue;
+                }
+                int read = stream.ReadAtLeast(head, head.Length, throwOnEndOfStream: false);
+                if (ContentSearch.LooksBinary(head.AsSpan(0, read)))
+                {
+                    skipped++;
+                    continue;
+                }
+                stream.Position = 0;
+                // BOM decides, else UTF-8 - leniently: this only reads.
+                var capped = new CappedReadStream(stream, ContentSearch.MaxFileBytes);
+                using var reader = new StreamReader(capped, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                scan = ContentSearch.Scan(reader, file, regex, request.ContextLines, request.MaxMatches - matches.Count, ct,
+                    (int)(ContentSearch.MaxResultChars - chars));
+                if (capped.Exceeded)
+                {
+                    skipped++;   // it grew past the cap while it was being read: oversized, like any other
+                    continue;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                skipped++;   // locked, denied, or vanished mid-read
+                continue;
+            }
+
+            searched++;
+            matches.AddRange(scan.Matches);
+            foreach (var m in scan.Matches)
+            {
+                chars += m.Text.Length + (m.Before?.Sum(l => (long)l.Length) ?? 0) + (m.After?.Sum(l => (long)l.Length) ?? 0);
+            }
+            if (scan.Truncated || matches.Count >= request.MaxMatches || chars >= ContentSearch.MaxResultChars)
+            {
+                truncated = true;
+                break;
+            }
+        }
+
+        return new ContentSearchResult(matches.ToArray(), searched, skipped, truncated, request.MaxMatches);
+    }
+
+    private static bool IsDirectoryLink(string directory)
+    {
+        try { return new DirectoryInfo(directory).LinkTarget is not null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return true; }   // cannot tell: do not enter it
+    }
+
+    private static bool IsLink(string file)
+    {
+        try { return new FileInfo(file).LinkTarget is not null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return true; }   // cannot tell: do not follow it
     }
 
     public Task ZipAsync(string srcDir, string dstZip, CancellationToken ct = default)

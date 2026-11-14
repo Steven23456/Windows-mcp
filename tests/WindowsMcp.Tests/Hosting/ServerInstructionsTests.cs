@@ -449,7 +449,7 @@ public class ServerInstructionsTests
         // confirm, and the never-ask tools that have one (file_manage, scheduled_task, service)
         // use it only for other actions - their probes above show the named actions ignore it.
         foreach (var tool in new[] { "registry_set", "registry_delete", "service", "scheduled_task", "power_action",
-                     "file_write", "file_manage", "firewall", "process", "env" })
+                     "file_write", "file_edit", "file_manage", "firewall", "process", "env" })
         {
             SchemaOf(tool).GetProperty("properties").TryGetProperty("confirm", out var confirm).Should().BeTrue(
                 "{0} has a gated action, so it takes confirm", tool);

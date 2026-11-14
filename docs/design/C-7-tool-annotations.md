@@ -35,7 +35,8 @@ all four hints and a title on every tool.
   (moves the pointer) and `clipboard` (`set` replaces the text) are not.
 - Titles are short imperative or noun phrases in sentence case.
 - No behaviour changes; no service touched; the count stays at what it is when the item lands
-  (68 before C-2, 69 after; E-6's `sequence` made it 70 and has a row below).
+  (68 before C-2, 69 after; E-6's `sequence` made it 70 and E-9's `file_edit` 71, each with a row
+  in the table).
 
 ## The table
 
@@ -85,6 +86,7 @@ all four hints and a title on every tool.
 | audio | Audio | ✘ | ✘ | ✔ | ✘ | |
 | file_read | Read file | ✔ | ✘ | ✔ | ✘ | |
 | file_write | Write file | ✘ | ✔ | ✘ | ✘ | C-1's `append`: twice is not the same state twice |
+| file_edit | Edit file | ✘ | ✔ | ✘ | ✘ | E-9; a second identical call no longer finds `old_string` |
 | file_manage | Manage files | ✘ | ✔ | ✘ | ✘ | |
 | file_search | Search files | ✔ | ✘ | ✔ | ✘ | |
 | file_info | File info | ✔ | ✘ | ✔ | ✘ | |

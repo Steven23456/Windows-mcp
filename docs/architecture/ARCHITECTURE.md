@@ -14,7 +14,7 @@ Windows-MCP follows a four-layer architecture built on .NET 10 with dependency i
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           Tool Layer                                         │
-│                 (20 [McpServerToolType] classes, 70 tools)                   │
+│                 (20 [McpServerToolType] classes, 71 tools)                   │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐  │
 │  │InputTools  │ │UIAutoTools │ │ FileTools  │ │SystemTools │ │WindowTools │  │
 │  │ 11 tools   │ │  9 tools   │ │  9 tools   │ │  9 tools   │ │  5 tools   │  │
@@ -144,7 +144,7 @@ public sealed class InputTools
 |------------|-------|------------------|
 | `InputTools` | 11 | `IInputService`, `IClipboardService`, `IUIAutomationService` (B-4: resolves `element_id` to a point; E-5: the `Observation` it builds from it takes the observe snapshot) |
 | `UIAutomationTools` | 9 | `IUIAutomationService` (also behind `interact_element`'s E-5 `Observation`) |
-| `FileTools` | 9 | `IFileSystemService`, `IInputService`, `IFileStreamService` |
+| `FileTools` | 10 | `IFileSystemService`, `IInputService`, `IFileStreamService` |
 | `SystemTools` | 9 | `IWmiService`, `IEnvService`, `IPowerService`, `INotificationService`, `IAudioService`, `ISecurityService`, `IReliabilityService`, `IDriverService`, `ISessionService` |
 | `WindowTools` | 5 | `IWindowService`, `IVirtualDesktopService` |
 | `ProcessTools` | 6 | `IProcessService`, `IServiceControlService`, `ITaskSchedulerService`, `IEventLogService` |
