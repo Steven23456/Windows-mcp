@@ -6,7 +6,7 @@ Checklist item: `docs/upstream-parity-checklist.md` § E-9.
 in-process over the real HTTP transport by `FileEditHttpTransportTests`, not on a remote host; no
 network share, FAT or OneDrive target was tried and ACL preservation is not tested). The review's
 changes are folded in below ("What the review changed"). "Not in scope" below and the gaps found
-are logged as parity D-74 … D-83.
+are logged as parity D-74 … D-85.
 
 ## Problem
 
@@ -105,7 +105,7 @@ Occurrences are counted left to right, non-overlapping. `firstLine` counts `\r\n
 
 ### The write
 
-- The edited bytes go to a temp file beside the target (`<path>.tmp.<guid>`), created **with the
+- The edited bytes go to a temp file in the target's folder (`~wmcp-<16 hex>.tmp`), created **with the
   target's access rules** (`FileSystemAclExtensions.Create` with the access section of the
   target's descriptor), so the edited content of a file with a restrictive explicit ACL is never
   briefly readable through the folder's inherited ACL. When the target's ACL cannot be read or
@@ -114,7 +114,7 @@ Occurrences are counted left to right, non-overlapping. `firstLine` counts `\r\n
   was read; if they changed, the edit is abandoned with an `IOException` ("changed while it was
   being edited"), nothing written.
 - `File.Replace(temp, path, backup)` swaps it in, with a **backup name** beside the target
-  (`<path>.bak.<guid>`). Unlike the move `file_write` uses, a replace keeps the target's identity:
+  (`~wmcp-<the same hex>.bak`). Unlike the move `file_write` uses, a replace keeps the target's identity:
   its ACL, attributes, creation time and alternate data streams, where the file system supports
   it. A sharing violation is retried twice (50 ms, 100 ms), and only while `path` still exists.
 - **A failed swap never loses the file, and never recreates one** (`RecoverFromFailedEdit`).
@@ -282,6 +282,26 @@ which ends the stream at the cap and records whether the source had more). A fil
 growing while it is read is skipped and counted too, and its matches are discarded.
 
 `FileSystemService.Stage` gained `EditOpen` and `SearchEntry`, test hooks only.
+
+**6. The hard-link count is checked before every replace attempt**, not only before the read:
+before the first attempt and again after each sharing-violation wait. A second name added while
+the file was being edited is the same hard-link refusal (`InvalidOperationException` naming the
+count), with nothing written.
+
+**7. The recovery deletes the backup only when the file at the path is still the original** —
+the same length and last-write time as when it was read. If the swap moved the original aside
+and someone else then put a different file at the path, the backup is kept and the
+`IOException` names it ("The original is in '<backup>'; nothing was deleted.").
+
+**8. A content search re-reads an entry's attributes from the path right before opening it.**
+One that has become a link, a cloud-only file or a directory since the walk saw it, or is gone,
+is skipped and counted in `filesSkipped`. This narrows the window between the walk and the
+open; it does not close it (D-84: a no-follow open by handle would).
+
+**9. The temp and backup names no longer depend on the target's name.** They are
+`<target folder>\~wmcp-<16 hex>.tmp` and `.bak` (the same hex), so a file whose name is near the
+255-character component limit can be edited — `<name>.tmp.<guid>` would have been too long.
+`file_write` and `archive` still use `<path>.tmp.<guid>` (D-85).
 
 ## Not in scope
 

@@ -734,8 +734,106 @@ public class FileSystemServiceContentSearchTests : IDisposable
         result.FilesSearched.Should().Be(1);
     }
 
-    [Fact]
+    // ==== PR #47 finding F: the decision to skip is made on fresh attributes, not the walk's ===========
 
+    /// <summary>
+    /// F1: the walk saw an ordinary file; before the open it was replaced by a file symlink of the
+    /// same name pointing OUTSIDE the root. The skip decision used the walk's attributes, so the open
+    /// followed the link. Now it is skipped and counted, and nothing from the outside file appears.
+    /// </summary>
+    [FileSymlinkFact]
+    public async Task A_file_replaced_by_a_symlink_before_the_open_is_skipped_not_followed()
+    {
+        var outside = Path.Combine(_tmp, "outside");
+        Directory.CreateDirectory(outside);
+        var secret = Path.Combine(outside, "secret.txt");
+        File.WriteAllText(secret, "needle outside\n");
+        var path = File_("match.txt", "needle inside\n");
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage != FileSystemService.Stage.SearchFile || arg != path) return;
+                File.Delete(arg);
+                File.CreateSymbolicLink(arg, secret);
+            },
+        };
+
+        var result = await svc.SearchContentAsync(Request("needle"));
+
+        result.Matches.Should().BeEmpty("the link is not followed - in particular nothing of the outside file is returned");
+        result.FilesSkipped.Should().Be(1);
+        result.FilesSearched.Should().Be(0);
+    }
+
+    /// <summary>F2: the file became a cloud placeholder (Offline) after the walk saw it: skipped, not read.</summary>
+    [Fact]
+    public async Task A_file_that_went_offline_before_the_open_is_skipped_not_read()
+    {
+        var path = File_("cloud.txt", "needle cloud\n");
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage == FileSystemService.Stage.SearchFile && arg == path)
+                    File.SetAttributes(arg, File.GetAttributes(arg) | FileAttributes.Offline);
+            },
+        };
+
+        var result = await svc.SearchContentAsync(Request("needle"));
+
+        result.Matches.Should().BeEmpty();
+        result.FilesSkipped.Should().Be(1);
+        result.FilesSearched.Should().Be(0);
+    }
+
+    /// <summary>
+    /// F4: the file was deleted after the walk saw it. The fresh attribute read fails; that is a
+    /// skipped file, counted - not an error that ends the search.
+    /// </summary>
+    [Fact]
+    public async Task A_file_deleted_before_the_open_is_skipped_and_the_search_goes_on()
+    {
+        var gone = File_("gone.txt", "needle gone\n");
+        var kept = File_("kept.txt", "needle kept\n");
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage == FileSystemService.Stage.SearchFile && arg == gone) File.Delete(arg);
+            },
+        };
+
+        var result = await svc.SearchContentAsync(Request("needle"));
+
+        result.Matches.Should().ContainSingle().Which.Path.Should().Be(kept);
+        result.FilesSkipped.Should().Be(1);
+        result.FilesSearched.Should().Be(1);
+    }
+
+    /// <summary>F3 (guard): the hook leaves the file alone - searched as before.</summary>
+    [Fact]
+    public async Task A_file_left_alone_before_the_open_is_searched()
+    {
+        var path = File_("plain.txt", "needle plain\n");
+        var opened = new List<string>();
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage == FileSystemService.Stage.SearchFile) opened.Add(arg);
+            },
+        };
+
+        var result = await svc.SearchContentAsync(Request("needle"));
+
+        opened.Should().Equal(path);
+        result.Matches.Should().ContainSingle().Which.Path.Should().Be(path);
+        result.FilesSearched.Should().Be(1);
+        result.FilesSkipped.Should().Be(0);
+    }
+
+    [Fact]
     public async Task SearchContentAsync_with_a_cancelled_token_does_nothing()
     {
         File_("a.txt", "needle\n");

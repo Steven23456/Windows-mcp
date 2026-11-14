@@ -11,18 +11,18 @@ E-1, E-2, E-3, E-4 (with D-20), E-5, E-6, E-7, E-8 and E-9.
 SDK `ModelContextProtocol` 2.2.0.
 **Status:** Living document — check items off as they ship.
 
-This is the working list of everything upstream can do that this server cannot (plus eighty-three
+This is the working list of everything upstream can do that this server cannot (plus eighty-five
 defects: D-1…D-4 from the original comparison, D-5…D-9 added later under rule 4 and D-10/D-11
 logged 2026-11-10 — **all eleven are now fixed** — then D-12…D-18, logged 2026-11-11 by the
 D-10/D-11 review, D-19…D-22, logged 2026-11-12 during E-1, D-23…D-27, logged 2026-11-12
 during E-2, D-28…D-32, logged 2026-11-12 by the E-3 review, D-33…D-38, logged 2026-11-12
 during E-4, D-39…D-48, logged 2026-11-12 during E-5 and its review, D-49…D-53, logged
-2026-11-13 by the E-6 review, D-54…D-65, logged 2026-11-13 during E-7 and its review, D-66…D-73, logged 2026-11-13 during E-8 and its review, and D-74…D-83, logged 2026-11-13 during E-9 and its review, all still open except D-31, which E-3's
+2026-11-13 by the E-6 review, D-54…D-65, logged 2026-11-13 during E-7 and its review, D-66…D-73, logged 2026-11-13 during E-8 and its review, and D-74…D-85, logged 2026-11-13/14 during E-9 and its review, all still open except D-31, which E-3's
 review round fixed, D-20, which E-4 fixed, and D-67, which E-8's review fixed; section A's phase 1 — A-7, A-9, A-8, A-11 and A-13 — is done, phase 2 shipped A-1,
 phase 3 shipped A-2 with A-3 and A-4 inside it, phase 4 shipped A-6, and phase 5 shipped A-14,
 A-12 phase 1, A-10 and A-5 phase 1 — so every section-A row is ticked, with only A-5's Firefox
 phase left open and A-12's phase 2 deliberately not planned; section B is ticked too, and
-C-5/C-6 close section C — section S, D-12…D-83 (less D-20, D-31 and D-67) and section E are the work that is left; section E
+C-5/C-6 close section C — section S, D-12…D-85 (less D-20, D-31 and D-67) and section E are the work that is left; section E
 is not upstream parity but an agent-efficiency backlog from a review of this server's own tools).
 Each item carries enough context to write a design note and an implementation plan without re-reading
 upstream from scratch: what upstream does and where, what we do today and where, an
@@ -194,6 +194,8 @@ function names are the stable anchor.
 | D-81 | UTF-32 BE and BOM-less UTF-16 files are skipped as binary by content search; UTF-32 BE is not editable | P3 | S | E-9 | ☐ |
 | D-82 | An edited file's owner, and possibly its integrity label, can change: the temp is the server's and metadata errors are ignored | P3 | S | E-9, D-80 | ☐ |
 | D-83 | A backup (the original content) whose delete fails after a successful edit is left beside the file, unreported | P3 | S | E-9 | ☐ |
+| D-84 | A content search's attribute re-check before opening a file is two steps: an entry swapped for a link in between is still followed | P3 | S | E-9 | ☐ |
+| D-85 | `file_write` and `archive` cannot write a file whose name is near the 255-character limit (`<path>.tmp.<guid>`) | P3 | S | E-9 | ☐ |
 | E-1 | Server instructions in the MCP handshake | P1 | S | — | ☑ |
 | E-2 | `interact_element`: expand, collapse, set_value, scroll_into_view | P1 | S | D-10 | ☑ |
 | E-3 | `click` modifiers; `key` repeat and hold | P2 | S | — | ☑ |
@@ -210,7 +212,7 @@ function names are the stable anchor.
 D-10/D-11 review, D-19 … D-22, logged 2026-11-12 during E-1, D-23 … D-27, logged 2026-11-12
 during E-2, D-28 … D-32, logged 2026-11-12 by the E-3 review, D-33 … D-38, logged 2026-11-12
 during E-4, D-39 … D-48, logged 2026-11-12 during E-5 and its review, and D-49 … D-53, logged
-2026-11-13 by the E-6 review, D-54 … D-65, logged 2026-11-13 during E-7 and its review, D-66 … D-73, logged 2026-11-13 during E-8 and its review, and D-74 … D-83, logged 2026-11-13 during E-9 and its review, are open — except D-31, fixed in E-3's
+2026-11-13 by the E-6 review, D-54 … D-65, logged 2026-11-13 during E-7 and its review, D-66 … D-73, logged 2026-11-13 during E-8 and its review, and D-74 … D-85, logged 2026-11-13/14 during E-9 and its review, are open — except D-31, fixed in E-3's
 review round, D-20, fixed by E-4, and D-67, fixed in E-8's review round), and
 **so are sections
 A, B and C** (A-5's Firefox phase and
@@ -2344,7 +2346,7 @@ when the owner cannot be kept, unless the caller opts in).
 
 **Found by the E-9 second review pass (2026-11-13), read from the source.**
 
-**Ours today.** `file_edit` swaps with a backup name (`<path>.bak.<guid>`), which holds the
+**Ours today.** `file_edit` swaps with a backup name (`~wmcp-<16 hex>.bak` in the target's folder), which holds the
 original content after a successful replace, and deletes it best-effort (`catch { }`). If the
 delete fails (the backup is open in another process, a scanner holds it), the original content is
 left beside the file under a random name, and the result is the ordinary success with no mention
@@ -2359,6 +2361,51 @@ knows to remove it.
 **Tests.** A backup whose delete is made to fail: the result names it.
 
 **Done when.** No edit leaves a copy of the original behind without saying where.
+
+### D-84 — A content search's link check before opening a file can still race  `P3 · S`
+- [ ] Not started
+
+**Found by the PR #47 review of E-9 (2026-11-14), read from the source.**
+
+**Ours today.** `FileSystemService.SearchContent` re-reads an entry's attributes from the path
+right before opening it, and skips one that has become a link, a cloud-only file or a directory
+since the walk saw it (or is gone). The check and the open are two steps on a path: an entry
+replaced by a symlink (or a cloud placeholder) between them is still opened through the path, so
+the search can follow a link it meant to skip, or recall a cloud file. The window is narrow; it is
+not closed.
+
+**Sketch.** Open the entry itself without following it: `CreateFile` with
+`FILE_FLAG_OPEN_REPARSE_POINT`, then check the reparse tag on that handle — a symlink or mount
+point is skipped; a non-link reparse file (OneDrive, deduplication) is reopened normally and the
+second handle verified to be the same file by its file id before it is read.
+
+**Touches.** `Services/FileSystemService.cs` (`SearchContent`).
+
+**Tests.** A seam that swaps the entry for a symlink between the attribute check and the open: the
+link is not followed and the entry is skipped and counted.
+
+**Done when.** A content search never reads through a link or recalls a cloud file, whatever
+changes during the walk.
+
+### D-85 — `file_write` and `archive` cannot write a file whose name is near the 255-character limit  `P3 · S`
+- [ ] Not started
+
+**Found by the PR #47 review of E-9 (2026-11-14), read from the source.**
+
+**Ours today.** `file_write` (no `append`) writes `<path>.tmp.<guid>` and moves it into place, and
+`archive(zip)` writes `<dst>.tmp.<guid>`; the temp name is the target's name plus 37 characters.
+A target whose file name is within 37 characters of the 255-character component limit therefore
+cannot be written — the temp file's name is too long — though the target name itself is valid.
+`file_edit` names its temp and backup `~wmcp-<16 hex>.tmp` / `.bak` in the target's folder,
+independent of the target's name, and has no such limit.
+
+**Sketch.** Use the same short sibling name (`~wmcp-<hex>.tmp`) for `file_write` and `archive`.
+
+**Touches.** `Services/FileSystemService.cs` (`WriteTextAsync`, `ZipAsync`).
+
+**Tests.** `file_write` and `archive(zip)` to a target whose name is 250 characters long.
+
+**Done when.** Any target name the file system accepts can be written.
 
 ---
 
@@ -3802,7 +3849,7 @@ unchanged. Tests: `TextEditTests`, `ContentSearchTests`, `FileSystemServiceEditT
 met in-process, not on a remote host:** `FileEditHttpTransportTests` changes one line of a CRLF
 config file over the real HTTP transport (in-process, ephemeral port) and checks the reply does
 not carry the file's content. Not verified: no run against a real remote host, no network share,
-FAT or OneDrive target, and ACL preservation is not tested. Neighbour gaps logged: D-74 … D-83.
+FAT or OneDrive target, and ACL preservation is not tested. Neighbour gaps logged: D-74 … D-85.
 
 ### E-10 — Named toolsets on top of S-1  `P3 · S`
 - [ ] Not started

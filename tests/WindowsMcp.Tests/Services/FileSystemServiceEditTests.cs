@@ -60,7 +60,7 @@ public class FileSystemServiceEditTests : IDisposable
 
     private static byte[] Bytes(params byte[][] parts) => parts.SelectMany(p => p).ToArray();
 
-    /// <summary>Every entry in the temp directory: a stray <c>.tmp.</c> file beside the target shows up here.</summary>
+    /// <summary>Every entry in the temp directory: a stray temp or backup (<c>~wmcp-&lt;hex&gt;.tmp</c> / <c>.bak</c>) beside the target shows up here.</summary>
     private string[] Entries() =>
         Directory.EnumerateFileSystemEntries(_tmp).Select(e => Path.GetFileName(e)!).OrderBy(n => n, StringComparer.Ordinal).ToArray();
 
@@ -505,7 +505,7 @@ public class FileSystemServiceEditTests : IDisposable
         await act.Should().ThrowAsync<OperationCanceledException>();
         temp.Should().NotBeNull("the temp file was written before the replace");
         Path.GetDirectoryName(temp).Should().Be(_tmp, "the temp file is beside the target, so File.Replace stays on one volume");
-        Path.GetFileName(temp).Should().MatchRegex("^" + Regex.Escape("c.ini") + @"\.tmp\.[0-9a-fA-F-]{32,36}$");
+        Path.GetFileName(temp).Should().MatchRegex(TempName, "PR #47 finding G: the temp name no longer grows with the target's name");
         tempBytes.Should().Equal("a=2\n"u8.ToArray());
         File.Exists(temp).Should().BeFalse("a cancel deletes the temp file");
         File.ReadAllBytes(path).Should().Equal(original);
@@ -663,7 +663,10 @@ public class FileSystemServiceEditTests : IDisposable
         catch (Exception ex) { return ex; }
     }
 
-    private const string BackupName = @"^r\.ini\.bak\.[0-9a-fA-F-]{32,36}$";
+    // PR #47 finding G: sibling names independent of the target's name, so a near-255-character
+    // file name can still be edited: <dir>\~wmcp-<16 hex>.tmp and <dir>\~wmcp-<16 hex>.bak.
+    private const string TempName = @"^~wmcp-[0-9a-f]{16}\.tmp$";
+    private const string BackupName = @"^~wmcp-[0-9a-f]{16}\.bak$";
 
     /// <summary>
     /// (a) Second review pass, decision A - REVERSES the round-2 row that expected the temp to be
@@ -1356,6 +1359,280 @@ public class FileSystemServiceEditTests : IDisposable
         OnlyTheseEntries("edge.ini");
     }
 
+    // ==== PR #47 finding D: a hard link added during the edit ==========================================
+
+    private static string HardLinkRefusal(string path) => $"File '{path}' has 2 hard links";
+
+    /// <summary>
+    /// D1: the link count was checked once, before the read. A second name created while the temp
+    /// is written (the EditTempWritten hook) must still be refused - the replace would split the two
+    /// names - with the existing refusal, nothing written, ReplaceFile never called, no litter.
+    /// </summary>
+    [Fact]
+    public async Task A_hard_link_added_while_the_temp_is_written_is_refused_before_the_replace()
+    {
+        var first = Write("first.ini", "x=1\n");
+        var second = Path.Combine(_tmp, "second.ini");
+        var calls = 0;
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, _) =>
+            {
+                if (stage == FileSystemService.Stage.EditTempWritten) HardLink(second, first);
+            },
+            ReplaceFile = (source, destination, backup) =>
+            {
+                calls++;
+                File.Replace(source, destination, backup, ignoreMetadataErrors: true);
+            },
+        };
+
+        var act = () => svc.EditTextAsync(first, "x=1", "x=2", false, "auto");
+
+        (await act.Should().ThrowExactlyAsync<InvalidOperationException>()).Which.Message.Should().Contain(HardLinkRefusal(first));
+        calls.Should().Be(0, "the replace is never attempted on a file that now has two names");
+        File.ReadAllText(first).Should().Be("x=1\n");
+        File.ReadAllText(second).Should().Be("x=1\n");
+        OnlyTheseEntries("first.ini", "second.ini");
+    }
+
+    /// <summary>
+    /// D2: a link created during a sharing violation (attempt 1 adds it, then fails): after the wait
+    /// the same refusal, no second ReplaceFile call. A new link does not move the length or the
+    /// last-write time, so the existing re-check after the delay does not see it.
+    /// </summary>
+    [Fact]
+    public async Task A_hard_link_added_during_a_sharing_violation_is_refused_without_a_second_attempt()
+    {
+        var first = Write("first.ini", "x=1\n");
+        var second = Path.Combine(_tmp, "second.ini");
+        var calls = 0;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                if (++calls == 1)
+                {
+                    HardLink(second, destination);
+                    throw SharingViolation();
+                }
+                File.Replace(source, destination, backup, ignoreMetadataErrors: true);
+            },
+        };
+
+        var act = () => svc.EditTextAsync(first, "x=1", "x=2", false, "auto");
+
+        (await act.Should().ThrowExactlyAsync<InvalidOperationException>()).Which.Message.Should().Contain(HardLinkRefusal(first));
+        calls.Should().Be(1);
+        File.ReadAllText(first).Should().Be("x=1\n");
+        File.ReadAllText(second).Should().Be("x=1\n");
+        OnlyTheseEntries("first.ini", "second.ini");
+    }
+
+    /// <summary>D3 (guard): no link added - the edit lands through one replace.</summary>
+    [Fact]
+    public async Task Without_a_new_link_the_edit_lands_through_one_replace()
+    {
+        var path = Write("one.ini", "x=1\n");
+        var calls = 0;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                calls++;
+                File.Replace(source, destination, backup, ignoreMetadataErrors: true);
+            },
+        };
+
+        await svc.EditTextAsync(path, "x=1", "x=2", false, "auto");
+
+        calls.Should().Be(1);
+        File.ReadAllText(path).Should().Be("x=2\n");
+        OnlyTheseEntries("one.ini");
+    }
+
+    // ==== PR #47 finding E: the recovery never deletes the only copy of the original ====================
+
+    /// <summary>
+    /// E1: the replace moved the original to the backup name, someone else wrote a NEW file at the
+    /// path, and the replace failed. The re-check sees a changed file; the old cleanup then saw "a
+    /// file is at the path" and deleted the backup - the only copy of the original. Now the backup is
+    /// kept, the IOException names it and says the original is there, the other writer's file stays,
+    /// and the temp goes.
+    /// </summary>
+    [Fact]
+    public async Task A_new_file_at_the_path_after_the_original_went_to_the_backup_keeps_the_backup()
+    {
+        var path = Write("r.ini", "a=1\n");
+        var theirs = "a different, longer file\n"u8.ToArray();
+        string? backupSeen = null, temp = null;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                backupSeen ??= backup;
+                temp = source;
+                File.Move(destination, backup!);
+                File.WriteAllBytes(destination, theirs);
+                throw Win32Io(1177, "Unable to move the replacement file to the file to be replaced.");
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        var message = (await act.Should().ThrowExactlyAsync<IOException>()).Which.Message;
+        message.Should().Contain(backupSeen!, "the caller is told where the original is");
+        message.Should().MatchRegex("(?i)original");
+        File.ReadAllText(backupSeen!).Should().Be("a=1\n", "the backup is the only copy of the original: it is not deleted");
+        File.ReadAllBytes(path).Should().Equal(theirs, "the other writer's file stays");
+        File.Exists(temp!).Should().BeFalse("the temp is ours alone and goes");
+        OnlyTheseEntries("r.ini", Path.GetFileName(backupSeen!));
+    }
+
+    /// <summary>E2: the new file has the SAME length as the original and a later last-write time - the backup is kept all the same.</summary>
+    [Fact]
+    public async Task A_same_length_new_file_at_the_path_after_the_original_went_to_the_backup_keeps_the_backup()
+    {
+        var path = Write("r.ini", "a=1\n");
+        var theirs = "z=9\n"u8.ToArray();
+        string? backupSeen = null, temp = null;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                backupSeen ??= backup;
+                temp = source;
+                File.Move(destination, backup!);
+                File.WriteAllBytes(destination, theirs);
+                File.SetLastWriteTimeUtc(destination, DateTime.UtcNow.AddHours(1));
+                throw Win32Io(1177, "Unable to move the replacement file to the file to be replaced.");
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        (await act.Should().ThrowExactlyAsync<IOException>()).Which.Message.Should().Contain(backupSeen!);
+        File.ReadAllText(backupSeen!).Should().Be("a=1\n");
+        File.ReadAllBytes(path).Should().Equal(theirs);
+        File.Exists(temp!).Should().BeFalse();
+        OnlyTheseEntries("r.ini", Path.GetFileName(backupSeen!));
+    }
+
+    /// <summary>
+    /// E1b: the new file at the path has a different LENGTH but carries the original's last-write
+    /// time. "The original" is length AND last-write time; a matching time alone is not enough to
+    /// delete the backup.
+    /// </summary>
+    [Fact]
+    public async Task A_longer_new_file_with_the_original_write_time_after_the_original_went_to_the_backup_keeps_the_backup()
+    {
+        var path = Write("r.ini", "a=1\n");
+        var stamp = File.GetLastWriteTimeUtc(path);
+        var theirs = "a=1\nand more\n"u8.ToArray();
+        string? backupSeen = null;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                backupSeen ??= backup;
+                File.Move(destination, backup!);
+                File.WriteAllBytes(destination, theirs);
+                File.SetLastWriteTimeUtc(destination, stamp);
+                throw Win32Io(1177, "Unable to move the replacement file to the file to be replaced.");
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        (await act.Should().ThrowExactlyAsync<IOException>()).Which.Message.Should().Contain(backupSeen!);
+        File.ReadAllText(backupSeen!).Should().Be("a=1\n");
+        File.ReadAllBytes(path).Should().Equal(theirs);
+        OnlyTheseEntries("r.ini", Path.GetFileName(backupSeen!));
+    }
+
+    /// <summary>
+    /// E3 (guard): a stray backup COPY while the original never left the path (same length, same
+    /// last-write time) is just litter: three sharing violations surface the IOException, the
+    /// original is intact, and the copy is deleted.
+    /// </summary>
+    [Fact]
+    public async Task A_stray_backup_copy_beside_an_untouched_original_is_deleted()
+    {
+        var path = Write("r.ini", "a=1\n");
+        var calls = 0;
+        string? backupSeen = null;
+        var svc = new FileSystemService
+        {
+            ReplaceFile = (source, destination, backup) =>
+            {
+                calls++;
+                backupSeen = backup;
+                File.Copy(destination, backup!, overwrite: true);
+                throw SharingViolation();
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        (await act.Should().ThrowExactlyAsync<IOException>()).Which.Message.Should().Contain("being used by another process");
+        calls.Should().Be(3);
+        File.ReadAllText(path).Should().Be("a=1\n");
+        File.Exists(backupSeen!).Should().BeFalse("a copy beside an untouched original is litter");
+        OnlyTheseEntries("r.ini");
+    }
+
+    // ==== PR #47 finding G: sibling names do not grow with the target's name ===========================
+
+    /// <summary>
+    /// G1/G2: "&lt;name&gt;.tmp.&lt;32 hex&gt;" made a 250-character file name 287 characters - over
+    /// the 255 a file name may have - so the temp could not be created and the file could not be
+    /// edited. With "~wmcp-&lt;16 hex&gt;.tmp" any name the file system accepts can be edited.
+    /// </summary>
+    [Theory]
+    [InlineData(250)]
+    [InlineData(255)]
+    public async Task A_file_whose_name_is_near_the_255_character_limit_can_be_edited(int length)
+    {
+        var name = new string('n', length - 4) + ".ini";
+        var path = Write(name, "a=1\n");
+
+        await Svc().EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        File.ReadAllText(path).Should().Be("a=2\n");
+        OnlyTheseEntries(name);
+    }
+
+    /// <summary>G3: the temp and the backup are siblings of the target named ~wmcp-&lt;16 hex&gt; with the same hex.</summary>
+    [Fact]
+    public async Task The_temp_and_backup_are_named_wmcp_with_the_same_hex_beside_the_target()
+    {
+        var path = Write("r.ini", "a=1\n");
+        string? tempSeen = null, sourceSeen = null, backupSeen = null;
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage == FileSystemService.Stage.EditTempWritten) tempSeen = arg;
+            },
+            ReplaceFile = (source, destination, backup) =>
+            {
+                sourceSeen = source;
+                backupSeen = backup;
+                File.Replace(source, destination, backup, ignoreMetadataErrors: true);
+            },
+        };
+
+        await svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        Path.GetDirectoryName(tempSeen).Should().Be(_tmp);
+        Path.GetFileName(tempSeen).Should().MatchRegex(TempName);
+        sourceSeen.Should().Be(tempSeen);
+        Path.GetDirectoryName(backupSeen).Should().Be(_tmp);
+        Path.GetFileName(backupSeen).Should().MatchRegex(BackupName);
+        Path.GetFileNameWithoutExtension(backupSeen).Should().Be(Path.GetFileNameWithoutExtension(tempSeen), "the same 16 hex in both");
+        OnlyTheseEntries("r.ini");
+    }
+
     // ==== R2 decision 2: no stray \r on disk ===========================================================
 
     [Fact]
@@ -1492,6 +1769,25 @@ public class FileSystemServiceEditTests : IDisposable
         File.ReadAllText(second).Should().Be("x=1\n");
         File.ReadAllText(third).Should().Be("x=1\n");
         OnlyTheseEntries("first.ini", "second.ini", "third.ini");
+    }
+
+    /// <summary>
+    /// A file that already has a second name is refused before it is opened: no read, no temp
+    /// written (the later re-checks catch a link added DURING the edit; this one never starts it).
+    /// </summary>
+    [Fact]
+    public async Task A_hard_linked_file_is_refused_before_it_is_read()
+    {
+        var first = Write("first.ini", "x=1\n");
+        HardLink(Path.Combine(_tmp, "second.ini"), first);
+        var stages = new List<FileSystemService.Stage>();
+        var svc = new FileSystemService { StageHook = (stage, _) => stages.Add(stage) };
+
+        var act = () => svc.EditTextAsync(first, "x=1", "x=2", false, "auto");
+
+        (await act.Should().ThrowExactlyAsync<InvalidOperationException>()).Which.Message.Should().Contain($"File '{first}' has 2 hard links");
+        stages.Should().BeEmpty("the refusal comes before the open, the read and the temp");
+        OnlyTheseEntries("first.ini", "second.ini");
     }
 
     private static void HardLink(string link, string target)

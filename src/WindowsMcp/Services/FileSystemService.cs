@@ -41,7 +41,7 @@ public sealed class FileSystemService : IFileSystemService
 
     /// <summary>
     /// E-9 R2 test seam: the replace step of <c>file_edit</c> as (source = the temp file,
-    /// destination = the target, backup = <c>&lt;path&gt;.bak.&lt;guid&gt;</c>). Production is
+    /// destination = the target, backup = <c>~wmcp-&lt;16 hex&gt;.bak</c> beside it). Production is
     /// <c>File.Replace</c>; a test swaps in a replace that fails part-way (error 1176 / 1177 shapes).
     /// </summary>
     internal Action<string, string, string?> ReplaceFile { get; init; } =
@@ -855,12 +855,7 @@ public sealed class FileSystemService : IFileSystemService
         if (directory)
             throw new InvalidOperationException($"'{path}' is a directory, not a file.");
 
-        // The replace gives the path a new file record, so the file's other names would keep the
-        // old content: one file would silently become two.
-        if (HardLinkCount(path) is > 1 and var links)
-            throw new InvalidOperationException(
-                $"File '{path}' has {links} hard links (other names for the same file); an edit through this name would leave " +
-                "the other names with the old content, so it was not edited. Rewrite it with file_write, or remove the extra links first.");
+        RefuseHardLinks(path);
 
         // One handle for the size, the bytes and the write time: a size checked on the path and
         // a read that reopens it are two different moments, and the file can grow in between.
@@ -892,9 +887,11 @@ public sealed class FileSystemService : IFileSystemService
         StageHook?.Invoke(Stage.EditRead, path);
         ct.ThrowIfCancellationRequested();
 
-        var id = Guid.NewGuid().ToString("N");
-        var tmp = path + ".tmp." + id;
-        var backup = path + ".bak." + id;
+        // Beside the target (the replace needs the same volume), but not built from its name: a
+        // 250-character file name is valid, and the same name plus a suffix is not.
+        var sibling = Path.Combine(Path.GetDirectoryName(path)!, "~wmcp-" + Guid.NewGuid().ToString("N")[..16]);
+        var tmp = sibling + ".tmp";
+        var backup = sibling + ".bak";
         bool replaceStarted = false;
         try
         {
@@ -911,6 +908,7 @@ public sealed class FileSystemService : IFileSystemService
             var now = new FileInfo(path);
             if (!now.Exists || now.Length != bytes.Length || now.LastWriteTimeUtc != lastWrite)
                 throw new IOException(changed);
+            RefuseHardLinks(path);   // a second name added since the read would keep the old content
 
             replaceStarted = true;
             for (int i = 0; ; i++)
@@ -933,13 +931,14 @@ public sealed class FileSystemService : IFileSystemService
                     if (!again.Exists) throw;
                     if (again.Length != bytes.Length || again.LastWriteTimeUtc != lastWrite)
                         throw new IOException(changed);
+                    RefuseHardLinks(path);
                 }
             }
             try { File.Delete(backup); } catch { /* best-effort: the edit has landed */ }
         }
         catch (Exception failure)
         {
-            RecoverFromFailedEdit(path, tmp, backup, replaceStarted, failure);
+            RecoverFromFailedEdit(path, tmp, backup, replaceStarted, bytes.Length, lastWrite, failure);
             throw;
         }
 
@@ -954,7 +953,7 @@ public sealed class FileSystemService : IFileSystemService
     /// leaves the target or the backup, so "neither" means someone else deleted the target while
     /// it was being edited - their deletion wins, and the caller is told where the edited content is.
     /// </summary>
-    private static void RecoverFromFailedEdit(string path, string tmp, string backup, bool replaceStarted, Exception failure)
+    private static void RecoverFromFailedEdit(string path, string tmp, string backup, bool replaceStarted, long originalLength, DateTime originalWrite, Exception failure)
     {
         if (!replaceStarted)
         {
@@ -987,12 +986,35 @@ public sealed class FileSystemService : IFileSystemService
             }
         }
 
-        // Nothing is deleted unless a file is at the path.
-        if (File.Exists(path))
+        // Nothing is deleted unless a file is at the path - and the backup only when that file
+        // is the original. A replace can move the original aside and fail, and someone else can
+        // put a new file at the path before this runs: then the backup is the only copy left.
+        var at = new FileInfo(path);
+        if (!at.Exists) return;
+
+        try { File.Delete(tmp); } catch { /* best-effort cleanup */ }
+        if (!File.Exists(backup)) return;
+        if (at.Length == originalLength && at.LastWriteTimeUtc == originalWrite)
         {
-            try { File.Delete(tmp); } catch { /* best-effort cleanup */ }
             try { File.Delete(backup); } catch { /* best-effort cleanup */ }
+            return;
         }
+
+        throw new IOException(
+            $"The edit of '{path}' failed part-way, and a different file was at that path before the original could be put back. " +
+            $"The original is in '{backup}'; nothing was deleted. ({failure.Message})", failure);
+    }
+
+    /// <summary>
+    /// E-9: the replace gives the path a new file record, so a file's other names would keep the
+    /// old content - one file would silently become two.
+    /// </summary>
+    private static void RefuseHardLinks(string path)
+    {
+        if (HardLinkCount(path) is > 1 and var links)
+            throw new InvalidOperationException(
+                $"File '{path}' has {links} hard links (other names for the same file); an edit through this name would leave " +
+                "the other names with the old content, so it was not edited. Rewrite it with file_write, or remove the extra links first.");
     }
 
     /// <summary>
@@ -1136,6 +1158,26 @@ public sealed class FileSystemService : IFileSystemService
 
             StageHook?.Invoke(Stage.SearchFile, file);
             ct.ThrowIfCancellationRequested();
+
+            // The attributes above are the walk's, and the walk can be well ahead of the reads:
+            // the entry is looked at again right before it is opened, so one that has become a
+            // link or a cloud-only file since is not followed or downloaded. Two steps, so this
+            // narrows the window; it cannot close it.
+            try
+            {
+                var current = File.GetAttributes(file);
+                if ((current & NotOnDisk) != 0 || (current & FileAttributes.Directory) != 0
+                    || ((current & FileAttributes.ReparsePoint) != 0 && IsLink(file)))
+                {
+                    skipped++;
+                    continue;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                skipped++;   // gone or denied since the walk saw it
+                continue;
+            }
 
             if (length > ContentSearch.MaxFileBytes)
             {

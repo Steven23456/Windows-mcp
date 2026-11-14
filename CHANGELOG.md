@@ -27,21 +27,26 @@
     be corrupted; `encoding:"utf-16"` edits it). Bytes outside the replaced text are never touched.
   - **The swap.** The file is read once, through one handle that shares only reading, so the
     16 MiB check, the bytes and the baseline for the changed-file check describe the same file.
-    The edited bytes go to a temp file beside the target, created with the target's
+    The edited bytes go to a temp file in the target's folder (`~wmcp-<16 hex>.tmp`, a name
+    independent of the target's, so a file whose name is near the 255-character limit can be
+    edited), created with the target's
     access rules where they can be read and applied (so a protected file's content is never
     briefly readable through the folder's ACL), and `File.Replace` swaps them in with a backup name
-    (`<path>.bak.<guid>`) — which, unlike the move `file_write` uses, keeps the target's ACL,
+    (`~wmcp-<same hex>.bak`) — which, unlike the move `file_write` uses, keeps the target's ACL,
     attributes, creation time and alternate data streams where the file system supports it. **A
     failed swap never loses the file:** a retry happens only while the target exists, and the
     cleanup restores before it deletes: when the original had been moved aside the backup is put
     back (or, if that fails, the error names it); a swap that never started just deletes its
     temp; and **a file removed by someone else meanwhile is not recreated** — the edit is not
-    applied and the error names the temp file holding the edited content.
+    applied and the error names the temp file holding the edited content. The backup is deleted
+    only while the file at the path is still the original; if someone else put a different file
+    there, the backup is kept and the error names it.
   - Refused with nothing written: an empty `old_string`, a null `new_string` (an empty string
     deletes), `old_string` equal to `new_string`, an unknown encoding, a file that does not exist
     (use `file_write`), a directory, a symlink or junction (OneDrive and deduplicated files are
     edited normally), a file with more than one hard link (the swap would split it into two
-    files), a read-only file, a file over 16 MiB, an edit whose result would exceed 16 MiB
+    files; checked again before every replace attempt, so a name added during the edit is
+    refused too), a read-only file, a file over 16 MiB, an edit whose result would exceed 16 MiB
     (16,777,216 characters before encoding, or bytes after it, BOM included — computed in 64 bits,
     so a huge `replace_all` is a refusal, not an overflow), and a file whose length or last-write
     time changed between the read and the replace — checked again after each wait when a sharing
@@ -57,7 +62,9 @@
     8 KiB and no BOM), files over 16 MiB (checked again on the opened file, and read through a
     16 MiB bound, so a file that grows past it while being read is skipped with its matches
     discarded), files that cannot be opened, file symlinks, and
-    cloud-only (offline) files, which are never downloaded. Unreadable folders are passed over and
+    cloud-only (offline) files, which are never downloaded — each entry's attributes are read
+    again right before it is opened, so one that became a link, a cloud-only file or a directory
+    since the walk saw it is skipped too. Unreadable folders are passed over and
     junctions and symlinked folders are not entered (every other folder is, OneDrive's included);
     in a content search `pattern` is a file-name glob, and one containing `\` or `/` is refused
     (put the folder in `root`). A pattern that takes over 2 s on one line
@@ -78,7 +85,7 @@
   additions to `ToolInventoryTests`, `StreamTransportTests`, `DrivingToolsTests`,
   `SequenceStepsTests` and `ServerInstructionsTests`. Not verified: no run against a real remote
   host, no network-share, FAT or OneDrive target, and ACL preservation is not tested. Gaps found
-  and not fixed are parity D-74 … D-83.
+  and not fixed are parity D-74 … D-85.
 - **Session state: is the desktop reachable, and is the server elevated?** (E-8; still 70 tools,
   one new service). When the workstation is locked, the session is disconnected or a UAC prompt is
   up on the secure desktop, `snapshot` used to fail on its cursor read or return an empty or stale
