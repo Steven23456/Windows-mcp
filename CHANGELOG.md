@@ -25,7 +25,9 @@
     not valid in the encoding, or a `new_string` it cannot represent, are refused, and `auto`
     without a BOM refuses text containing NUL characters (BOM-less UTF-16 is valid UTF-8 and would
     be corrupted; `encoding:"utf-16"` edits it). Bytes outside the replaced text are never touched.
-  - **The swap.** The edited bytes go to a temp file beside the target, created with the target's
+  - **The swap.** The file is read once, through one handle that shares only reading, so the
+    16 MiB check, the bytes and the baseline for the changed-file check describe the same file.
+    The edited bytes go to a temp file beside the target, created with the target's
     access rules where they can be read and applied (so a protected file's content is never
     briefly readable through the folder's ACL), and `File.Replace` swaps them in with a backup name
     (`<path>.bak.<guid>`) — which, unlike the move `file_write` uses, keeps the target's ACL,
@@ -52,12 +54,15 @@
     filesSearched, filesSkipped, truncated, maxMatches}`; lines are clipped at 400 characters and
     the search also stops, `truncated:true`, once the returned lines total 60,000 characters.
     Hidden and system files are read. Skipped and counted: binary files (a NUL byte in the first
-    8 KiB and no BOM), files over 16 MiB, files that cannot be opened, file symlinks, and
+    8 KiB and no BOM), files over 16 MiB (checked again on the opened file, and read through a
+    16 MiB bound, so a file that grows past it while being read is skipped with its matches
+    discarded), files that cannot be opened, file symlinks, and
     cloud-only (offline) files, which are never downloaded. Unreadable folders are passed over and
     junctions and symlinked folders are not entered (every other folder is, OneDrive's included);
     in a content search `pattern` is a file-name glob, and one containing `\` or `/` is refused
     (put the folder in `root`). A pattern that takes over 2 s on one line
-    stops the search with an error naming the file. Scan cost does not grow with the matches found.
+    stops the search with an error naming the file. Scan cost does not grow with the matches found, and cancellation is observed on every entry
+    the walk visits, matching or not.
     An invalid regex, `content` with `find_duplicates`, or `max_matches` / `context_lines` out of
     range (checked even without `content`) is refused before anything is enumerated. Without
     `content` the search is unchanged.

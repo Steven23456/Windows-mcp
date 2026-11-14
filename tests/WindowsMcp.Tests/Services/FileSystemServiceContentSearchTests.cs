@@ -582,7 +582,160 @@ public class FileSystemServiceContentSearchTests : IDisposable
         result.Matches.Should().ContainSingle().Which.Path.Should().Be(plain);
     }
 
+    // ==== PR #47 finding B: the token is observed for every entry, matching or not ====================
+
+    /// <summary>200 .txt files in four folders, none matching '*.config'; optionally one match last.</summary>
+    private void TreeWithNoMatches(bool withLateMatch = false)
+    {
+        for (int d = 0; d < 4; d++)
+            for (int f = 0; f < 50; f++)
+                File_(Path.Combine($"f{d}", $"n{f:D3}.txt"), "needle\n");
+        if (withLateMatch)
+            File_(Path.Combine("f3", "zz-last.config"), "needle\n");
+    }
+
+    /// <summary>
+    /// B1: the token was checked only in the loop body, which runs only for files the name glob
+    /// matched - a walk over thousands of non-matching entries could not be cancelled. Cancelled at
+    /// the 20th entry the search must end in OperationCanceledException, and the walk must not go
+    /// on: at most one more entry after the cancel. Today it walks all 204 entries and returns an
+    /// empty result.
+    /// </summary>
     [Fact]
+    public async Task A_walk_over_entries_the_glob_excludes_observes_cancellation()
+    {
+        TreeWithNoMatches();
+        using var cts = new CancellationTokenSource();
+        int seen = 0, seenAfterCancel = 0;
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, _) =>
+            {
+                if (stage != FileSystemService.Stage.SearchEntry) return;
+                if (cts.IsCancellationRequested) seenAfterCancel++;
+                if (++seen == 20) cts.Cancel();
+            },
+        };
+
+        var act = () => svc.SearchContentAsync(Request("needle", pattern: "*.config"), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        seenAfterCancel.Should().BeLessThanOrEqualTo(1, "the walk stops at the next entry once the token is cancelled");
+    }
+
+    /// <summary>B2: the one matching file comes after the cancel point, so it is never opened.</summary>
+    [Fact]
+    public async Task A_match_after_the_cancel_point_is_never_opened()
+    {
+        TreeWithNoMatches(withLateMatch: true);
+        using var cts = new CancellationTokenSource();
+        int seen = 0;
+        var opened = new List<string>();
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage == FileSystemService.Stage.SearchFile) opened.Add(arg);
+                if (stage == FileSystemService.Stage.SearchEntry && ++seen == 3) cts.Cancel();
+            },
+        };
+
+        var act = () => svc.SearchContentAsync(Request("needle", pattern: "*.config"), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        opened.Should().BeEmpty("the walk stopped before it reached the matching file");
+    }
+
+    /// <summary>B3 (guard): without a cancel the same tree is an empty, unremarkable result.</summary>
+    [Fact]
+    public async Task A_walk_over_entries_the_glob_excludes_returns_an_empty_result()
+    {
+        TreeWithNoMatches();
+
+        var result = await Svc().SearchContentAsync(Request("needle", pattern: "*.config"));
+
+        result.Matches.Should().BeEmpty();
+        result.FilesSearched.Should().Be(0);
+        result.FilesSkipped.Should().Be(0);
+        result.Truncated.Should().BeFalse();
+    }
+
+    // ==== PR #47 finding C: the per-file cap holds for the file that is actually opened ===============
+
+    /// <summary>
+    /// C1: the size test used the length the WALK saw; the stream that was then opened was unbounded.
+    /// A matching file under the cap at enumeration, grown past it in the SearchFile hook (the moment
+    /// before the open) with lines that match: skipped and counted, never searched, no matches. Today
+    /// it is read whole.
+    /// </summary>
+    [Fact]
+    public async Task A_file_grown_past_the_cap_after_the_walk_saw_it_is_skipped_not_searched()
+    {
+        var path = File_("grow.log", "needle 0\n");
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage != FileSystemService.Stage.SearchFile) return;
+                var tail = new byte[ContentSearch.MaxFileBytes];
+                Array.Fill(tail, (byte)'x');
+                for (long i = 99; i < tail.Length; i += 100) tail[i] = (byte)'\n';
+                "needle grown\n"u8.CopyTo(tail);
+                using var append = new FileStream(arg, FileMode.Append, FileAccess.Write);
+                append.Write(tail);
+            },
+        };
+
+        var result = await svc.SearchContentAsync(Request("needle"));
+
+        new FileInfo(path).Length.Should().BeGreaterThan(ContentSearch.MaxFileBytes, "precondition: the hook grew it past the cap");
+        result.Matches.Should().BeEmpty("a file over the cap at the open is not read");
+        result.FilesSkipped.Should().Be(1);
+        result.FilesSearched.Should().Be(0);
+    }
+
+    /// <summary>C2 (guard): grown in the hook but still under the cap - searched, and the appended lines are found.</summary>
+    [Fact]
+    public async Task A_file_grown_under_the_cap_after_the_walk_saw_it_is_searched_with_the_new_lines()
+    {
+        var path = File_("grow.log", "nothing\n");
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage == FileSystemService.Stage.SearchFile) File.AppendAllText(arg, "needle appended\n");
+            },
+        };
+
+        var result = await svc.SearchContentAsync(Request("needle"));
+
+        result.Matches.Should().ContainSingle().Which.Should().Match<ContentMatch>(m => m.Path == path && m.Line == 2);
+        result.FilesSearched.Should().Be(1);
+        result.FilesSkipped.Should().Be(0);
+    }
+
+    /// <summary>C3 (guard): grown in the hook to EXACTLY the cap - not over it, so it is searched.</summary>
+    [Fact]
+    public async Task A_file_grown_to_exactly_the_cap_after_the_walk_saw_it_is_searched()
+    {
+        var path = File_("edge.log", "needle\n");
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage == FileSystemService.Stage.SearchFile) File.WriteAllBytes(arg, BigText(ContentSearch.MaxFileBytes));
+            },
+        };
+
+        var result = await svc.SearchContentAsync(Request("needle"));
+
+        new FileInfo(path).Length.Should().Be(ContentSearch.MaxFileBytes);
+        result.Matches.Should().ContainSingle().Which.Path.Should().Be(path);
+        result.FilesSearched.Should().Be(1);
+    }
+
+    [Fact]
+
     public async Task SearchContentAsync_with_a_cancelled_token_does_nothing()
     {
         File_("a.txt", "needle\n");

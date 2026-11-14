@@ -27,6 +27,10 @@ public sealed class FileSystemService : IFileSystemService
         EditTempWritten,
         /// <summary>content search: a file that passed the name/size/date filters is about to be opened. Argument: its path.</summary>
         SearchFile,
+        /// <summary>file_edit: the refusals have passed and the file is about to be opened and read. Argument: its path.</summary>
+        EditOpen,
+        /// <summary>content search: the walk is looking at an entry (a file or a folder, matching the name or not). Argument: its path.</summary>
+        SearchEntry,
     }
 
     /// <summary>E-9 test seam: called at each <see cref="Stage"/>; null in production.</summary>
@@ -858,14 +862,23 @@ public sealed class FileSystemService : IFileSystemService
                 $"File '{path}' has {links} hard links (other names for the same file); an edit through this name would leave " +
                 "the other names with the old content, so it was not edited. Rewrite it with file_write, or remove the extra links first.");
 
-        var before = new FileInfo(path);
-        long length = before.Length;
-        var lastWrite = before.LastWriteTimeUtc;
-        if (length > TextEdit.MaxFileBytes)
-            throw new InvalidOperationException(
-                $"File '{path}' is {length} bytes; file_edit edits files of up to {TextEdit.MaxFileBytes} bytes (16 MiB).");
-
-        var bytes = await File.ReadAllBytesAsync(path, ct);
+        // One handle for the size, the bytes and the write time: a size checked on the path and
+        // a read that reopens it are two different moments, and the file can grow in between.
+        // No writer can have the file open while this handle is (FileShare.Read).
+        StageHook?.Invoke(Stage.EditOpen, path);
+        byte[] bytes;
+        DateTime lastWrite;
+        await using (var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096,
+                         FileOptions.Asynchronous | FileOptions.SequentialScan))
+        {
+            long length = source.Length;
+            if (length > TextEdit.MaxFileBytes)
+                throw new InvalidOperationException(
+                    $"File '{path}' is {length} bytes; file_edit edits files of up to {TextEdit.MaxFileBytes} bytes (16 MiB).");
+            bytes = new byte[length];
+            await source.ReadExactlyAsync(bytes, ct);
+            lastWrite = File.GetLastWriteTimeUtc(source.SafeFileHandle);
+        }
         var detected = TextEdit.Detect(bytes, encoding);
         var text = TextEdit.Decode(bytes, detected);
         var outcome = TextEdit.Apply(text, oldString, newString, replaceAll, path);
@@ -1088,7 +1101,13 @@ public sealed class FileSystemService : IFileSystemService
             walk)
         {
             ShouldIncludePredicate = (ref FileSystemEntry entry) =>
-                !entry.IsDirectory && FileSystemName.MatchesWin32Expression(name, entry.FileName, ignoreCase: true),
+            {
+                StageHook?.Invoke(Stage.SearchEntry, entry.ToFullPath());
+                // Every entry, not only the files the name matches: a walk that finds nothing
+                // to open must still stop when the caller cancels.
+                ct.ThrowIfCancellationRequested();
+                return !entry.IsDirectory && FileSystemName.MatchesWin32Expression(name, entry.FileName, ignoreCase: true);
+            },
             // A junction or directory symlink is not followed: a loop must not hang a search. A
             // reparse directory that is not a link (a OneDrive folder) is an ordinary folder here.
             ShouldRecursePredicate = (ref FileSystemEntry entry) =>
@@ -1128,6 +1147,13 @@ public sealed class FileSystemService : IFileSystemService
             try
             {
                 using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                // The walk's length is from the directory entry, some time ago: a log can have
+                // grown past the cap since. Writers are not shut out, so the read is bounded too.
+                if (stream.Length > ContentSearch.MaxFileBytes)
+                {
+                    skipped++;
+                    continue;
+                }
                 int read = stream.ReadAtLeast(head, head.Length, throwOnEndOfStream: false);
                 if (ContentSearch.LooksBinary(head.AsSpan(0, read)))
                 {
@@ -1136,9 +1162,15 @@ public sealed class FileSystemService : IFileSystemService
                 }
                 stream.Position = 0;
                 // BOM decides, else UTF-8 - leniently: this only reads.
-                using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                var capped = new CappedReadStream(stream, ContentSearch.MaxFileBytes);
+                using var reader = new StreamReader(capped, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
                 scan = ContentSearch.Scan(reader, file, regex, request.ContextLines, request.MaxMatches - matches.Count, ct,
                     (int)(ContentSearch.MaxResultChars - chars));
+                if (capped.Exceeded)
+                {
+                    skipped++;   // it grew past the cap while it was being read: oversized, like any other
+                    continue;
+                }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

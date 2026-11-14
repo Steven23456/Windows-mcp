@@ -386,7 +386,8 @@ public class FileSystemServiceEditTests : IDisposable
         var message = (await act.Should().ThrowAsync<InvalidOperationException>()).Which.Message;
         message.Should().ContainEquivalentOf("not found").And.Contain(path);
         File.ReadAllBytes(path).Should().Equal(original);
-        stages.Should().BeEmpty("a content refusal comes before anything is written - no temp file is ever started");
+        stages.Where(s => s is FileSystemService.Stage.EditRead or FileSystemService.Stage.EditTempWritten)
+            .Should().BeEmpty("a content refusal comes before anything is written - no temp file is ever started");
         OnlyTheseEntries("ab.ini");
     }
 
@@ -469,7 +470,8 @@ public class FileSystemServiceEditTests : IDisposable
         var act = () => svc.EditTextAsync(path, "a=1", "a=2", false, "auto", cts.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
-        stages.Should().Equal([FileSystemService.Stage.EditRead], "the temp file is never written after the cancel");
+        stages.Where(s => s != FileSystemService.Stage.EditOpen)
+            .Should().Equal([FileSystemService.Stage.EditRead], "the temp file is never written after the cancel");
         File.ReadAllBytes(path).Should().Equal(original);
         OnlyTheseEntries("c.ini");
     }
@@ -1225,6 +1227,133 @@ public class FileSystemServiceEditTests : IDisposable
         message.Should().Contain(path).And.Contain((TextEdit.MaxFileBytes + 1).ToString());
         Sha(path).Should().Be(before);
         OnlyTheseEntries("edge.log");
+    }
+
+    // ==== PR #47 finding A: the size cap holds for the file that is actually opened ===================
+
+    /// <summary>"a=1\n" followed by 'x' padding to exactly <paramref name="length"/> bytes.</summary>
+    private static byte[] Padded(long length)
+    {
+        var bytes = new byte[length];
+        Array.Fill(bytes, (byte)'x');
+        "a=1\n"u8.CopyTo(bytes);
+        return bytes;
+    }
+
+    /// <summary>
+    /// A1: the 16 MiB check ran on a FileInfo, then File.ReadAllBytesAsync read whatever was there
+    /// when it opened. A file that grows past the cap in between was read whole. Grown inside the
+    /// EditOpen hook (the moment before the open) to 16 MiB + 1: the existing size refusal, naming the
+    /// actual byte count; the grown content stays byte for byte; nothing left beside it. The edit
+    /// shrinks the file, so today's code - which reads it - lands the edit instead of refusing.
+    /// </summary>
+    [Fact]
+    public async Task A_file_grown_past_16_MiB_just_before_the_open_is_refused_with_the_size_refusal()
+    {
+        var path = Write("grow.ini", "a=1\n");
+        var stamp = File.GetLastWriteTimeUtc(path);
+        var grown = Padded(TextEdit.MaxFileBytes + 1);
+        var grownSha = Convert.ToHexString(SHA256.HashData(grown));
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage != FileSystemService.Stage.EditOpen) return;
+                File.WriteAllBytes(arg, grown);
+                File.SetLastWriteTimeUtc(arg, stamp);   // only the size says it changed
+            },
+        };
+
+        var act = () => svc.EditTextAsync(path, "a=1\n", "", false, "auto");
+
+        var message = (await act.Should().ThrowExactlyAsync<InvalidOperationException>()).Which.Message;
+        message.Should().Contain($"File '{path}' is {TextEdit.MaxFileBytes + 1} bytes",
+            "the size refusal names the size of the file that was opened, not the one checked earlier");
+        message.Should().Contain("16 MiB");
+        Sha(path).Should().Be(grownSha, "the grown file is not touched");
+        OnlyTheseEntries("grow.ini");
+    }
+
+    /// <summary>
+    /// A2 (guard, the last-write time put back): a file changed just before the open but still under
+    /// the cap is edited from the content that was read, and bytesBefore is that content's length.
+    /// </summary>
+    [Fact]
+    public async Task A_file_changed_under_the_cap_just_before_the_open_is_edited_from_what_was_read()
+    {
+        var path = Write("chg.ini", "a=1\n");
+        var stamp = File.GetLastWriteTimeUtc(path);
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage != FileSystemService.Stage.EditOpen) return;
+                File.WriteAllText(arg, "a=1\nb=2\n");
+                File.SetLastWriteTimeUtc(arg, stamp);
+            },
+        };
+
+        var result = await svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        File.ReadAllText(path).Should().Be("a=2\nb=2\n");
+        result.BytesBefore.Should().Be(8, "bytesBefore is the length of what was read");
+        OnlyTheseEntries("chg.ini");
+    }
+
+    /// <summary>
+    /// A2 (the ordinary case: the change moves the last-write time). "the read and the size come from
+    /// one handle": what was read IS the file as it was opened, so it is edited from that content.
+    /// RED TODAY for a different reason than A1: the change check's baseline (length and last-write
+    /// time) is taken from a FileInfo BEFORE the open, so a change before the open - which the read
+    /// already includes - is refused as "changed while it was being edited". This row passes only if
+    /// the baseline is taken from the opened handle too. (If refusing here is preferred, say so and
+    /// this row flips to expecting the IOException.)
+    /// </summary>
+    [Fact]
+    public async Task A_file_changed_just_before_the_open_with_a_new_write_time_is_edited_from_what_was_read()
+    {
+        var path = Write("chg.ini", "a=1\n");
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage != FileSystemService.Stage.EditOpen) return;
+                File.WriteAllText(arg, "a=1\nb=2\n");
+                File.SetLastWriteTimeUtc(arg, DateTime.UtcNow.AddMinutes(5));
+            },
+        };
+
+        var result = await svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        File.ReadAllText(path).Should().Be("a=2\nb=2\n");
+        result.BytesBefore.Should().Be(8);
+        OnlyTheseEntries("chg.ini");
+    }
+
+    /// <summary>
+    /// A3 (guard): grown just before the open to EXACTLY 16 MiB, last-write time put back - not over
+    /// the cap, so it is still edited.
+    /// </summary>
+    [Fact]
+    public async Task A_file_grown_to_exactly_16_MiB_just_before_the_open_is_still_edited()
+    {
+        var path = Write("edge.ini", "a=1\n");
+        var stamp = File.GetLastWriteTimeUtc(path);
+        var svc = new FileSystemService
+        {
+            StageHook = (stage, arg) =>
+            {
+                if (stage != FileSystemService.Stage.EditOpen) return;
+                File.WriteAllBytes(arg, Padded(TextEdit.MaxFileBytes));
+                File.SetLastWriteTimeUtc(arg, stamp);
+            },
+        };
+
+        var result = await svc.EditTextAsync(path, "a=1", "a=2", false, "auto");
+
+        result.BytesBefore.Should().Be(TextEdit.MaxFileBytes);
+        new FileInfo(path).Length.Should().Be(TextEdit.MaxFileBytes);
+        OnlyTheseEntries("edge.ini");
     }
 
     // ==== R2 decision 2: no stray \r on disk ===========================================================

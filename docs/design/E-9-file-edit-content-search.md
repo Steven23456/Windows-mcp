@@ -194,7 +194,7 @@ as `settle_ms` is); `content` together with `find_duplicates:true`; and, in a co
   **2-second match timeout** per line; a timeout is an `InvalidOperationException` naming the
   pattern and the file ("too slow on …") — a pathological pattern must not pin a core.
   Case-insensitive search is `(?i)` in the pattern.
-- Cancellation is observed per file and every 1,000 lines.
+- Cancellation is observed on every entry the walk visits and every 1,000 lines.
 - The search stops at `max_matches` matching lines, **or once the matched and context lines
   returned total 60,000 characters** (`ContentSearch.MaxResultChars`, shared across files), and
   reports `truncated:true`. (1,000 matches × 11 lines × 400 characters would be 4.4 MB.)
@@ -264,6 +264,24 @@ result longer than 16,777,216 characters (the length is computed in 64 bits — 
 that multiplied the text used to overflow an `int` and surface as an
 `ArgumentOutOfRangeException`), and `FileSystemService.EditTextAsync` refuses an encoded result
 longer than 16,777,216 bytes, BOM included (a UTF-16 file doubles the characters).
+
+**3. `file_edit` reads through one handle.** The 16 MiB check, the bytes and the last-write
+baseline for the "changed while it was being edited" check all come from the same open file,
+opened with `FileShare.Read` so no writer can have it open meanwhile. A file that grows between a
+separate size check and the read can no longer be read in full; a change made just before the
+open is simply what gets edited.
+
+**4. A content search observes cancellation on every entry the walk visits**, not only on files
+whose name matches `pattern` (the check is in the enumeration's include predicate), so a walk
+that matches nothing still stops when the caller cancels.
+
+**5. A content search bounds what it reads.** The size is checked again on the opened file — one
+that grew past 16 MiB since the walk saw it is skipped and counted in `filesSkipped` — and the
+file is read through a 16 MiB bound (`CappedReadStream`, internal, in `Services/ContentSearch.cs`,
+which ends the stream at the cap and records whether the source had more). A file that keeps
+growing while it is read is skipped and counted too, and its matches are discarded.
+
+`FileSystemService.Stage` gained `EditOpen` and `SearchEntry`, test hooks only.
 
 ## Not in scope
 

@@ -136,3 +136,56 @@ internal static class ContentSearch
 
 /// <summary>E-9: one file's matches, and whether the scan stopped at the cap.</summary>
 internal sealed record ContentScan(IReadOnlyList<ContentMatch> Matches, bool Truncated);
+
+/// <summary>
+/// E-9: a read-only view of <paramref name="inner"/> that ends after <paramref name="cap"/> bytes,
+/// so a file that is being appended to cannot keep a scan running. <see cref="Exceeded"/> says
+/// the source had more than that. It does not own <paramref name="inner"/>.
+/// </summary>
+internal sealed class CappedReadStream(Stream inner, long cap) : Stream
+{
+    private long _read;
+
+    /// <summary>True once a read at the cap found more data in the source.</summary>
+    public bool Exceeded { get; private set; }
+
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new InvalidOperationException("A capped stream has no length.");
+
+    public override long Position
+    {
+        get => _read;
+        set => throw new InvalidOperationException("A capped stream cannot seek.");
+    }
+
+    public override int Read(Span<byte> buffer)
+    {
+        if (buffer.IsEmpty) return 0;
+        long left = cap - _read;
+        if (left <= 0)
+        {
+            if (!Exceeded)
+            {
+                Span<byte> one = stackalloc byte[1];
+                Exceeded = inner.Read(one) > 0;
+            }
+            return 0;
+        }
+
+        int n = inner.Read(buffer[..(int)Math.Min(buffer.Length, left)]);
+        _read += n;
+        return n;
+    }
+
+    public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+    public override void Flush()
+    {
+    }
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new InvalidOperationException("A capped stream cannot seek.");
+    public override void SetLength(long value) => throw new InvalidOperationException("A capped stream is read-only.");
+    public override void Write(byte[] buffer, int offset, int count) => throw new InvalidOperationException("A capped stream is read-only.");
+}
